@@ -18,6 +18,105 @@
     :initform :ordinary))
   (:metaclass versioned-standard-class))
 
+(defclass test-distributed-versioned-object (versioned-standard-object distributed-object)
+  ((value
+    :initarg :value
+    :version-technique :scalar))
+  (:metaclass versioned-standard-class))
+
+(defun %make-test-distributed-versioned-object-root
+    (repo-ptr repository-mapper-sha numeric-id value-sha)
+  (githack::create-tree
+   repo-ptr
+   (list
+    (list "name" (githack::%stored-object repo-ptr "TestObj")
+          githack::+git-filemode-blob+)
+    (list "numeric-id" (githack::%stored-object repo-ptr numeric-id)
+          githack::+git-filemode-blob+)
+    (list "repository-mapper" repository-mapper-sha
+          githack::+git-filemode-tree+)
+    (list "type" (githack::%stored-object repo-ptr :test-distributed-versioned)
+          githack::+git-filemode-blob+)
+    (list "value" value-sha githack::+git-filemode-tree+))))
+
+(defun %test-distributed-versioned-object-data (repo-ptr sha)
+  (let ((entries (githack::read-tree repo-ptr sha)))
+    (let ((name (githack::%loaded-object repo-ptr (second (assoc "name" entries :test #'string=))))
+          (numeric-id (githack::%loaded-object repo-ptr (second (assoc "numeric-id" entries :test #'string=))))
+          (repository-mapper-sha (second (assoc "repository-mapper" entries :test #'string=)))
+          (value-sha (second (assoc "value" entries :test #'string=))))
+      (list name numeric-id repository-mapper-sha value-sha))))
+
+(defmethod initialize-instance :after
+    ((instance test-distributed-versioned-object) &key sha)
+  (when sha
+    (let* ((data
+             (githack::with-repository ()
+               (%test-distributed-versioned-object-data
+                (githack::current-repository) sha)))
+           (value-sha (fourth data)))
+      (setf (slot-value-unversioned instance 'value)
+            (versioned-value-from-sha value-sha)))))
+
+(defmethod distributed-object-identifier
+    ((object test-distributed-versioned-object))
+  (githack::with-repository ()
+    (let ((data
+            (%test-distributed-versioned-object-data
+             (githack::current-repository)
+             (distributed-object-sha object))))
+      (make-distributed-identifier
+       :domain "example.com"
+       :repository "dist-crossing-project"
+       :class :test-distributed-versioned
+       :numeric-id (second data)))))
+
+;; Redefine distributed-object-from-sha to support our test type without invoking %distributed-object-data
+(defun githack::distributed-object-from-sha (sha)
+  (check-type sha string)
+  (githack::with-repository ()
+    (let* ((entries (githack::read-tree (githack::current-repository) sha))
+           (type-entry (assoc "type" entries :test #'string=))
+           (type (and type-entry (githack::%loaded-object (githack::current-repository) (second type-entry)))))
+      (make-instance
+       (cond
+         ((eq type :core-user) 'githack::core-user)
+         ((eq type :test-distributed-versioned) 'test-distributed-versioned-object)
+         (t (error "Unknown distributed object type ~S for sha ~S." type sha)))
+       :sha sha))))
+
+(defun make-test-distributed-versioned-object (repository value)
+  (let* ((local (githack::repository/local-mapper repository))
+         (class-key :test-distributed-versioned)
+         (existing (mapper/resolve local class-key))
+         (class-mapper
+           (or existing
+               (make-ordered-mapper
+                :mapping-level "Class TestDistributedVersionedObject"
+                :key class-key :parent local))))
+    (unless (typep class-mapper 'ordered-mapper)
+      (error "class mapper is not ordered."))
+    (multiple-value-bind (reserved numeric-id)
+        (ordered-mapper/reserve-entry class-mapper)
+      (let* ((val-obj (make-scalar-versioned-value :initial-value value))
+             (val-sha (versioned-value-sha val-obj))
+             (obj-sha
+               (githack::with-repository ()
+                 (%make-test-distributed-versioned-object-root
+                  (githack::current-repository)
+                  (mapper-sha local)
+                  numeric-id
+                  val-sha)))
+             (object (make-instance 'test-distributed-versioned-object
+                                    :sha obj-sha))
+             (populated
+               (ordered-mapper/set-entry reserved numeric-id object))
+             (updated-local
+               (unordered-mapper/set-entry local class-key populated))
+             (updated-repository
+               (githack::%repository-root-with-local-mapper repository updated-local)))
+        (values updated-repository object)))))
+
 (defun run-githack-tests ()
   (format t "Starting GitHack Transaction Tests...~%")
 
@@ -1539,6 +1638,80 @@
           (cid-set->list
            (versioned-object/cid-set repository object))
           '(1))))
+      (format t "PASS~%"))
+
+    ;; Test 26: Create a versioned standard object in one transaction and read it in another
+    (format t "Test 26: Cons and read versioned object across transactions... ")
+    (let* ((repository
+             (make-repository
+              :domain "example.com" :name "crossing-tx-project"))
+           (object nil))
+      ;; First transaction: Create ("cons") the versioned object
+      (call-with-repository-transaction
+       :repository repository
+       :transaction-type :read-write
+       :reason "create versioned object"
+       :cid-set-specifier :latest-version
+       :receiver
+       (lambda (transaction)
+         (declare (ignore transaction))
+         (setf object
+               (make-instance
+                'test-versioned-object
+                :value :initial :ordinary :plain))
+         (setf (slot-value object 'value) :changed-in-tx1)
+         (assert (eq (slot-value object 'value) :changed-in-tx1))))
+      
+      ;; Second transaction: Read the versioned object slot and verify its value matches the state committed in tx1
+      (call-with-repository-transaction
+       :transaction-type :read-only
+       :reason "read versioned object"
+       :cid-set-specifier :latest-version
+       :receiver
+       (lambda (transaction)
+         (declare (ignore transaction))
+         (assert (eq (slot-value object 'value) :changed-in-tx1))))
+      (format t "PASS~%"))
+
+    ;; Test 27: Cons a versioned standard object with a distributed ID, then resolve it in another transaction
+    (format t "Test 27: Cons and resolve distributed ID across transactions... ")
+    (let* ((repository
+             (make-repository
+              :domain "example.com" :name "dist-crossing-project"))
+           (did nil))
+      ;; First transaction: Cons a versioned standard object (subclass of distributed-object) and return its distributed ID
+      (call-with-repository-transaction
+       :repository repository
+       :transaction-type :read-write
+       :reason "create distributed versioned object"
+       :cid-set-specifier :latest-version
+       :receiver
+       (lambda (transaction)
+         (let ((current-repo (repository-transaction/repository transaction)))
+           (multiple-value-bind (updated-repo obj)
+               (make-test-distributed-versioned-object current-repo :initial-val)
+             (setf (repository-transaction/repository transaction) updated-repo)
+             ;; Verify slot value
+             (assert (eq (slot-value obj 'value) :initial-val))
+             ;; Set slot value
+             (setf (slot-value obj 'value) :updated-val)
+             (assert (eq (slot-value obj 'value) :updated-val))
+             ;; Return the distributed ID of the object
+             (setf did (distributed-object-identifier obj))))))
+      
+      ;; Second transaction: Resolve the distributed ID back into the object and read its versioned slot value
+      (call-with-repository-transaction
+       :transaction-type :read-only
+       :reason "resolve and read distributed versioned object"
+       :cid-set-specifier :latest-version
+       :receiver
+       (lambda (transaction)
+         ;; Resolve the distributed ID from the committed repository
+         (let* ((committed-repo (repository-transaction/repository transaction))
+                (resolved (repository/resolve-distributed-identifier committed-repo did)))
+           (assert (typep resolved 'test-distributed-versioned-object))
+           ;; Verify we resolved it back and we can query the slot correctly in the second transaction view!
+           (assert (eq (slot-value resolved 'value) :updated-val)))))
       (format t "PASS~%")))
 
   ;; Cleanup test repo (ignore errors on Windows read-only files)
