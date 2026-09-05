@@ -263,3 +263,85 @@ other hand-built PERSISTENT-CONS chain."
         (is (string= sha (sha head)))))
     (is (= 3 (persistent-cons-length head)))
     (is (eq t (persistent-cons-proper head)))))
+
+(defun %make-persistent-alist-pair (key value)
+  "Helper for the SCAN-PERSISTENT-ALIST tests below: build a single,
+in-memory, already GET-LOADED? PERSISTENT-CONS pair whose
+PERSISTENT-CAR is KEY and PERSISTENT-CDR is VALUE, wrapping each in
+a fresh GIT-BLOB unless it is already a GIT-OBJECT -- the same
+PERSISTENT-CONS-of-PERSISTENT-CONSes shape PERSISTENT-HASH-TABLE.LISP
+uses for its own bucket chains."
+  (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
+                                   :persistent-car (if (typep key 'git-object) key
+                                                        (make-instance 'git-blob :repository :dummy-repo :payload key :loaded? t))
+                                   :persistent-cdr (if (typep value 'git-object) value
+                                                        (make-instance 'git-blob :repository :dummy-repo :payload value :loaded? t))))
+
+(defun %make-persistent-alist-spine (pairs)
+  "Helper for the SCAN-PERSISTENT-ALIST tests below: build an
+in-memory, already GET-LOADED? PERSISTENT-CONS spine chaining the
+given PAIRS (each already a PERSISTENT-CONS, e.g. as returned by
+%MAKE-PERSISTENT-ALIST-PAIR) in order, terminated by NIL."
+  (reduce (lambda (pair tail)
+            (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
+                                             :persistent-car pair
+                                             :persistent-cdr tail))
+          pairs
+          :from-end t
+          :initial-value nil))
+
+(test scan-persistent-alist-of-nil-is-empty
+  "SCAN-PERSISTENT-ALIST of NIL (the empty alist) produces two empty
+series, for keys and values respectively."
+  (multiple-value-bind (keys values) (scan-persistent-alist nil)
+    (is (null (series:collect keys)))
+    (is (null (series:collect values)))))
+
+(test scan-persistent-alist-collects-decoded-key-value-pairs
+  "SCAN-PERSISTENT-ALIST of an in-memory, already-loaded spine of
+PERSISTENT-CONS pairs produces two series -- keys and, respectively,
+values -- each decoded via %PERSISTENT-CONS-DECODE (a GIT-BLOB's own
+PAYLOAD, here plain keywords/integers), in the spine's own order."
+  (let ((spine (%make-persistent-alist-spine
+                (list (%make-persistent-alist-pair :a 1)
+                      (%make-persistent-alist-pair :b 2)
+                      (%make-persistent-alist-pair :c 3)))))
+    (multiple-value-bind (keys values) (scan-persistent-alist spine)
+      (is (equal '(:a :b :c) (series:collect keys)))
+      (is (equal '(1 2 3) (series:collect values))))))
+
+(test scan-persistent-alist-passes-through-compound-values-unchanged
+  "SCAN-PERSISTENT-ALIST leaves an already-compound GIT-OBJECT value
+(a nested PERSISTENT-CONS, here) unwrapped, exactly as
+%PERSISTENT-CONS-DECODE always does for any non-GIT-BLOB element."
+  (let* ((nested (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
+                                 :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload :inner :loaded? t)
+                                 :persistent-cdr nil))
+         (spine (%make-persistent-alist-spine (list (%make-persistent-alist-pair :a nested)))))
+    (multiple-value-bind (keys values) (scan-persistent-alist spine)
+      (is (equal '(:a) (series:collect keys)))
+      (is (eq nested (first (series:collect values)))))))
+
+(test scan-persistent-alist-round-trips-through-a-fake-git-repository
+  "SCAN-PERSISTENT-ALIST correctly walks a spine of PERSISTENT-CONS
+pairs that must be lazily fetched and inflated from Git: after
+serializing an in-memory alist and obtaining only a hollow proxy for
+its head SHA (via INFLATE-GIT-PROXY, exactly as a fresh repository
+read would), scanning the hollow proxy yields the same decoded
+keys/values as the original in-memory alist."
+  (with-fake-git-repository ()
+    (let* ((pair2 (make-instance 'persistent-cons :repository :dummy-repo
+                                  :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload :b)
+                                  :persistent-cdr (make-instance 'git-blob :repository :dummy-repo :payload 2)))
+           (pair1 (make-instance 'persistent-cons :repository :dummy-repo
+                                  :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload :a)
+                                  :persistent-cdr (make-instance 'git-blob :repository :dummy-repo :payload 1)))
+           (spine2 (make-instance 'persistent-cons :repository :dummy-repo
+                                   :persistent-car pair2 :persistent-cdr nil))
+           (spine1 (make-instance 'persistent-cons :repository :dummy-repo
+                                   :persistent-car pair1 :persistent-cdr spine2))
+           (head-sha (serialize-persistent-cons spine1))
+           (hollow (inflate-git-proxy :dummy-repo head-sha)))
+      (multiple-value-bind (keys values) (scan-persistent-alist hollow)
+        (is (equal '(:a :b) (series:collect keys)))
+        (is (equal '(1 2) (series:collect values)))))))

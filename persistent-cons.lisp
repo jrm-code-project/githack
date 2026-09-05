@@ -328,6 +328,54 @@ the resulting series is later consumed."
               (%persistent-cons-decode (persistent-car (%ensure-persistent-cons-loaded tail))))
             tails)))
 
+(defun scan-persistent-alist (list)
+  "Analogous to SERIES's own SCAN-ALIST: return two series -- the
+successive keys and, correspondingly, values -- scanned from LIST (a
+PERSISTENT-CONS spine, a not-yet-retyped GIT-TREE proxy for one, or
+NIL for the empty alist) whose successive PERSISTENT-CAR elements
+are themselves each a \"pair\" -- a further PERSISTENT-CONS (or
+not-yet-retyped GIT-TREE proxy for one) whose own PERSISTENT-CAR is
+that entry's key and PERSISTENT-CDR is that entry's value, exactly
+the PERSISTENT-CONS-of-PERSISTENT-CONSes shape used throughout
+PERSISTENT-HASH-TABLE.LISP for its own bucket chains. Each key and
+value is decoded via %PERSISTENT-CONS-DECODE, precisely as
+SCAN-PERSISTENT-LIST decodes its own elements. Terminates at the
+first spine tail for which %PERSISTENT-CONS-TAIL-P is false, exactly
+as SCAN-PERSISTENT-LIST does.
+
+Unlike CL:SCAN-ALIST, this does NOT suppress shadowed duplicate keys
+(SCAN-ALIST's OPTIONAL TEST argument checks each pair against every
+earlier pair via ASSOC, which would force fetching -- from Git --
+every remaining pair of LIST just to decide whether to keep the
+current one, defeating the entire purpose of a lazy, incremental
+scan). LIST is assumed to already hold at most one pair per key, the
+same invariant PERSISTENT-HASH-TABLE.LISP's own bucket chains always
+maintain.
+
+An OPTIMIZABLE-SERIES-FUNCTION producing 2 output series, built
+entirely from the primitive SCAN-FN/MAP-FN series functions exactly
+as SCAN-PERSISTENT-LIST is, so it can be spliced and fused into a
+surrounding series expression by the SERIES compiler -- only the
+prefix of LIST actually demanded is ever fetched from Git. Each
+spine tail's pair is fetched and decoded into keys/values only once,
+regardless of how many of the two returned series are actually
+consumed, since both are derived (via cheap, no-fetch CAR/CDR) from
+one shared, single underlying (key . value) Lisp cons series."
+  (declare (optimizable-series-function 2))
+  (let* ((tails (scan-fn t
+                         (lambda () list)
+                         (lambda (tail) (persistent-cdr (%ensure-persistent-cons-loaded tail)))
+                         (lambda (tail) (not (%persistent-cons-tail-p tail)))))
+         (pairs (map-fn t
+                        (lambda (tail)
+                          (let ((pair (%ensure-persistent-cons-loaded
+                                       (%persistent-cons-decode (persistent-car (%ensure-persistent-cons-loaded tail))))))
+                            (cons (%persistent-cons-decode (persistent-car pair))
+                                  (%persistent-cons-decode (persistent-cdr pair)))))
+                        tails)))
+    (values (map-fn t #'car pairs)
+            (map-fn t #'cdr pairs))))
+
 (defun %persistent-cons-encode (repository value)
   "Inverse of %PERSISTENT-CONS-DECODE: return VALUE itself, unchanged,
 if it is already a GIT-OBJECT (a compound proxy -- a GIT-TREE,

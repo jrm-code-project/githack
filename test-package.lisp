@@ -69,6 +69,7 @@
                 "%ENSURE-BLOB-LOADED"
                 "%ENSURE-PERSISTENT-CONS-LOADED"
                 "SCAN-PERSISTENT-LIST"
+                "SCAN-PERSISTENT-ALIST"
                 "COLLECT-PERSISTENT-LIST"
                 "WRAP-ATOMIC-COMMIT-ROOT"
                 "RESOLVE-COMMIT-ROOT"
