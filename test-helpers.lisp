@@ -223,9 +223,14 @@ WITH-FAKE-GIT-*/WITH-RECORDING-GIT-* fixture above -- inside a fresh
 temporary directory. Bind REPOSITORY-VAR, for the extent of BODY, to
 that repository's pathname (its --git-dir, exactly what
 GIT-HASH-OBJECT/GIT-CAT-FILE/GIT-TYPE/GIT-SHOW-REF-SHA/GIT-UPDATE-REF
-all expect as their own REPOSITORY argument). Recursively deletes
-the entire temporary directory afterward, regardless of how BODY
-exits (normally, via a non-local exit, or by signaling an error)."
+all expect as their own REPOSITORY argument). Closes any persistent
+`git` subprocess sessions GIT-HASH-OBJECT/GIT-TYPE/GIT-CAT-FILE
+opened against this repository (see CLOSE-GIT-IO-SESSIONS) before
+recursively deleting the entire temporary directory afterward,
+regardless of how BODY exits (normally, via a non-local exit, or by
+signaling an error) -- a live session's pipes would otherwise
+silently outlive, and keep referencing, a directory this macro is
+about to delete."
   (let ((path (gensym "PATH")))
     `(let ((,path (%e2e-unique-repository-pathname)))
        (ensure-directories-exist ,path)
@@ -234,6 +239,7 @@ exits (normally, via a non-local exit, or by signaling an error)."
        (unwind-protect
             (let ((,repository-var ,path))
               ,@body)
+         (ignore-errors (close-git-io-sessions ,path))
          (ignore-errors (uiop:delete-directory-tree ,path :validate t :if-does-not-exist :ignore))))))
 
 (defmacro with-fake-git-type ((type-alist) &body body)

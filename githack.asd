@@ -8,7 +8,7 @@
   :components ((:file "package")
                (:file "conditions" :depends-on ("package"))
                (:file "git-object" :depends-on ("conditions" "package"))
-               (:file "git-io" :depends-on ("git-object" "package"))
+               (:file "git-io" :depends-on ("git-object" "conditions" "package"))
                (:file "git-blob" :depends-on ("git-object" "conditions" "package"))
                (:file "git-tree" :depends-on ("git-object" "conditions" "package"))
                (:file "git-commit" :depends-on ("git-object" "conditions" "package"))

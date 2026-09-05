@@ -45,30 +45,35 @@ no `libgit2`/CFFI bindings at all — every Git operation shells out to the
 
 ## P1 — Architectural/robustness gaps
 
-### 3. Every Git operation shells out to a fresh `git` process (High, perf)
+### 3. Every Git operation shells out to a fresh `git` process (Resolved)
 
-`git-io.lisp` performs each object read/write by launching a brand-new
-`git` subprocess via `uiop:run-program`, with no batching, caching, or
-persistent session:
-
-- `git-io.lisp:26-45` (`git-hash-object` writes a temp file, then spawns
-  `git hash-object -w --path=... <tmpfile>`)
-- `git-io.lisp:47-55` (`git-type` spawns `git cat-file -t <sha>`)
-- `git-io.lisp:71-84` (`git-cat-file` spawns `git-type` *and then* a second
-  `git cat-file <type> <sha>` process — two subprocesses per read)
-
-There is no `git cat-file --batch`/`--batch-check` long-lived pipe, no SHA
-existence/type cache, and no reuse of a repository-level command session.
-Persisting a single moderately-sized persistent structure (e.g. a
-multi-hundred-entry `persistent-vector` or a deep `persistent-cons` chain)
-can spawn dozens to hundreds of `git` processes, each paying full process
-start-up and temp-file I/O cost. This is almost certainly the dominant
-runtime cost of the system today and will not scale well.
-
-**Suggested fix:** introduce a long-lived `git cat-file --batch` (reads) and
-`git hash-object --stdin-paths -w` or `git fast-import`-style batching
-(writes) session per repository/transaction, falling back to today's
-one-shot subprocess calls only when unavailable.
+**Resolved:** `git-io.lisp` now maintains a cache of long-lived `git`
+subprocesses (`*git-io-sessions*`) instead of spawning a brand-new process
+per call. `git-type` talks to a persistent `git cat-file --batch-check`
+session (one round-trip per SHA: write the SHA, read back its `<type>
+<size>` header); `git-cat-file` talks to its own persistent `git cat-file
+--batch` session, which returns the header *and* the object's content body
+in the same round-trip, eliminating the old "two subprocesses per read"
+pattern entirely (`git-cat-file` no longer calls `git-type` first);
+`git-hash-object` talks to a persistent, per-TYPE `git hash-object -w -t
+<type> --stdin-paths` session (Git only supports one `-t` per invocation,
+so a session is cached per (repository, type) pair), still staging content
+through a temporary file (as before) but feeding that file's path to the
+long-lived process instead of spawning a fresh `git hash-object` each time.
+Every persistent-session call path transparently falls back to the
+original one-shot `uiop:run-program` implementation (`%git-type-one-shot`,
+`%git-cat-file-one-shot`, `%git-hash-object-one-shot`) if its session
+cannot be started, or dies/misbehaves mid-conversation (broken pipe,
+unexpected EOF); the fallback discards the broken session first so the
+next call gets a fresh one. `close-git-io-sessions` terminates and forgets
+some (or, if called with no argument, every) repository's cached sessions;
+`with-temporary-git-repository` (the test suite's real-repository fixture)
+now calls it before deleting a temporary repository's directory, so no
+session's pipes outlive the directory they were opened against, and an
+`sb-ext:*exit-hooks*` entry defensively closes any sessions still cached
+when the Lisp image exits. New tests in `git-io-tests.lisp` cover session
+reuse across repeated calls, `close-git-io-sessions`'s per-repository
+scoping, and the one-shot fallback after a session has died.
 
 ### 4. No custom condition hierarchy (Resolved)
 
@@ -251,18 +256,19 @@ cheaply set up others. Numbers refer back to the item numbers above.
    — do these together, in either order; they're independent of each other
    but both consume the condition hierarchy from #4. #5 in particular
    should also directly exercise the retry/conflict condition added in #1.
-5. **#3 (batch/cache Git subprocess calls)** — deliberately sequenced after
-   #1, #4, #5, and #6. It's the largest, riskiest, most invasive change in
-   this document (a new long-lived-process protocol underneath
-   `git-io.lisp`), and it is much safer to attempt once the transaction
-   layer above it already has conflict detection (#1), a real condition
-   hierarchy to report subprocess failures through (#4), and direct test
-   coverage of the current one-shot-process behavior (#5) to diff against.
+5. **#3 (batch/cache Git subprocess calls)** *(done)* — deliberately
+   sequenced after #1, #4, #5, and #6. It was the largest, riskiest, most
+   invasive change in this document (a new long-lived-process protocol
+   underneath `git-io.lisp`), and was safer to attempt once the
+   transaction layer above it already had conflict detection (#1), a real
+   condition hierarchy to report subprocess failures through (#4), and
+   direct test coverage of the original one-shot-process behavior (#5) to
+   diff against.
 6. **#7 (docstrings on generated `define-persistent-struct` APIs)** and
    **#8 (mechanical exported-symbol documentation check)** — do these
    together: write the #8 test first (it will immediately fail and enumerate
    every gap, including #7's), then fix #7 until #8 passes. Cheap, low-risk,
-   no dependency on anything above.
+   no dependency on anything above. **This is the next item to pick up.**
 7. **#9 (rename leftover `-etypecase` function names)** and **#10/#11/#12**
    (concurrency-policy docs, `git` PATH sanity check, pathname-portability
    tests) — lowest priority; pick these up opportunistically whenever

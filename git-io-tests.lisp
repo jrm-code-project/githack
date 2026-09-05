@@ -8,8 +8,10 @@
 ;;; these tests genuinely shell out to a real, temporary, bare Git
 ;;; repository (via WITH-TEMPORARY-GIT-REPOSITORY) to exercise the
 ;;; actual subprocess plumbing: non-zero exit-status handling,
-;;; binary/non-UTF-8-safe content round-tripping, and temp-file
-;;; cleanup on failure.
+;;; binary/non-UTF-8-safe content round-tripping, temp-file cleanup
+;;; on failure, persistent-session reuse across repeated calls (see
+;;; *GIT-IO-SESSIONS*), CLOSE-GIT-IO-SESSIONS's per-repository
+;;; teardown, and the one-shot fallback path when a session has died.
 
 (def-suite git-io-suite
   :in githack-suite
@@ -32,6 +34,70 @@ fails."
              (or (and (>= (length name) 15) (string= name "githack-object-" :end1 15))
                  (and (>= (length name) 17) (string= name "githack-catfile-" :end1 16))))))
     (directory (merge-pathnames "*.tmp" (uiop:default-temporary-directory))))))
+
+(test git-hash-object-reuses-a-single-persistent-session-across-calls
+  "Two GIT-HASH-OBJECT calls of the same TYPE against the same
+repository reuse a single cached `git hash-object --stdin-paths`
+session (see *GIT-IO-SESSIONS*) instead of spawning a fresh
+subprocess every time."
+  (with-temporary-git-repository (repository)
+    (git-hash-object repository "blob" (sb-ext:string-to-octets "one" :external-format :utf-8))
+    (let ((process (gethash (%git-io-session-key :hash-object repository "blob") *git-io-sessions*)))
+      (is-true process)
+      (is-true (uiop:process-alive-p process))
+      (git-hash-object repository "blob" (sb-ext:string-to-octets "two" :external-format :utf-8))
+      (is (eq process (gethash (%git-io-session-key :hash-object repository "blob") *git-io-sessions*))))))
+
+(test git-type-and-git-cat-file-reuse-their-own-persistent-sessions
+  "GIT-TYPE and GIT-CAT-FILE each reuse their own cached session
+\(`cat-file --batch-check` and `cat-file --batch`, respectively)
+across repeated calls against the same repository."
+  (with-temporary-git-repository (repository)
+    (let ((sha (git-hash-object repository "blob" (sb-ext:string-to-octets "atom" :external-format :utf-8))))
+      (git-type repository sha)
+      (let ((batch-check-process (gethash (%git-io-session-key :batch-check repository) *git-io-sessions*)))
+        (is-true batch-check-process)
+        (git-type repository sha)
+        (is (eq batch-check-process (gethash (%git-io-session-key :batch-check repository) *git-io-sessions*))))
+      (git-cat-file repository sha)
+      (let ((batch-process (gethash (%git-io-session-key :batch repository) *git-io-sessions*)))
+        (is-true batch-process)
+        (git-cat-file repository sha)
+        (is (eq batch-process (gethash (%git-io-session-key :batch repository) *git-io-sessions*)))))))
+
+(test close-git-io-sessions-terminates-and-forgets-a-repositorys-sessions
+  "CLOSE-GIT-IO-SESSIONS terminates every cached session for a given
+repository and removes it from *GIT-IO-SESSIONS*, without disturbing
+sessions cached for a different repository."
+  (with-temporary-git-repository (repository-1)
+    (with-temporary-git-repository (repository-2)
+      (git-hash-object repository-1 "blob" (sb-ext:string-to-octets "a" :external-format :utf-8))
+      (git-hash-object repository-2 "blob" (sb-ext:string-to-octets "b" :external-format :utf-8))
+      (let ((process-1 (gethash (%git-io-session-key :hash-object repository-1 "blob") *git-io-sessions*))
+            (process-2 (gethash (%git-io-session-key :hash-object repository-2 "blob") *git-io-sessions*)))
+        (is-true process-1)
+        (is-true process-2)
+        (close-git-io-sessions repository-1)
+        (is (null (gethash (%git-io-session-key :hash-object repository-1 "blob") *git-io-sessions*)))
+        (is-false (uiop:process-alive-p process-1))
+        (is (eq process-2 (gethash (%git-io-session-key :hash-object repository-2 "blob") *git-io-sessions*)))
+        (is-true (uiop:process-alive-p process-2))
+        (close-git-io-sessions repository-2)))))
+
+(test git-hash-object-falls-back-to-one-shot-when-its-session-dies
+  "If GIT-HASH-OBJECT's persistent session for a TYPE has already
+died (e.g. Git rejected that TYPE and exited without echoing a SHA),
+the next call for that same TYPE transparently falls back to a
+one-shot subprocess and still succeeds, rather than propagating the
+dead session's failure."
+  (with-temporary-git-repository (repository)
+    (signals error
+      (git-hash-object repository "not-a-real-type"
+                        (sb-ext:string-to-octets "x" :external-format :utf-8)))
+    (let* ((octets (sb-ext:string-to-octets "recovered" :external-format :utf-8))
+           (sha (git-hash-object repository "blob" octets)))
+      (is (= 40 (length sha)))
+      (is (equalp octets (git-cat-file repository sha))))))
 
 (test git-hash-object-and-git-cat-file-round-trip-a-blob
   "GIT-HASH-OBJECT writes real octets into a real repository's object
