@@ -195,26 +195,3 @@ even concurrently with writers, is always safe."
           value)))
     books))
 
-;;; --- Satirical seed data ---------------------------------------------
-
-(defparameter +satirical-books+
-  '(("978-001" "Git Push --Force: A Memoir of Regret" "Linus Torvalds")
-    ("978-002" "Parentheses and Pain: Navigating Lisp" "John McCarthy's Ghost")
-    ("978-003" "Lost Updates and Found Sanity: An Optimistic Guide" "Concurrency Carl")
-    ("978-004" "Fifty Shades of Beige: Surviving the Helpful Assistant" "Anonymous Corporate Drone")
-    ("978-005" "To Kill a Mocking-Object: TDD for the Soulless" "Enterprise Architect Bob")
-    ("978-006" "The Ouroboros Hack: Eating Your Own Repository" "The Boss"))
-  "ISBN/TITLE/AUTHOR triples POPULATE-SATIRICAL-LIBRARY seeds the
-\"database-example\" branch's LIBRARY catalog with.")
-
-(defun populate-satirical-library ()
-  "Ensure the \"database-example\" library exists (see ENSURE-
-LIBRARY-INITIALIZED), then ADD-BOOK every entry of
-+SATIRICAL-BOOKS+ to it, one real Git transaction (and so one real
-Git commit) per book. Safe to call more than once: re-adding an ISBN
-already present simply replaces that entry with an identical one."
-  (ensure-library-initialized)
-  (dolist (entry +satirical-books+)
-    (destructuring-bind (isbn title author-name) entry
-      (add-book isbn title author-name)))
-  (values))
