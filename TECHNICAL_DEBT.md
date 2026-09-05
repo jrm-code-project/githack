@@ -190,29 +190,19 @@ dispatch) rather than what it replaced.
 
 ## P3 — Cosmetic / out of scope for now
 
-### 10. No documented concurrency policy (Medium, mostly a documentation gap)
+### 10. No documented concurrency policy (Resolved)
 
-`*repository*`, `*git-transaction*`, and `*transaction*`
-(`package.lisp:13-15`) are ordinary dynamic variables, correctly rebound
-per-call via `let` in `git-repository.lisp:8-18,97-103`,
-`git-transaction.lisp:32-45,263-268`, and `transaction.lisp:62-84,122-137`
-— thread-local dynamic binding itself is not a bug. However:
-
-- Lazily-loaded proxy caches (`persistent-vector.lisp:252-260`,
-  `persistent-array.lisp:231-260`, and the shared `atomic-wrapper.lisp`
-  lazy-load helpers) mutate slots with no locking; two threads touching the
-  same hollow proxy concurrently can race harmlessly (idempotent re-fetch)
-  or, in the worst case, observe a partially-populated object.
-  Practically low-risk today since nothing in the codebase currently
-  spawns worker threads, but undocumented.
-- No README/docstring anywhere states whether concurrent use (multiple
-  threads, or multiple OS processes sharing one Git repository) is
-  supported, and to what extent.
-
-**Suggested fix:** at minimum, document the current single-writer,
-single-thread-per-transaction assumption explicitly (e.g. in
-`git-transaction.lisp`'s file-level comment), so this isn't discovered the
-hard way. A real fix depends on item #1 being addressed first.
+**Resolved:** `git-transaction.lisp`'s file-level comment now has a
+"CONCURRENCY POLICY" block documenting that: (a) multiple GIT-TRANSACTIONs
+against the same repository, across threads or OS processes, are supported
+at the Git-ref level via `CONFLICT-RESOLUTION` (`:ERROR`/`:RETRY`/`:LOCK`);
+but (b) sharing a single in-memory proxy instance (or anything reachable
+from one) across threads is not safe, since none of the lazy-load caches
+(`%ensure-tree-entries-loaded`/`%ensure-blob-loaded`/`%ensure-commit-loaded`
+in `atomic-wrapper.lisp`, or `persistent-vector-ref`/`persistent-array-ref`'s
+per-index caches) are synchronized. Each of those five functions also gets
+a short "Not thread-safe" docstring note pointing back at this policy, so
+it's discoverable at the actual mutation sites, not just centrally.
 
 ### 11. Hardcoded/ambient dependence on `git` being on `PATH` (Low)
 
@@ -281,11 +271,13 @@ cheaply set up others. Numbers refer back to the item numbers above.
 7. **#9 (rename leftover `-etypecase` function names)** *(done)* — renamed
    all four `%persist-*-etypecase` generic functions (one more than
    originally called out) to `%persist-*-by-type`.
-8. **#10/#11/#12** (concurrency-policy docs, `git` PATH sanity check,
-   pathname-portability tests) — lowest priority; pick these up
-   opportunistically whenever another change already has you touching the
-   same file, rather than as dedicated work. **This is the next item to
-   pick up.**
+8. **#10 (document concurrency policy)** *(done)* — added a CONCURRENCY
+   POLICY block to `git-transaction.lisp`'s file header plus short
+   "Not thread-safe" notes at each unsynchronized lazy-load cache site.
+9. **#11/#12** (`git` PATH sanity check, pathname-portability tests) —
+   lowest priority; pick these up opportunistically whenever another
+   change already has you touching the same file, rather than as
+   dedicated work. **This is the next item to pick up.**
 
 ---
 

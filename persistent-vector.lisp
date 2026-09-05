@@ -258,7 +258,11 @@ fetched, decoded, and cached completely independently of every other
 index, only on that index's own first access. Signals an ordinary
 Lisp error for an out-of-bounds INDEX -- but only after VECTOR's
 LENGTH has been established, since an unloaded proxy cannot know its
-own bounds without first consulting Git."
+own bounds without first consulting Git.
+
+Not thread-safe: see git-transaction.lisp's CONCURRENCY POLICY
+comment. Neither %ENSURE-PERSISTENT-VECTOR-LOADED nor this
+function's own per-index cache array is synchronized."
   (%ensure-persistent-vector-loaded vector)
   (let ((length (persistent-vector-length vector)))
     (unless (and (integerp index) (<= 0 index) (< index length))

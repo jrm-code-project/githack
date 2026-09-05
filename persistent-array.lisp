@@ -261,7 +261,11 @@ its own tree, then independent per-index fetch/decode/cache -- is
 then entirely PERSISTENT-VECTOR-REF's responsibility. Signals an
 ordinary Lisp error for a wrong number of subscripts or any
 out-of-bounds subscript, but only once ARRAY's own DIMENSIONS have
-been established."
+been established.
+
+Not thread-safe: see git-transaction.lisp's CONCURRENCY POLICY
+comment. %ENSURE-PERSISTENT-ARRAY-LOADED is not synchronized, on top
+of PERSISTENT-VECTOR-REF's own unsynchronized per-index cache."
   (%ensure-persistent-array-loaded array)
   (let* ((dimensions (persistent-array-dimensions array))
          (index (%persistent-array-row-major-index dimensions subscripts)))

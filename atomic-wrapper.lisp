@@ -57,7 +57,12 @@ no SHA (is not yet persisted)."
 (defun %ensure-tree-entries-loaded (repository tree)
   "Ensure TREE's ENTRIES are populated, fetching and parsing its raw
 Git tree bytes via GIT-CAT-FILE and DESERIALIZE-TREE if TREE is not
-already loaded. Returns TREE."
+already loaded. Returns TREE.
+
+Not thread-safe: see git-transaction.lisp's CONCURRENCY POLICY
+comment. Two threads racing to load the same TREE instance can only
+redo idempotent work, never corrupt data, but neither GET-ENTRIES nor
+GET-LOADED? is synchronized."
   (unless (get-loaded? tree)
     (setf (get-entries tree) (deserialize-tree repository (git-cat-file repository (sha tree))))
     (setf (get-loaded? tree) t))
@@ -66,7 +71,10 @@ already loaded. Returns TREE."
 (defun %ensure-blob-loaded (blob)
   "Ensure BLOB's PAYLOAD slot is populated, fetching and decoding its
 raw Git blob bytes via GIT-CAT-FILE and DESERIALIZE-ATOM if BLOB is
-not already loaded. Returns BLOB."
+not already loaded. Returns BLOB.
+
+Not thread-safe: see git-transaction.lisp's CONCURRENCY POLICY
+comment."
   (unless (get-loaded? blob)
     (setf (get-payload blob)
           (deserialize-atom (git-cat-file (get-repository blob) (sha blob))))
@@ -89,7 +97,10 @@ ordinary tree with no \".meta\" entry at all."
 slots are populated, fetching and parsing its raw Git commit text
 via GIT-CAT-FILE and DESERIALIZE-COMMIT if COMMIT is not already
 loaded (as is the case for a freshly INFLATE-GIT-PROXY'd commit,
-e.g. a GIT-BRANCH's TARGET). Returns COMMIT."
+e.g. a GIT-BRANCH's TARGET). Returns COMMIT.
+
+Not thread-safe: see git-transaction.lisp's CONCURRENCY POLICY
+comment."
   (unless (get-loaded? commit)
     (deserialize-commit commit
                          (sb-ext:octets-to-string

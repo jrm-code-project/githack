@@ -27,6 +27,36 @@
 ;;; prototype transaction system in githack.lisp (predating the
 ;;; GIT-OBJECT proxy layer) that is still exercised by tests.lisp.
 
+;;; CONCURRENCY POLICY: multiple GIT-TRANSACTIONs against the *same*
+;;; repository, whether from separate threads in this Lisp image or
+;;; from entirely separate OS processes, are supported at the
+;;; Git-ref level -- see CALL-WITH-GIT-TRANSACTION's
+;;; CONFLICT-RESOLUTION argument (:ERROR / :RETRY / :LOCK), which
+;;; governs how a branch's compare-and-swap ("Lost Update") race is
+;;; detected and handled.
+;;;
+;;; What is NOT safe is sharing a single in-memory GIT-OBJECT/
+;;; PERSISTENT-OBJECT proxy instance (or anything reachable from
+;;; one, e.g. via a GIT-BRANCH's TARGET) across multiple threads.
+;;; Every lazy-load path in this codebase -- %ENSURE-TREE-ENTRIES-
+;;; LOADED, %ENSURE-BLOB-LOADED, and %ENSURE-COMMIT-LOADED in
+;;; atomic-wrapper.lisp; PERSISTENT-VECTOR-REF's and PERSISTENT-
+;;; ARRAY-REF's element caches in persistent-vector.lisp/persistent-
+;;; array.lisp -- mutates a proxy's own slots with no locking
+;;; whatsoever. Two threads racing to lazily load the *same* proxy
+;;; instance can, at best, harmlessly redo idempotent work (re-fetch
+;;; and re-decode the same Git object twice), or, at worst, observe
+;;; or produce a partially-populated object if one thread reads a
+;;; slot the other is mid-way through setting. Nothing in this
+;;; codebase today spawns worker threads internally, so this is a
+;;; theoretical risk rather than an observed bug, but any caller
+;;; introducing concurrency of their own MUST ensure each thread
+;;; either uses entirely separate proxy object graphs (e.g. by
+;;; opening its own GIT-TRANSACTION and letting it re-resolve BRANCH
+;;; from scratch, rather than sharing one already-resolved
+;;; GIT-COMMIT/GIT-TRANSACTION across threads) or otherwise
+;;; externally serializes all access to any proxy object it shares.
+
 ;;; *GIT-TRANSACTION* is the GIT-TRANSACTION currently in dynamic
 ;;; scope, bound by CALL-WITH-GIT-TRANSACTION around its call to
 ;;; RECEIVER. It is unbound at the top level -- referencing it
