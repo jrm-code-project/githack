@@ -243,6 +243,33 @@ VECTOR."
           (setf (persistent-vector-element-type vector) element-type)))))
   vector)
 
+(defun scan-persistent-vector (vector)
+  "Return a series of VECTOR's successive elements, in index order
+from 0 to (1- (PERSISTENT-VECTOR-LENGTH VECTOR)), each exactly as
+PERSISTENT-VECTOR-REF would return it (a decoded atom for a
+GIT-BLOB element, or the GIT-OBJECT proxy itself -- a GIT-TREE,
+PERSISTENT-CONS, or nested PERSISTENT-VECTOR -- for any other,
+compound element). VECTOR's underlying Git tree (and, if necessary,
+its \".meta\" entry) is parsed at most once, via the same
+%ENSURE-PERSISTENT-VECTOR-LOADED/PERSISTENT-VECTOR-REF machinery
+used for direct random-access indexing, so LENGTH need not already
+be known when this function is called; each individual element is
+then fetched and decoded, and its result cached in VECTOR's own
+per-index cache, independently of every other element, only as the
+series is actually advanced past that index. An
+OPTIMIZABLE-SERIES-FUNCTION, built from the primitive
+SCAN-RANGE/MAP-FN series functions -- when consumed from within a
+surrounding SERIES-optimized expression (e.g. one ending in
+UNTIL-IF or a bounded COLLECT), only the elements actually demanded
+are ever fetched from Git; a bare, unoptimized call instead produces
+its result eagerly, fetching every element up front, exactly like
+SCAN-PERSISTENT-LIST."
+  (declare (optimizable-series-function))
+  (%ensure-persistent-vector-loaded vector)
+  (map-fn t
+          (lambda (index) (persistent-vector-ref vector index))
+          (scan-range :below (persistent-vector-length vector))))
+
 (defun persistent-vector-ref (vector index)
   "Return the real Lisp value held at INDEX (a non-negative integer
 less than (PERSISTENT-VECTOR-LENGTH VECTOR)) in VECTOR: the decoded

@@ -193,3 +193,65 @@ has not yet been determined and which also has no SHA to fetch it
 from (so it can never become loaded)."
   (let ((vector (make-instance 'persistent-vector :repository :dummy-repo)))
     (signals error (persistent-vector-ref vector 0))))
+
+(test scan-persistent-vector-of-empty-vector-is-empty
+  "SCAN-PERSISTENT-VECTOR of an already-loaded, zero-length vector
+produces an empty series."
+  (let ((vector (make-instance 'persistent-vector :repository :dummy-repo :length 0 :loaded? t)))
+    (is (null (series:collect (scan-persistent-vector vector))))))
+
+(test scan-persistent-vector-collects-decoded-elements-in-index-order
+  "SCAN-PERSISTENT-VECTOR of an in-memory, already-loaded vector
+produces a series of its elements in index order, each decoded
+exactly as PERSISTENT-VECTOR-REF would return it."
+  (let* ((e0 (make-instance 'git-blob :repository :dummy-repo :payload :zero :loaded? t))
+         (e1 (make-instance 'git-blob :repository :dummy-repo :payload :one :loaded? t))
+         (e2 (make-instance 'git-blob :repository :dummy-repo :payload :two :loaded? t))
+         (vector (make-instance 'persistent-vector :repository :dummy-repo :length 3 :loaded? t
+                                                    :entries (list (cons "0" e0)
+                                                                   (cons "1" e1)
+                                                                   (cons "2" e2)))))
+    (is (equal '(:zero :one :two) (series:collect (scan-persistent-vector vector))))))
+
+(test scan-persistent-vector-passes-through-compound-elements-unchanged
+  "SCAN-PERSISTENT-VECTOR leaves a compound (non-GIT-BLOB) element's
+own GIT-OBJECT proxy unchanged in the resulting series, exactly as
+PERSISTENT-VECTOR-REF does for a nested PERSISTENT-CONS/
+PERSISTENT-VECTOR/GIT-TREE element."
+  (let* ((e0 (make-instance 'git-blob :repository :dummy-repo :payload :zero :loaded? t))
+         (nested (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
+                                                  :persistent-car e0
+                                                  :persistent-cdr nil))
+         (vector (make-instance 'persistent-vector :repository :dummy-repo :length 2 :loaded? t
+                                                    :entries (list (cons "0" e0)
+                                                                   (cons "1" nested)))))
+    (is (equal (list :zero nested) (series:collect (scan-persistent-vector vector))))))
+
+(test scan-persistent-vector-round-trips-through-a-fake-git-repository
+  "SCAN-PERSISTENT-VECTOR correctly walks a vector that must be
+lazily fetched from Git: after serializing an in-memory vector,
+scanning a hollow PERSISTENT-VECTOR proxy for the same SHA (exactly
+as PERSISTENT-VECTOR-REF-FETCHES-DECODES-AND-CACHES constructs its
+own hollow proxy above, since INFLATE-GIT-PROXY itself has no way to
+know a plain tree SHA denotes a PERSISTENT-VECTOR rather than an
+ordinary GIT-TREE) yields the same decoded elements as the original
+in-memory vector, in index order."
+  (let* ((e0 (make-instance 'git-blob :repository :dummy-repo :payload 10))
+         (e1 (make-instance 'git-blob :repository :dummy-repo :payload 20))
+         (e2 (make-instance 'git-blob :repository :dummy-repo :payload 30))
+         (original (make-instance 'persistent-vector :repository :dummy-repo
+                                                      :entries (list (cons "0" e0)
+                                                                     (cons "1" e1)
+                                                                     (cons "2" e2)))))
+    (with-fake-git-object-store ()
+      (serialize-persistent-vector original)
+      (let* ((hollow (make-instance 'persistent-vector :repository :dummy-repo :sha (sha original)))
+             (meta-sha (sha (cdr (assoc ".meta" (get-entries original) :test #'string=))))
+             (readme-sha (sha (cdr (assoc "README.md" (get-entries original) :test #'string=)))))
+        (with-fake-git-type ((list (cons (sha original) "tree")
+                                    (cons meta-sha "blob")
+                                    (cons readme-sha "blob")
+                                    (cons (sha e0) "blob")
+                                    (cons (sha e1) "blob")
+                                    (cons (sha e2) "blob")))
+          (is (equal '(10 20 30) (series:collect (scan-persistent-vector hollow)))))))))
