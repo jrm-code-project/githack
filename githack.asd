@@ -22,9 +22,12 @@
                 :depends-on ("git-object" "git-blob" "git-tree" "git-io" "atomic-wrapper" "persistent-cons" "conditions" "package"))
                (:file "persistent-array"
                 :depends-on ("git-object" "git-blob" "git-tree" "git-io" "atomic-wrapper" "persistent-vector" "conditions" "package"))
+               (:file "persistent-wttree"
+                :depends-on ("git-object" "git-blob" "git-tree" "git-io" "atomic-wrapper"
+                              "persistent-cons" "persistent-vector" "conditions" "package"))
                (:file "persistent-standard-class"
                 :depends-on ("git-object" "git-blob" "git-tree" "git-io" "atomic-wrapper"
-                              "persistent-cons" "persistent-vector" "persistent-array" "conditions" "package"))
+                              "persistent-cons" "persistent-vector" "persistent-array" "persistent-wttree" "conditions" "package"))
                (:file "persistent-struct"
                 :depends-on ("git-object" "git-blob" "git-tree" "persistent-standard-class" "package"))
                (:file "persistent-hash-table"
@@ -63,6 +66,7 @@
                (:file "atomic-wrapper-tests" :depends-on ("test-package" "test-helpers"))
                (:file "persistent-vector-tests" :depends-on ("test-package" "test-helpers"))
                (:file "persistent-array-tests" :depends-on ("test-package" "test-helpers"))
+               (:file "persistent-wttree-tests" :depends-on ("test-package" "test-helpers"))
                (:file "persistent-standard-class-tests" :depends-on ("test-package" "test-helpers"))
                (:file "persistent-struct-tests" :depends-on ("test-package" "test-helpers"))
                (:file "persistent-hash-table-tests" :depends-on ("test-package" "test-helpers"))

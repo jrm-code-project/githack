@@ -205,6 +205,68 @@ restored afterward."
              (setf (fdefinition 'git-cat-file) ,cat-original)
              (fmakunbound 'git-cat-file))))))
 
+(defmacro with-fake-git-repository (() &body body)
+  "Within BODY, GIT-HASH-OBJECT, GIT-CAT-FILE, and GIT-TYPE all
+cooperate as a single in-memory fake Git object database, none of
+them shelling out to Git or touching the filesystem: GIT-HASH-OBJECT
+computes a fake SHA for its TYPE/OCTETS arguments via %FAKE-SHA-FOR
+and remembers both OCTETS and TYPE under that SHA; GIT-CAT-FILE
+returns the OCTETS previously remembered for a SHA; GIT-TYPE returns
+the TYPE previously remembered for a SHA; each of the latter two
+signals an error for any SHA never hashed in this way. Unlike
+WITH-FAKE-GIT-OBJECT-STORE (which fakes only GIT-HASH-OBJECT/
+GIT-CAT-FILE), this additionally fakes GIT-TYPE, so it is suitable
+for exercising a full write-then-read-back round trip through
+INFLATE-GIT-PROXY/DESERIALIZE-TREE (which both consult GIT-TYPE to
+distinguish a blob SHA from a tree SHA) without having to separately
+enumerate every SHA's type via WITH-FAKE-GIT-TYPE by hand. The real
+definitions (or lack thereof) of all three functions are restored
+afterward."
+  (let ((hash-was-bound (gensym "HASH-WAS-BOUND"))
+        (hash-original (gensym "HASH-ORIGINAL"))
+        (cat-was-bound (gensym "CAT-WAS-BOUND"))
+        (cat-original (gensym "CAT-ORIGINAL"))
+        (type-was-bound (gensym "TYPE-WAS-BOUND"))
+        (type-original (gensym "TYPE-ORIGINAL"))
+        (table (gensym "TABLE")))
+    `(let* ((,table (make-hash-table :test 'equal))
+            (,hash-was-bound (fboundp 'git-hash-object))
+            (,hash-original (and ,hash-was-bound (fdefinition 'git-hash-object)))
+            (,cat-was-bound (fboundp 'git-cat-file))
+            (,cat-original (and ,cat-was-bound (fdefinition 'git-cat-file)))
+            (,type-was-bound (fboundp 'git-type))
+            (,type-original (and ,type-was-bound (fdefinition 'git-type))))
+       (setf (fdefinition 'git-hash-object)
+             (lambda (repository type octets)
+               (declare (ignore repository))
+               (let ((sha (%fake-sha-for type octets)))
+                 (setf (gethash sha ,table) (cons type octets))
+                 sha)))
+       (setf (fdefinition 'git-cat-file)
+             (lambda (repository sha)
+               (declare (ignore repository))
+               (multiple-value-bind (entry present?) (gethash sha ,table)
+                 (unless present?
+                   (error "No fake GIT-CAT-FILE content for SHA ~S." sha))
+                 (cdr entry))))
+       (setf (fdefinition 'git-type)
+             (lambda (repository sha)
+               (declare (ignore repository))
+               (multiple-value-bind (entry present?) (gethash sha ,table)
+                 (unless present?
+                   (error "No fake GIT-TYPE content for SHA ~S." sha))
+                 (car entry))))
+       (unwind-protect (progn ,@body)
+         (if ,hash-was-bound
+             (setf (fdefinition 'git-hash-object) ,hash-original)
+             (fmakunbound 'git-hash-object))
+         (if ,cat-was-bound
+             (setf (fdefinition 'git-cat-file) ,cat-original)
+             (fmakunbound 'git-cat-file))
+         (if ,type-was-bound
+             (setf (fdefinition 'git-type) ,type-original)
+             (fmakunbound 'git-type))))))
+
 (defun %e2e-unique-repository-pathname (&optional (name-prefix "githack-e2e-"))
   "Return a pathname, extremely unlikely to collide with any other
 directory, naming a fresh temporary directory (not yet created)

@@ -238,6 +238,9 @@ of an ETYPECASE clause."))
 (defmethod %persist-object-component-by-type ((value persistent-array))
   (serialize-persistent-array value))
 
+(defmethod %persist-object-component-by-type ((value persistent-wttree))
+  (serialize-persistent-wttree-node value))
+
 (defmethod %persist-object-component-by-type ((value git-tree))
   (unless (sha value)
     (setf (sha value)
@@ -271,6 +274,9 @@ of an ETYPECASE clause."))
   (serialize-persistent-object git-object))
 
 (defmethod %persist-vector-component-by-type ((git-object persistent-object))
+  (serialize-persistent-object git-object))
+
+(defmethod %persist-wttree-component-by-type ((git-object persistent-object))
   (serialize-persistent-object git-object))
 
 (defun %persist-object-component (value repository)
@@ -464,19 +470,21 @@ BUCKETS slot) whose stored value is one of these compound types."
          (tag (%persistent-tree-tag repository tree)))
     (case tag
       (:clos (deserialize-persistent-object tree))
-      ((:cons :vector :array)
+      ((:cons :vector :array :wttree)
        (let* ((tree-octets (git-cat-file repository sha))
               (meta-entry (assoc ".meta" (get-entries tree) :test #'string=))
               (meta-octets (git-cat-file repository (sha (cdr meta-entry))))
               (hollow (make-instance (ecase tag
                                         (:cons 'persistent-cons)
                                         (:vector 'persistent-vector)
-                                        (:array 'persistent-array))
+                                        (:array 'persistent-array)
+                                        (:wttree 'persistent-wttree))
                                       :repository repository :sha sha)))
          (ecase tag
            (:cons (deserialize-persistent-cons hollow tree-octets meta-octets))
            (:vector (deserialize-persistent-vector hollow tree-octets meta-octets))
-           (:array (deserialize-persistent-array hollow tree-octets meta-octets)))))
+           (:array (deserialize-persistent-array hollow tree-octets meta-octets))
+           (:wttree (deserialize-persistent-wttree-node hollow tree-octets meta-octets)))))
       (t tree))))
 
 (defun %resolve-persistent-slot-value (value)
@@ -494,7 +502,8 @@ correct, lazily self-loading proxy for their own compound data."
   (cond
     ((typep value 'git-blob) (get-payload (%ensure-blob-loaded value)))
     ((and (typep value 'git-tree)
-          (not (typep value '(or persistent-cons persistent-vector persistent-array persistent-object))))
+          (not (typep value '(or persistent-cons persistent-vector persistent-array
+                               persistent-wttree persistent-object))))
      (let ((repository (get-repository value)))
        (%ensure-tree-entries-loaded repository value))
      (%redispatch-persistent-tree value))
