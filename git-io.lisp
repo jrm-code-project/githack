@@ -39,21 +39,42 @@ TYPE (\"blob\", \"tree\", or \"commit\"), and return the resulting
                                             :output :string)))
       (ignore-errors (delete-file path)))))
 
+(defun git-type (repository sha)
+  "Shell out to `git cat-file -t <SHA>` against REPOSITORY (a
+pathname naming a Git directory) and return that Git object's type
+as a string: \"blob\", \"tree\", or \"commit\". See
+INFLATE-GIT-PROXY, which dispatches on this to choose the concrete
+proxy subclass for SHA."
+  (string-trim '(#\Space #\Newline #\Return)
+               (uiop:run-program (list "git"
+                                        (format nil "--git-dir=~A" (uiop:native-namestring repository))
+                                        "cat-file" "-t" sha)
+                                  :output :string)))
+
 (defun git-cat-file (repository sha)
-  "Shell out to `git cat-file -p <SHA>` against REPOSITORY (a
-pathname naming a Git directory) and return that Git object's raw,
-already-decompressed content as a (VECTOR (UNSIGNED-BYTE 8)). Unlike
-GIT-HASH-OBJECT's counterpart write path, the object's content is
-captured through a temporary file (rather than a Lisp string) so
-that arbitrary binary content -- such as a tree's packed binary SHA
+  "Shell out to `git cat-file <type> <SHA>` against REPOSITORY (a
+pathname naming a Git directory) -- first determining SHA's own TYPE
+via GIT-TYPE -- and return that Git object's raw, already-
+decompressed content as a (VECTOR (UNSIGNED-BYTE 8)). An explicit
+TYPE, rather than `-p` (pretty-print), is essential here: `git
+cat-file -p` reformats a TREE object into a human-readable directory
+listing, silently corrupting the strict packed binary format
+DESERIALIZE-TREE (and every DESERIALIZE-PERSISTENT-* built upon it)
+requires, whereas `git cat-file tree <sha>` returns that same packed
+binary content byte-for-byte unchanged (exactly as `-p`/<type> both
+already do, identically, for a BLOB or COMMIT). Unlike GIT-HASH-
+OBJECT's counterpart write path, the object's content is captured
+through a temporary file (rather than a Lisp string) so that
+arbitrary binary content -- such as a tree's packed binary SHA
 entries -- round-trips exactly, with no character-encoding or
 line-ending translation."
-  (let ((path (%unique-temporary-pathname "githack-catfile-")))
+  (let ((path (%unique-temporary-pathname "githack-catfile-"))
+        (type (git-type repository sha)))
     (unwind-protect
          (progn
            (uiop:run-program (list "git"
                                     (format nil "--git-dir=~A" (uiop:native-namestring repository))
-                                    "cat-file" "-p" sha)
+                                    "cat-file" type sha)
                               :output path
                               :if-output-exists :supersede)
            (with-open-file (stream path :direction :input :element-type '(unsigned-byte 8))

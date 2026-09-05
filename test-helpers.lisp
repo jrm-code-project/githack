@@ -167,6 +167,37 @@ restored afterward."
              (setf (fdefinition 'git-cat-file) ,cat-original)
              (fmakunbound 'git-cat-file))))))
 
+(defun %e2e-unique-repository-pathname ()
+  "Return a pathname, extremely unlikely to collide with any other
+directory, naming a fresh temporary directory (not yet created)
+within the system's default temporary directory, suitable to `git
+init --bare` a real end-to-end test repository into. Mirrors
+GIT-IO.LISP's own %UNIQUE-TEMPORARY-PATHNAME, but names a directory
+(a trailing \"/\") rather than a file."
+  (merge-pathnames
+   (format nil "githack-e2e-~(~36,10,'0R~)/" (random (expt 36 10) (make-random-state t)))
+   (uiop:default-temporary-directory)))
+
+(defmacro with-temporary-git-repository ((repository-var) &body body)
+  "Create a brand-new, empty, real bare Git repository -- via `git
+init --bare`, genuinely shelling out to the Git executable, not any
+WITH-FAKE-GIT-*/WITH-RECORDING-GIT-* fixture above -- inside a fresh
+temporary directory. Bind REPOSITORY-VAR, for the extent of BODY, to
+that repository's pathname (its --git-dir, exactly what
+GIT-HASH-OBJECT/GIT-CAT-FILE/GIT-TYPE/GIT-SHOW-REF-SHA/GIT-UPDATE-REF
+all expect as their own REPOSITORY argument). Recursively deletes
+the entire temporary directory afterward, regardless of how BODY
+exits (normally, via a non-local exit, or by signaling an error)."
+  (let ((path (gensym "PATH")))
+    `(let ((,path (%e2e-unique-repository-pathname)))
+       (ensure-directories-exist ,path)
+       (uiop:run-program (list "git" "init" "--bare" (uiop:native-namestring ,path))
+                          :output nil :error-output nil)
+       (unwind-protect
+            (let ((,repository-var ,path))
+              ,@body)
+         (ignore-errors (uiop:delete-directory-tree ,path :validate t :if-does-not-exist :ignore))))))
+
 (defmacro with-fake-git-type ((type-alist) &body body)
   "Within BODY, GIT-TYPE returns the string associated with a SHA in
 TYPE-ALIST (an alist of (sha . type) conses, compared with STRING=),

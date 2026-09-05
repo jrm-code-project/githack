@@ -55,7 +55,10 @@
                (:file "persistent-struct-tests" :depends-on ("test-package" "test-helpers"))
                (:file "persistent-hash-table-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-transaction-tests" :depends-on ("test-package" "test-helpers"))
-               (:file "transaction-tests" :depends-on ("test-package" "test-helpers")))
+               (:file "transaction-tests" :depends-on ("test-package" "test-helpers"))
+               (:file "end-to-end-tests"
+                :depends-on ("test-package" "test-helpers" "persistent-standard-class-tests"
+                             "persistent-struct-tests")))
   :perform (test-op (op c)
              (declare (ignore op c))
              (unless (uiop:symbol-call "GITHACK-TEST" "RUN-GITHACK-TESTS")

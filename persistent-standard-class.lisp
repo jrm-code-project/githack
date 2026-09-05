@@ -290,39 +290,72 @@ its \".meta\" blob's :TAG is not :CLOS."
         (setf (get-loaded? instance) t)
         instance))))
 
-(defun %persistent-object-tree-p (repository tree)
-  "Return true if TREE (with ENTRIES already loaded) is a
-persistent CLOS object's own underlying tree: one whose \".meta\"
-entry, fetched via GIT-CAT-FILE and parsed as a plist via
-%DESERIALIZE-PLIST, has a :TAG of :CLOS. Returns NIL (rather than
-signaling) for any ordinary tree with no \".meta\" entry at all.
-Mirrors %ATOMIC-WRAPPER-TREE-P's identical convention."
+(defun %persistent-tree-tag (repository tree)
+  "Return the :TAG keyword recorded in TREE's own \".meta\" entry
+(:CLOS, :CONS, :VECTOR, :ARRAY, or :ATOMIC-WRAPPER -- see
+SERIALIZE-PERSISTENT-OBJECT/-CONS/-VECTOR/-ARRAY and WRAP-ATOMIC-
+COMMIT-ROOT), fetched via GIT-CAT-FILE and %DESERIALIZE-PLIST from
+TREE's \".meta\" entry (TREE's own ENTRIES must already be loaded);
+or NIL for any ordinary, untagged GIT-TREE with no \".meta\" entry
+at all."
   (let ((meta-entry (assoc ".meta" (get-entries tree) :test #'string=)))
     (and meta-entry
-         (eq (getf (%deserialize-plist (git-cat-file repository (sha (cdr meta-entry)))) :tag)
-             :clos))))
+         (getf (%deserialize-plist (git-cat-file repository (sha (cdr meta-entry)))) :tag))))
+
+(defun %redispatch-persistent-tree (tree)
+  "Return the correctly, specifically typed proxy for TREE (a plain,
+not-yet-more-specifically-typed GIT-TREE, with its own ENTRIES
+already loaded): a freshly DESERIALIZE-PERSISTENT-OBJECT'd CLOS
+instance, DESERIALIZE-PERSISTENT-CONS'd/-VECTOR'd/-ARRAY'd hollow
+proxy, if TREE's own \".meta\" entry reveals (via %PERSISTENT-TREE-
+TAG) that it actually holds one of those compound types; or TREE
+itself, unchanged, if it has no \".meta\" entry at all (an ordinary,
+untagged GIT-TREE). This is exactly the re-dispatch DESERIALIZE-
+PERSISTENT-OBJECT's own initarg reconstruction cannot itself perform
+-- since DESERIALIZE-TREE/INFLATE-GIT-PROXY only ever distinguish a
+raw GIT-BLOB from a plain GIT-TREE, never a nested PERSISTENT-CONS/
+-VECTOR/-ARRAY/-OBJECT -- needed both for a fresh commit root and for
+any persistent-object slot (e.g. a PERSISTENT-HASH-TABLE's own
+BUCKETS slot) whose stored value is one of these compound types."
+  (let* ((repository (get-repository tree))
+         (sha (sha tree))
+         (tag (%persistent-tree-tag repository tree)))
+    (case tag
+      (:clos (deserialize-persistent-object tree))
+      ((:cons :vector :array)
+       (let* ((tree-octets (git-cat-file repository sha))
+              (meta-entry (assoc ".meta" (get-entries tree) :test #'string=))
+              (meta-octets (git-cat-file repository (sha (cdr meta-entry))))
+              (hollow (make-instance (ecase tag
+                                        (:cons 'persistent-cons)
+                                        (:vector 'persistent-vector)
+                                        (:array 'persistent-array))
+                                      :repository repository :sha sha)))
+         (ecase tag
+           (:cons (deserialize-persistent-cons hollow tree-octets meta-octets))
+           (:vector (deserialize-persistent-vector hollow tree-octets meta-octets))
+           (:array (deserialize-persistent-array hollow tree-octets meta-octets)))))
+      (t tree))))
 
 (defun %resolve-persistent-slot-value (value)
   "Return the real Lisp data VALUE (a slot's raw stored value)
 represents: unchanged, if VALUE is not a GIT-OBJECT proxy at all;
 its decoded PAYLOAD, ensuring VALUE is first loaded via
-%ENSURE-BLOB-LOADED, if VALUE is a GIT-BLOB; a freshly
-DESERIALIZE-PERSISTENT-OBJECT'd CLOS instance, if VALUE is a plain
-(not yet more specifically typed) GIT-TREE proxy that turns out,
-once its own entries and \".meta\" are consulted, to be a persistent
-CLOS object's own tree (per %PERSISTENT-OBJECT-TREE-P); or VALUE
-itself, unchanged, for any other kind of GIT-OBJECT (an ordinary
-GIT-TREE, PERSISTENT-CONS, PERSISTENT-VECTOR, PERSISTENT-ARRAY, or
-already-typed PERSISTENT-OBJECT), since those already are the
+%ENSURE-BLOB-LOADED, if VALUE is a GIT-BLOB; the result of
+%REDISPATCH-PERSISTENT-TREE, if VALUE is a plain (not yet more
+specifically typed) GIT-TREE proxy (retyped into a PERSISTENT-CONS/
+-VECTOR/-ARRAY/-OBJECT if its own \".meta\" entry says so, or left
+unchanged otherwise); or VALUE itself, unchanged, for any other kind
+of GIT-OBJECT (PERSISTENT-CONS, PERSISTENT-VECTOR, PERSISTENT-ARRAY,
+or already-typed PERSISTENT-OBJECT), since those already are the
 correct, lazily self-loading proxy for their own compound data."
   (cond
     ((typep value 'git-blob) (get-payload (%ensure-blob-loaded value)))
     ((and (typep value 'git-tree)
-          (not (typep value '(or persistent-cons persistent-vector persistent-array persistent-object)))
-          (let ((repository (get-repository value)))
-            (%ensure-tree-entries-loaded repository value)
-            (%persistent-object-tree-p repository value)))
-     (deserialize-persistent-object value))
+          (not (typep value '(or persistent-cons persistent-vector persistent-array persistent-object))))
+     (let ((repository (get-repository value)))
+       (%ensure-tree-entries-loaded repository value))
+     (%redispatch-persistent-tree value))
     (t value)))
 
 (defmethod sb-mop:slot-value-using-class

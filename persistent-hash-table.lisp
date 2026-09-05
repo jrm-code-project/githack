@@ -104,49 +104,99 @@ terminate it)."
                  :persistent-cdr tail))
 
 (defun %make-empty-buckets (repository n)
-  "Return a fresh, already-loaded, purely in-memory PERSISTENT-VECTOR
-of N elements, every element NIL (an empty bucket)."
-  (let ((vector (make-instance 'persistent-vector
-                                :repository repository
-                                :length n
-                                :element-type t
-                                :loaded? t)))
+  "Return a fresh, already-loaded PERSISTENT-VECTOR of N elements,
+every element NIL (an empty bucket). Both the in-memory cache and the
+real ENTRIES alist (each index wrapped via %PHASH-WRAP, so an empty
+bucket becomes a GIT-BLOB with a NIL payload) are populated, so this
+vector serializes correctly via SERIALIZE-PERSISTENT-VECTOR, which
+reads ENTRIES exclusively -- not the cache."
+  (let* ((entries (loop for i from 0 below n
+                         collect (cons (princ-to-string i) (%phash-wrap repository nil))))
+         (vector (make-instance 'persistent-vector
+                                 :repository repository
+                                 :length n
+                                 :element-type t
+                                 :loaded? t
+                                 :entries entries)))
     (setf (%persistent-vector-cache vector) (make-array n :initial-element nil))
     vector))
 
 (defun %persistent-vector-copy-with (vector index new-value)
   "Return a new, already-loaded PERSISTENT-VECTOR of the same LENGTH,
-ELEMENT-TYPE, REPOSITORY, and (if any) ENTRIES as VECTOR, whose cache
-is a fresh copy of VECTOR's own cache with NEW-VALUE substituted at
-INDEX -- every other index's cached value (or not-yet-fetched
-status) is preserved unchanged, and, since VECTOR's own ENTRIES are
-shared (not copied), every other index can still be lazily fetched
-from Git exactly as it could through VECTOR itself. VECTOR itself is
-never modified."
+ELEMENT-TYPE, and REPOSITORY as VECTOR, whose cache is a fresh copy of
+VECTOR's own cache with NEW-VALUE substituted at INDEX -- every other
+index's cached value (or not-yet-fetched status) is preserved
+unchanged. VECTOR's own ENTRIES (if any -- e.g. if VECTOR was freshly
+loaded from Git) are likewise copied, with only INDEX's own entry
+replaced by NEW-VALUE (wrapped via %PHASH-WRAP), so every other
+index's entry -- including any not-yet-resolved lazy proxy -- remains
+shared, unmodified, with VECTOR, and the result still serializes
+correctly via SERIALIZE-PERSISTENT-VECTOR (which reads ENTRIES
+exclusively, not the cache). VECTOR itself is never modified."
   (%ensure-persistent-vector-loaded vector)
   (let* ((length (persistent-vector-length vector))
+         (repository (get-repository vector))
          (old-cache (or (%persistent-vector-cache vector)
                         (make-array length :initial-element +persistent-vector-unloaded+)))
          (new-cache (copy-seq old-cache))
+         (index-string (princ-to-string index))
+         (old-entries (get-entries vector))
+         (new-entries (mapcar (lambda (entry)
+                                 (if (string= (car entry) index-string)
+                                     (cons index-string (%phash-wrap repository new-value))
+                                     entry))
+                               old-entries))
          (new-vector (make-instance 'persistent-vector
-                                     :repository (get-repository vector)
+                                     :repository repository
                                      :length length
                                      :element-type (persistent-vector-element-type vector)
                                      :loaded? t
-                                     :entries (get-entries vector))))
+                                     :entries new-entries)))
     (setf (svref new-cache index) new-value)
     (setf (%persistent-vector-cache new-vector) new-cache)
     new-vector))
+
+(defun %ensure-persistent-cons-loaded (cons)
+  "Ensure CONS's PERSISTENT-CAR/PERSISTENT-CDR (and LENGTH/PROPER)
+slots are populated: first, if CONS is merely a plain, not-yet-more-
+specifically-typed GIT-TREE (as returned by PERSISTENT-VECTOR-REF or
+PERSISTENT-CAR for a bucket/pair node freshly fetched from Git, since
+neither DESERIALIZE-TREE nor INFLATE-GIT-PROXY ever distinguish a
+nested PERSISTENT-CONS from an ordinary GIT-TREE), retype it in place
+into a PERSISTENT-CONS via CHANGE-CLASS; then, if CONS is not yet
+loaded, fetch its raw tree bytes and its own \".meta\" blob via
+GIT-CAT-FILE, and populate it via DESERIALIZE-PERSISTENT-CONS.
+Returns CONS."
+  (unless (typep cons 'persistent-cons)
+    (change-class cons 'persistent-cons))
+  (unless (get-loaded? cons)
+    (let* ((repository (get-repository cons))
+           (tree-octets (git-cat-file repository (sha cons)))
+           (entries (deserialize-tree repository tree-octets))
+           (meta-entry (assoc ".meta" entries :test #'string=))
+           (meta-octets (git-cat-file repository (sha (cdr meta-entry)))))
+      (deserialize-persistent-cons cons tree-octets meta-octets)))
+  cons)
+
+(defun %phash-bucket-node-p (node)
+  "Return true if NODE is a real, non-terminal bucket-chain node (a
+PERSISTENT-CONS, or a plain GIT-TREE proxy for one not yet retyped by
+%ENSURE-PERSISTENT-CONS-LOADED), as opposed to NIL (an in-memory,
+not-yet-serialized empty tail) or the GIT-BLOB that SERIALIZE-
+PERSISTENT-CONS always writes to encode a proper list's terminal NIL
+CDR once persisted for real -- either of which marks the end of the
+chain."
+  (and node (not (typep node 'git-blob))))
 
 (defun %phash-bucket-find (bucket key test)
   "Return the dotted-pair PERSISTENT-CONS holding KEY's association
 within BUCKET (a PERSISTENT-CONS chain, or NIL for an empty bucket),
 comparing each node's own key against KEY via TEST, or NIL if KEY is
 not present."
-  (loop for node = bucket then (persistent-cdr node)
-        while node
-        do (let* ((pair (persistent-car node))
-                  (existing-key (%phash-decode (persistent-car pair))))
+  (loop for node = bucket then (persistent-cdr (%ensure-persistent-cons-loaded node))
+        while (%phash-bucket-node-p node)
+        do (let* ((pair (persistent-car (%ensure-persistent-cons-loaded node)))
+                  (existing-key (%phash-decode (persistent-car (%ensure-persistent-cons-loaded pair)))))
              (when (funcall test existing-key key)
                (return pair)))))
 
@@ -161,8 +211,9 @@ its own node is rebuilt; every node after it is shared, unmodified,
 with BUCKET."
   (labels ((walk (node)
              (cond
-               ((null node) (values nil nil))
-               (t (let* ((pair (persistent-car node))
+               ((not (%phash-bucket-node-p node)) (values nil nil))
+               (t (%ensure-persistent-cons-loaded node)
+                  (let* ((pair (%ensure-persistent-cons-loaded (persistent-car node)))
                          (existing-key (%phash-decode (persistent-car pair))))
                     (if (funcall test existing-key key)
                         (values (%make-list-node repository (%make-pair-node repository key value)
@@ -185,8 +236,9 @@ directly as the new tail); every node before it is rebuilt, and every
 node after it remains shared, unmodified, with BUCKET."
   (labels ((walk (node)
              (cond
-               ((null node) (values nil nil))
-               (t (let* ((pair (persistent-car node))
+               ((not (%phash-bucket-node-p node)) (values nil nil))
+               (t (%ensure-persistent-cons-loaded node)
+                  (let* ((pair (%ensure-persistent-cons-loaded (persistent-car node)))
                          (existing-key (%phash-decode (persistent-car pair))))
                     (if (funcall test existing-key key)
                         (values (persistent-cdr node) t)
@@ -211,9 +263,9 @@ the number of buckets (load factor > 1.0)."
          (new-bucket-count (max 1 (* old-count 2)))
          (new-buckets (%make-empty-buckets repository new-bucket-count)))
     (dotimes (i old-count)
-      (loop for node = (persistent-vector-ref old-buckets i) then (persistent-cdr node)
-            while node
-            do (let* ((pair (persistent-car node))
+      (loop for node = (persistent-vector-ref old-buckets i) then (persistent-cdr (%ensure-persistent-cons-loaded node))
+            while (%phash-bucket-node-p node)
+            do (let* ((pair (%ensure-persistent-cons-loaded (persistent-car (%ensure-persistent-cons-loaded node))))
                       (key (%phash-decode (persistent-car pair)))
                       (new-index (%phash-bucket-index key new-bucket-count))
                       (existing (persistent-vector-ref new-buckets new-index)))
