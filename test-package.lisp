@@ -37,6 +37,7 @@
                 "GIT-REPOSITORY"
                 "GET-PATHNAME"
                 "*REPOSITORY*"
+                "*GIT-TRANSACTION*"
                 "GET-BRANCH"
                 "GET-MODE"
                 "CALL-WITH-REPOSITORY"

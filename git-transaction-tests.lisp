@@ -254,3 +254,22 @@ immediately and unwinds so any subsequent code in RECEIVER never runs."
                                                 (declare (ignore head))
                                                 (commit-git-transaction
                                                  tx (make-instance 'git-tree :repository +repo-path+ :entries '()))))))))
+
+(test star-git-transaction-is-unbound-outside-call-with-git-transaction
+  "*GIT-TRANSACTION* is unbound at the top level, outside the
+dynamic extent of any CALL-WITH-GIT-TRANSACTION call."
+  (is (not (boundp '*git-transaction*))))
+
+(test call-with-git-transaction-binds-star-git-transaction-to-the-same-instance
+  "CALL-WITH-GIT-TRANSACTION dynamically binds *GIT-TRANSACTION* to
+the exact GIT-TRANSACTION passed to RECEIVER, for the duration of
+the call, and *GIT-TRANSACTION* reverts to unbound once the call
+returns."
+  (let ((repository (%make-test-repository :read-write)))
+    (with-fake-head-resolution ()
+      (call-with-git-transaction repository :read-only
+                                  :receiver (lambda (tx head)
+                                              (declare (ignore head))
+                                              (is (eq tx *git-transaction*))
+                                              (abort-git-transaction tx)))))
+  (is (not (boundp '*git-transaction*))))

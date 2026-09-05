@@ -27,6 +27,24 @@
 ;;; prototype transaction system in githack.lisp (predating the
 ;;; GIT-OBJECT proxy layer) that is still exercised by tests.lisp.
 
+;;; *GIT-TRANSACTION* is the GIT-TRANSACTION currently in dynamic
+;;; scope, bound by CALL-WITH-GIT-TRANSACTION around its call to
+;;; RECEIVER. It is unbound at the top level -- referencing it
+;;; outside the dynamic extent of a CALL-WITH-GIT-TRANSACTION call
+;;; signals UNBOUND-VARIABLE.
+(defvar *git-transaction*)
+
+;; DEFVAR's own DOCUMENTATION argument cannot be supplied without
+;; also supplying an INITIAL-VALUE (which would leave
+;; *GIT-TRANSACTION* bound instead of unbound by default), so its
+;; docstring is attached separately here via (SETF DOCUMENTATION).
+(setf (documentation '*git-transaction* 'variable)
+      "The GIT-TRANSACTION currently in dynamic scope, dynamically
+bound by CALL-WITH-GIT-TRANSACTION to the GIT-TRANSACTION it
+constructs, for the duration of its call to RECEIVER. Unbound at the
+top level -- referencing it outside the dynamic extent of a
+CALL-WITH-GIT-TRANSACTION call signals UNBOUND-VARIABLE.")
+
 (defclass git-transaction ()
   ((git-repository
     :initarg :git-repository
@@ -190,7 +208,8 @@ INFLATE-GIT-PROXY) and, unless PARENTS is supplied, defaults PARENTS
 to a list of just that head commit -- or to the empty list if BRANCH
 does not exist yet (an empty repository, awaiting its initial
 commit), in which case HEAD-COMMIT is NIL. Invokes (FUNCALL RECEIVER
-TRANSACTION HEAD-COMMIT). RECEIVER may call RESOLVE-COMMIT-ROOT on
+TRANSACTION HEAD-COMMIT), with *GIT-TRANSACTION* dynamically bound
+to TRANSACTION for the duration of that call. RECEIVER may call RESOLVE-COMMIT-ROOT on
 HEAD-COMMIT to transparently retrieve its logical root object,
 whether that root is a GIT-TREE or (having been auto-wrapped by a
 prior commit) a bare atomic GIT-BLOB.
@@ -229,12 +248,13 @@ Returns TRANSACTION."
                                       :committer final-committer
                                       :message final-message
                                       :parents final-parents)))
-    (let ((root (catch 'git-transaction-exit
-                  (funcall receiver transaction head-commit))))
-      (when (eq (get-status transaction) :active)
-        (when (eq mode :read-write)
-          (%commit-git-transaction-now transaction root))
-        (setf (get-status transaction) :committed)))
+    (let ((*git-transaction* transaction))
+      (let ((root (catch 'git-transaction-exit
+                    (funcall receiver transaction head-commit))))
+        (when (eq (get-status transaction) :active)
+          (when (eq mode :read-write)
+            (%commit-git-transaction-now transaction root))
+          (setf (get-status transaction) :committed))))
     transaction))
 
 (defmacro with-git-transaction ((transaction-var head-commit-var) (repository mode &key branch author committer message parents) &body body)
