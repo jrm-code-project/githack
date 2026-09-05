@@ -257,6 +257,52 @@ paths.
 
 ---
 
+## Suggested order of remediation
+
+Priority alone (P0-P3) says *how much it matters*; this section says *what
+order to actually do the work in*, accounting for which items block or
+cheaply set up others. Numbers refer back to the item numbers above.
+
+1. **#2 (rewrite README.md/GEMINI.md)** — do this first, and by itself.
+   It's pure documentation, has zero interaction with any other item, costs
+   nothing to get wrong, and every other change below reads a lot easier
+   once the docs describe the architecture that actually exists.
+2. **#1 (optimistic-concurrency check on branch updates)** — the single
+   highest-impact correctness fix, and it's self-contained (touches
+   `update-branch`/`call-with-git-transaction` only). Do this next, before
+   anything that adds more callers of the transaction path (like #6's
+   validation work), so those new call sites inherit the safe behavior for
+   free instead of needing a follow-up pass.
+3. **#4 (custom condition hierarchy)** — do this before #6 and #5, not
+   after. Both of those items are about signaling *more* errors in *more*
+   places; introducing the condition types first means the validation work
+   in #6 and the new tests in #5 are written once, against the final
+   condition classes, instead of being written against bare `CL:ERROR` and
+   then re-touched later.
+4. **#6 (input validation on public entry points)** and **#5 (git-io-tests.lisp)**
+   — do these together, in either order; they're independent of each other
+   but both consume the condition hierarchy from #4. #5 in particular
+   should also directly exercise the retry/conflict condition added in #1.
+5. **#3 (batch/cache Git subprocess calls)** — deliberately sequenced after
+   #1, #4, #5, and #6. It's the largest, riskiest, most invasive change in
+   this document (a new long-lived-process protocol underneath
+   `git-io.lisp`), and it is much safer to attempt once the transaction
+   layer above it already has conflict detection (#1), a real condition
+   hierarchy to report subprocess failures through (#4), and direct test
+   coverage of the current one-shot-process behavior (#5) to diff against.
+6. **#7 (docstrings on generated `define-persistent-struct` APIs)** and
+   **#8 (mechanical exported-symbol documentation check)** — do these
+   together: write the #8 test first (it will immediately fail and enumerate
+   every gap, including #7's), then fix #7 until #8 passes. Cheap, low-risk,
+   no dependency on anything above.
+7. **#9 (rename leftover `-etypecase` function names)** and **#10/#11/#12**
+   (concurrency-policy docs, `git` PATH sanity check, pathname-portability
+   tests) — lowest priority; pick these up opportunistically whenever
+   another change already has you touching the same file, rather than as
+   dedicated work.
+
+---
+
 ## Explicitly *not* debt (verified, no action needed)
 
 - **Old prototype system removal**: `githack.lisp`, `tests.lisp`, all
