@@ -138,3 +138,24 @@ object, EQ, rather than attempting to decode it as an atom."
          (table (phash-make :repository :dummy-repo :size 4))
          (table2 (phash-put :nested nested table)))
     (is (eq nested (phash-get :nested table2)))))
+
+(test phash-map-visits-every-association-exactly-once
+  "PHASH-MAP calls its FUNCTION once per association currently in
+TABLE, each time with that association's own (already-decoded) KEY
+and VALUE, regardless of how many buckets those associations happen
+to land in."
+  (let ((table (phash-make :repository :dummy-repo :size 2))
+        (seen '()))
+    (dotimes (i 5)
+      (setf table (phash-put i (* i i) table)))
+    (phash-map (lambda (key value) (push (cons key value) seen)) table)
+    (is (= 5 (length seen)))
+    (dotimes (i 5)
+      (is (= (* i i) (cdr (assoc i seen)))))))
+
+(test phash-map-on-empty-table-calls-function-zero-times
+  "PHASH-MAP on a table with no associations never calls FUNCTION."
+  (let ((table (phash-make :repository :dummy-repo :size 4))
+        (calls 0))
+    (phash-map (lambda (key value) (declare (ignore key value)) (incf calls)) table)
+    (is (= 0 calls))))

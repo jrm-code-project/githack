@@ -109,6 +109,7 @@
                 "PHASH-GET"
                 "PHASH-PUT"
                 "PHASH-REMOVE"
+                "PHASH-MAP"
                 "CONCURRENT-MODIFICATION-ERROR"
                 "GET-EXPECTED-SHA"
                 "GET-NEW-SHA"

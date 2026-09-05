@@ -22,6 +22,7 @@
                 "PHASH-GET"
                 "PHASH-PUT"
                 "PHASH-REMOVE"
+                "PHASH-MAP"
                 "DESERIALIZE-PERSISTENT-OBJECT"
                 "WITH-REPOSITORY"
                 "WITH-TRANSACTION")
@@ -29,6 +30,7 @@
            "ENSURE-LIBRARY-INITIALIZED"
            "ADD-BOOK"
            "CHECKOUT-BOOK"
+           "LIST-BOOKS"
            "POPULATE-SATIRICAL-LIBRARY"))
 
 (in-package "GITHACK-EXAMPLE-LIBRARY")
@@ -152,6 +154,27 @@ catalog."
                                                     :checked-out-p t))
                    (catalog (phash-put isbn checked-out-book (library-catalog library))))
               (make-instance 'library :repository repository-path :catalog catalog))))))))
+
+(defun list-books ()
+  "Return a fresh list of every BOOK currently in the \"database-
+example\" branch's LIBRARY catalog, each a live, fully-typed BOOK
+instance (via %RESOLVE-PERSISTENT-OBJECT), in an unspecified order.
+Returns NIL if the library has never been initialized (see ENSURE-
+LIBRARY-INITIALIZED) or its catalog is empty. Reads via a :READ-ONLY
+transaction, so this never writes a commit -- calling it repeatedly,
+even concurrently with writers, is always safe."
+  (let ((repository-path (get-githack-repo-path))
+        (books '()))
+    (with-repository (repository) (repository-path :mode :read-only)
+      (with-transaction (value) (repository :read-only :branch +library-branch+)
+        (let ((library (%resolve-persistent-object value)))
+          (when library
+            (phash-map (lambda (isbn raw-book)
+                         (declare (ignore isbn))
+                         (push (%resolve-persistent-object raw-book) books))
+                       (library-catalog library)))
+          value)))
+    books))
 
 ;;; --- Satirical seed data ---------------------------------------------
 

@@ -357,3 +357,21 @@ unaffected; or TABLE itself, unchanged, if KEY is not present."
                          :test (persistent-hash-table-test table)
                          :count (1- (persistent-hash-table-count table))
                          :buckets (%persistent-vector-copy-with buckets index new-bucket))))))
+
+(defun phash-map (function table)
+  "Call FUNCTION with two arguments -- KEY and VALUE, each already
+decoded via %PHASH-DECODE exactly as PHASH-GET would return them --
+once for every association currently in TABLE, in an unspecified
+order. Returns NIL. Purely a read: TABLE itself is never modified,
+and no bucket-chain node visited is retyped/loaded any differently
+than PHASH-GET's own traversal already would."
+  (let* ((buckets (persistent-hash-table-buckets table))
+         (bucket-count (persistent-vector-length (%ensure-persistent-vector-loaded buckets))))
+    (dotimes (i bucket-count)
+      (loop for node = (persistent-vector-ref buckets i) then (persistent-cdr (%ensure-persistent-cons-loaded node))
+            while (%phash-bucket-node-p node)
+            do (let* ((pair (%ensure-persistent-cons-loaded (persistent-car (%ensure-persistent-cons-loaded node))))
+                      (key (%phash-decode (persistent-car pair)))
+                      (value (%phash-decode (persistent-cdr pair))))
+                 (funcall function key value))))
+    nil))
