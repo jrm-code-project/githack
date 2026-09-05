@@ -239,6 +239,30 @@ of an ETYPECASE clause."))
           (git-hash-object (get-repository value) "blob"
                             (serialize-atom (get-payload value))))))
 
+;;; PERSISTENT-CONS.LISP and PERSISTENT-VECTOR.LISP each define their
+;;; own analogous %PERSIST-CONS-COMPONENT-BY-TYPE/%PERSIST-VECTOR-
+;;; COMPONENT-BY-TYPE generic function, with methods for every
+;;; concrete GIT-OBJECT type they knew about at the time -- but
+;;; neither file can add a method specializing on PERSISTENT-OBJECT
+;;; itself, since PERSISTENT-OBJECT is defined here, in
+;;; PERSISTENT-STANDARD-CLASS.LISP, which loads AFTER both (it
+;;; depends on them, not the other way around -- see githack.asd).
+;;; Without these two methods, storing a PERSISTENT-OBJECT (e.g. a
+;;; DEFINE-PERSISTENT-STRUCT instance) as a raw CAR/CDR of a
+;;; PERSISTENT-CONS, or as an element of a PERSISTENT-VECTOR (and so,
+;;; transitively, as a value inside a PERSISTENT-HASH-TABLE, which is
+;;; built from both), would silently fall through to each generic
+;;; function's plain GIT-TREE method instead -- persisting only its
+;;; (at that point still-empty) ENTRIES slot via a bare SERIALIZE-TREE
+;;; call, entirely skipping SERIALIZE-PERSISTENT-OBJECT and so never
+;;; writing the \".meta\" entry DESERIALIZE-PERSISTENT-OBJECT requires
+;;; to reconstruct the object's real class later.
+(defmethod %persist-cons-component-by-type ((git-object persistent-object))
+  (serialize-persistent-object git-object))
+
+(defmethod %persist-vector-component-by-type ((git-object persistent-object))
+  (serialize-persistent-object git-object))
+
 (defun %persist-object-component (value repository)
   "Return the persisted GIT-OBJECT proxy for VALUE: if VALUE is
 already a GIT-OBJECT (a GIT-BLOB, plain GIT-TREE, PERSISTENT-CONS,

@@ -390,3 +390,37 @@ transaction has committed."
         (is (eq :committed (get-status transaction)))
         (is (eq t lock-held-during-receiver))
         (is (not (probe-file (%transaction-lock-pathname git-dir))))))))
+
+(test call-with-git-transaction-creates-an-orphan-root-commit-for-a-brand-new-branch
+  "The very first CALL-WITH-GIT-TRANSACTION against a branch name
+that does not exist yet produces a genuine orphan root commit: its
+real, raw Git object text (fetched via `git cat-file -p`, bypassing
+GitHack's own read path entirely) has no \"parent\" header line at
+all, and the branch's ref did not exist before this transaction
+created it -- exercising the same HEAD-COMMIT-is-NIL /
+EXPECTED-BRANCH-SHA-is-NIL path GITHACK-EXAMPLE-LIBRARY's
+ENSURE-LIBRARY-INITIALIZED relies on for the \"database-example\"
+branch."
+  (with-temporary-git-repository (git-dir)
+    (is (null (git-show-ref-sha git-dir "orphan-example")))
+    (let ((repository (make-instance 'git-repository
+                                      :pathname git-dir
+                                      :branch "orphan-example"
+                                      :author "The Boss <boss@githack.local>"
+                                      :committer "The Boss <boss@githack.local>"
+                                      :message "first commit"
+                                      :mode :read-write)))
+      (let ((transaction
+              (call-with-git-transaction repository :read-write
+                                          :receiver (lambda (tx head)
+                                                      (declare (ignore tx head))
+                                                      (make-instance 'git-tree :repository git-dir :entries '())))))
+        (is (eq :committed (get-status transaction)))
+        (let* ((commit-sha (git-show-ref-sha git-dir "orphan-example"))
+               (raw-commit-text
+                 (uiop:run-program (list "git" (format nil "--git-dir=~A" (uiop:native-namestring git-dir))
+                                          "cat-file" "-p" commit-sha)
+                                    :output :string)))
+          (is (not (null commit-sha)))
+          (is (not (search "parent " raw-commit-text))))))))
+

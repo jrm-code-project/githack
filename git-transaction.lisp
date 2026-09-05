@@ -302,6 +302,19 @@ some other writer already advanced BRANCH-NAME between this
 attempt's read and its commit. Returns the resulting GIT-TRANSACTION."
   (let* ((target-branch (resolve-branch (get-pathname repository) branch-name :if-does-not-exist nil))
          (head-commit (get-target target-branch))
+         ;; ORPHAN-COMMIT GUARANTEE: if BRANCH-NAME does not exist yet,
+         ;; RESOLVE-BRANCH (called with :IF-DOES-NOT-EXIST NIL above)
+         ;; returns a GIT-BRANCH whose TARGET is NIL, so HEAD-COMMIT is
+         ;; NIL here. FINAL-PARENTS then defaults to the empty list --
+         ;; SERIALIZE-COMMIT (git-commit.lisp) therefore emits no
+         ;; "parent" header line at all, producing a genuine orphan root
+         ;; commit -- and EXPECTED-BRANCH-SHA below is likewise NIL,
+         ;; which UPDATE-BRANCH/GIT-UPDATE-REF (git-branch.lisp) pass to
+         ;; `git update-ref` as an empty old-value argument, Git's own
+         ;; convention (equivalent to the all-zeroes SHA) for "this ref
+         ;; must not already exist" -- so a concurrently-created branch
+         ;; is still caught as a CONCURRENT-MODIFICATION-ERROR rather
+         ;; than silently clobbered.
          (final-parents (or parents (and head-commit (list head-commit))))
          (transaction (make-instance 'git-transaction
                                       :git-repository repository

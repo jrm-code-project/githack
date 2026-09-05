@@ -38,6 +38,12 @@
                (:file "transaction"
                 :depends-on ("git-object" "git-blob" "git-io" "atomic-wrapper" "git-transaction" "git-repository" "package"))))
 
+(defsystem "githack/example"
+  :description "Self-hosting persistent library example."
+  :depends-on ("githack")
+  :components ((:module "examples"
+                :components ((:file "library")))))
+
 (defsystem "githack/test"
   :description "FiveAM test suite for GitHack."
   :depends-on ("githack" "fiveam")

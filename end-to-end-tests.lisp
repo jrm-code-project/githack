@@ -264,3 +264,39 @@ transaction -- and correctly reports a missing key as absent."
            (multiple-value-bind (v found?) (phash-get "three" table) (is (eql 3 v)) (is (eq t found?)))
            (multiple-value-bind (v found?) (phash-get "missing" table 'default) (is (eq 'default v)) (is (eq nil found?))))
          value)))))
+
+(test end-to-end-persistent-hash-table-round-trips-a-nested-persistent-object-value
+  "A PERSISTENT-HASH-TABLE whose VALUEs are themselves nested
+PERSISTENT-OBJECT instances (a STRUCT-WIDGET, stored via a
+PERSISTENT-CONS collision chain inside the table's PERSISTENT-VECTOR
+of buckets) round-trips correctly through a real transaction:
+PHASH-GET, against a fresh DESERIALIZE-PERSISTENT-OBJECT instance in
+a second, independent transaction, must itself be
+DESERIALIZE-PERSISTENT-OBJECT'd again to recover the nested
+STRUCT-WIDGET's own slots -- exercising %PERSIST-CONS-COMPONENT-BY-
+TYPE/%PERSIST-VECTOR-COMPONENT-BY-TYPE's PERSISTENT-OBJECT methods
+(persistent-standard-class.lisp), without which the nested value
+would silently lose its \".meta\" entry and so its real class on
+read-back."
+  (with-temporary-git-repository (repository-path)
+    (call-with-repository
+     repository-path
+     :branch "main" :author +e2e-author+ :message "hash-table-nested-object" :mode :read-write
+     :receiver
+     (lambda (repository)
+       (with-transaction (value) (repository :read-write)
+         (declare (ignore value))
+         (let* ((widget (make-instance 'struct-widget :repository repository-path
+                                        :id 7 :name "Widget-7" :serial-number 12345))
+                (table (phash-make :repository repository-path :test 'equal)))
+           (phash-put "widget" widget table)))
+       (with-transaction (value) (repository :read-write)
+         (let* ((table (deserialize-persistent-object value)))
+           (multiple-value-bind (raw-widget found?) (phash-get "widget" table)
+             (is (eq t found?))
+             (let ((widget (deserialize-persistent-object raw-widget)))
+               (is (struct-widget-p widget))
+               (is (= 7 (sw-id widget)))
+               (is (string= "Widget-7" (sw-name widget)))
+               (is (= 12345 (sw-serial-number widget))))))
+         value)))))
