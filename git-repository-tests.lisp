@@ -55,3 +55,17 @@ the supplied defaults, and passes it to RECEIVER."
           (call-with-repository +repo-path+
                                  :author "The Boss <boss@githack.local>"
                                  :receiver (lambda (repository) (declare (ignore repository)) :the-receivers-value)))))
+
+(test star-repository-is-unbound-outside-call-with-repository
+  "*REPOSITORY* is unbound at the top level, outside the dynamic
+extent of any CALL-WITH-REPOSITORY call."
+  (is (not (boundp '*repository*))))
+
+(test call-with-repository-binds-star-repository-to-the-same-instance
+  "CALL-WITH-REPOSITORY dynamically binds *REPOSITORY* to the exact
+GIT-REPOSITORY instance passed to RECEIVER, for the duration of the
+call, and *REPOSITORY* reverts to unbound once the call returns."
+  (call-with-repository +repo-path+
+                         :author "The Boss <boss@githack.local>"
+                         :receiver (lambda (repository) (is (eq repository *repository*))))
+  (is (not (boundp '*repository*))))

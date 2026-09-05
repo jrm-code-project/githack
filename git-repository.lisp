@@ -2,6 +2,13 @@
 
 (in-package "GITHACK")
 
+;;; *REPOSITORY* is the GIT-REPOSITORY context object currently in
+;;; dynamic scope, bound by CALL-WITH-REPOSITORY around its call to
+;;; RECEIVER. It is unbound at the top level -- referencing it
+;;; outside the dynamic extent of a CALL-WITH-REPOSITORY call signals
+;;; UNBOUND-VARIABLE.
+(defvar *repository*)
+
 ;;; GIT-REPOSITORY is a lightweight context object: it bundles a Git
 ;;; repository's on-disk location (its --git-dir PATHNAME) together
 ;;; with the cascading defaults (BRANCH, AUTHOR, COMMITTER, MESSAGE,
@@ -61,9 +68,10 @@ See CALL-WITH-GIT-REPOSITORY."))
   "Instantiate a GIT-REPOSITORY naming the Git directory
 REPOSITORY-SPECIFIER, holding BRANCH, AUTHOR, COMMITTER, MESSAGE,
 and MODE as the cascading defaults later GIT-TRANSACTIONs inherit,
-then invoke RECEIVER with that GIT-REPOSITORY. COMMITTER defaults to
-AUTHOR when not explicitly supplied. Returns whatever RECEIVER
-returns."
+then invoke RECEIVER with that GIT-REPOSITORY, with *REPOSITORY*
+dynamically bound to it for the duration of the call. COMMITTER
+defaults to AUTHOR when not explicitly supplied. Returns whatever
+RECEIVER returns."
   (declare (ignore defaults))
   (let ((repository (make-instance 'git-repository
                                     :pathname repository-specifier
@@ -72,4 +80,5 @@ returns."
                                     :committer (or committer author)
                                     :message message
                                     :mode mode)))
-    (funcall receiver repository)))
+    (let ((*repository* repository))
+      (funcall receiver repository))))

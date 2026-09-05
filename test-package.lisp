@@ -36,6 +36,7 @@
                 "UPDATE-BRANCH"
                 "GIT-REPOSITORY"
                 "GET-PATHNAME"
+                "*REPOSITORY*"
                 "GET-BRANCH"
                 "GET-MODE"
                 "CALL-WITH-REPOSITORY"
