@@ -97,14 +97,15 @@ own SHA."
 
 (defun %persist-git-object (git-object)
   "Ensure GIT-OBJECT (a GIT-BLOB, GIT-TREE, PERSISTENT-CONS,
-PERSISTENT-VECTOR, or PERSISTENT-ARRAY) has a SHA, persisting it
-(and, for a GIT-TREE, PERSISTENT-CONS, PERSISTENT-VECTOR, or
-PERSISTENT-ARRAY, its children) to Git's object database if it does
-not already. Returns GIT-OBJECT's SHA. Objects that already have a
-SHA are assumed already present in Git's object database and are
-left untouched."
+PERSISTENT-VECTOR, PERSISTENT-ARRAY, or PERSISTENT-OBJECT) has a
+SHA, persisting it (and, for a GIT-TREE, PERSISTENT-CONS,
+PERSISTENT-VECTOR, PERSISTENT-ARRAY, or PERSISTENT-OBJECT, its
+children) to Git's object database if it does not already. Returns
+GIT-OBJECT's SHA. Objects that already have a SHA are assumed
+already present in Git's object database and are left untouched."
   (or (sha git-object)
       (etypecase git-object
+        (persistent-object (serialize-persistent-object git-object))
         (persistent-cons (serialize-persistent-cons git-object))
         (persistent-vector (serialize-persistent-vector git-object))
         (persistent-array (serialize-persistent-array git-object))
