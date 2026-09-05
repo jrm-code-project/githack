@@ -13,7 +13,7 @@
                (:file "git-tree" :depends-on ("git-object" "conditions" "package"))
                (:file "git-commit" :depends-on ("git-object" "conditions" "package"))
                (:file "git-branch" :depends-on ("git-object" "conditions" "package"))
-               (:file "git-repository" :depends-on ("package"))
+               (:file "git-repository" :depends-on ("conditions" "package"))
                (:file "persistent-cons"
                 :depends-on ("git-object" "git-blob" "git-tree" "git-io" "conditions" "package"))
                (:file "atomic-wrapper"
@@ -44,6 +44,7 @@
   :components ((:file "test-package")
                (:file "test-helpers" :depends-on ("test-package"))
                (:file "git-object-tests" :depends-on ("test-package" "test-helpers"))
+               (:file "git-io-tests" :depends-on ("test-package" "test-helpers"))
                (:file "atom-serialization-tests" :depends-on ("test-package"))
                (:file "git-tree-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-commit-tests" :depends-on ("test-package" "test-helpers"))

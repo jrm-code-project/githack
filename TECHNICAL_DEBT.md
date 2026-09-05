@@ -95,46 +95,39 @@ Test-only call sites simulating arbitrary failures (in `test-helpers.lisp`
 and various `*-tests.lisp` files) were deliberately left as plain `cl:error`,
 since they are not part of GitHack's own public API surface.
 
-### 5. No test file for `git-io.lisp` (Medium)
+### 5. No test file for `git-io.lisp` (Resolved)
 
-`githack.asd` registers a `git-io` component but there is no
-`git-io-tests.lisp` in either the main or `/test` subsystem:
+**Resolved:** `git-io-tests.lisp` now exercises `git-hash-object`/`git-type`/
+`git-cat-file` against a real, temporary, bare Git repository (via
+`with-temporary-git-repository`, genuinely shelling out to `git`, not the
+`with-fake-git-*`/`with-recording-git-*` fixtures used elsewhere). It covers
+a blob round-trip, `git-type` correctly distinguishing blob/tree/commit,
+binary/non-UTF-8-safe content round-tripping through `git-cat-file`,
+subprocess non-zero exit-status propagation as a Lisp error for both
+`git-type` and `git-cat-file` on a nonexistent SHA and for `git-hash-object`
+given an invalid object type, and that both `git-hash-object` and
+`git-cat-file` clean up their own temporary files (via `unwind-protect`)
+even when the underlying `git` subprocess itself fails.
 
-- `githack.asd:7-37` (main system file list — no `git-io-tests`)
-- `githack.asd:43-63` (test system file list — no `git-io-tests`)
+### 6. Minimal input validation on public entry points (Resolved)
 
-`git-io.lisp`'s behavior is only exercised indirectly, through fakes
-(`test-helpers.lisp:107-216`) and the end-to-end suite
-(`end-to-end-tests.lisp:58-246`). Untested directly: subprocess non-zero
-exit-status handling, a missing `git` executable, non-UTF-8/malformed
-subprocess output, and temp-file cleanup when a subprocess fails partway.
-
-**Suggested fix:** add a `git-io-tests.lisp` exercising `git-hash-object`/
-`git-type`/`git-cat-file` against a real temporary repository (as
-`end-to-end-tests.lisp` already does elsewhere), including at least one
-test per failure mode above.
-
-### 6. Minimal input validation on public entry points (Medium)
-
-Several widely-used constructors accept structurally invalid input without
-complaint, deferring failure to a much later, harder-to-diagnose point:
-
-- `persistent-hash-table.lisp:278-288` (`phash-make`'s `SIZE` is not
-  validated; a zero or negative size can surface later as a division/mod
-  error inside `%phash-hash`, `persistent-hash-table.lisp:68-72`)
-- `persistent-hash-table.lisp:43-52` (`%normalize-hash-test` accepts any
-  symbol without checking it names a callable two-argument predicate;
-  failure surfaces later via a generic undefined-function error from
-  `fdefinition`)
-- `git-repository.lisp:83-103` (`call-with-repository` does not validate
-  its `repository-specifier` pathname, `mode`, or that `receiver` is a
-  callable)
-- `git-transaction.lisp:271-273` (`call-with-git-transaction` validates only
-  the read-only/read-write combination — not branch-name shape, missing
-  receiver, etc.)
-
-**Suggested fix:** add `check-type`/explicit validation at these
-boundaries, ideally signaling the new condition types from item #4.
+**Resolved:** `phash-make` now signals `invalid-argument-error` if `size`
+is not a positive integer, and `%normalize-hash-test`'s symbol method now
+signals `invalid-argument-error` if `test` does not name a callable
+function (both previously deferred failure to a much later, harder-to-
+diagnose point -- a division/mod error inside `%phash-hash`, or an
+undefined-function error from `fdefinition`, respectively).
+`call-with-repository` now signals `invalid-argument-error` for a `nil`
+`repository-specifier`, a `mode` other than `:read-only`/`:read-write`, or
+a `receiver` that is not a callable function. `call-with-git-transaction`
+now signals `invalid-argument-error` for a `repository` that is not a
+`git-repository`, an invalid `mode`, a non-callable `receiver`, or an
+effective `branch` name (after cascading from the repository's own
+default) that is not a non-empty string, in addition to its pre-existing
+`transaction-state-error` for a `:read-write` transaction against a
+`:read-only` repository. All four validations are covered by new tests in
+`git-repository-tests.lisp`, `git-transaction-tests.lisp`, and
+`persistent-hash-table-tests.lisp`.
 
 ---
 

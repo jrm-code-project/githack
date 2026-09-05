@@ -18,6 +18,21 @@ requested SIZE."
     (is (eq 'eql (persistent-hash-table-test table)))
     (is (= 4 (persistent-vector-length (persistent-hash-table-buckets table))))))
 
+(test phash-make-signals-error-for-non-positive-size
+  "PHASH-MAKE rejects a SIZE that is not a positive integer, rather
+than deferring failure to a later division/mod error inside
+%PHASH-HASH."
+  (signals invalid-argument-error (phash-make :repository :dummy-repo :size 0))
+  (signals invalid-argument-error (phash-make :repository :dummy-repo :size -1))
+  (signals invalid-argument-error (phash-make :repository :dummy-repo :size "4")))
+
+(test phash-make-signals-error-for-test-not-naming-a-function
+  "PHASH-MAKE rejects a TEST symbol that does not name a callable
+function, rather than deferring failure to a later undefined-
+function error from FDEFINITION."
+  (signals invalid-argument-error
+    (phash-make :repository :dummy-repo :test '%not-a-real-function-name-at-all)))
+
 (test phash-get-on-empty-table-returns-default
   "PHASH-GET on a table with no associations returns (VALUES DEFAULT
 NIL)."

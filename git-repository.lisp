@@ -82,8 +82,21 @@ and MODE as the cascading defaults later GIT-TRANSACTIONs inherit,
 then invoke RECEIVER with that GIT-REPOSITORY, with *REPOSITORY*
 dynamically bound to it for the duration of the call. COMMITTER
 defaults to AUTHOR when not explicitly supplied. Returns whatever
-RECEIVER returns."
+RECEIVER returns. Signals INVALID-ARGUMENT-ERROR if
+REPOSITORY-SPECIFIER is NIL, if MODE is not :READ-ONLY or
+:READ-WRITE, or if RECEIVER is not a callable function."
   (declare (ignore defaults))
+  (unless repository-specifier
+    (error 'invalid-argument-error
+           :format-control "REPOSITORY-SPECIFIER must not be NIL."))
+  (unless (member mode '(:read-only :read-write))
+    (error 'invalid-argument-error
+           :format-control "MODE must be :READ-ONLY or :READ-WRITE, not ~S."
+           :format-arguments (list mode)))
+  (unless (or (functionp receiver) (and (symbolp receiver) receiver (fboundp receiver)))
+    (error 'invalid-argument-error
+           :format-control "RECEIVER must be a callable function, not ~S."
+           :format-arguments (list receiver)))
   (let ((repository (make-instance 'git-repository
                                     :pathname repository-specifier
                                     :branch branch

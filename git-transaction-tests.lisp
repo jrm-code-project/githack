@@ -38,6 +38,42 @@ GIT-BRANCH targeting the (unloaded) commit +HEAD-SHA+."
                                               (declare (ignore tx head))
                                               (error "RECEIVER should never run."))))))
 
+(test call-with-git-transaction-signals-error-for-non-git-repository
+  "CALL-WITH-GIT-TRANSACTION rejects a REPOSITORY that is not a
+GIT-REPOSITORY instance."
+  (signals invalid-argument-error
+    (call-with-git-transaction :not-a-git-repository :read-only
+                                :receiver (lambda (tx head) (declare (ignore tx head))))))
+
+(test call-with-git-transaction-signals-error-for-invalid-mode
+  "CALL-WITH-GIT-TRANSACTION rejects a MODE other than :READ-ONLY or
+:READ-WRITE."
+  (let ((repository (%make-test-repository :read-only)))
+    (signals invalid-argument-error
+      (call-with-git-transaction repository :bogus-mode
+                                  :receiver (lambda (tx head) (declare (ignore tx head)))))))
+
+(test call-with-git-transaction-signals-error-for-non-callable-receiver
+  "CALL-WITH-GIT-TRANSACTION rejects a RECEIVER that is not a
+callable function or fbound symbol."
+  (let ((repository (%make-test-repository :read-only)))
+    (signals invalid-argument-error
+      (call-with-git-transaction repository :read-only :receiver :not-a-function))))
+
+(test call-with-git-transaction-signals-error-for-empty-branch-name
+  "CALL-WITH-GIT-TRANSACTION rejects an effective BRANCH name (after
+cascading from the repository's own default) that is not a
+non-empty string."
+  (let ((repository (call-with-repository +repo-path+
+                                           :branch ""
+                                           :author "The Boss <boss@githack.local>"
+                                           :message "default message"
+                                           :mode :read-only
+                                           :receiver #'identity)))
+    (signals invalid-argument-error
+      (call-with-git-transaction repository :read-only
+                                  :receiver (lambda (tx head) (declare (ignore tx head)))))))
+
 (test call-with-git-transaction-cascades-defaults-and-resolves-head
   "BRANCH/AUTHOR/COMMITTER/MESSAGE not explicitly supplied are
 inherited from the repository, and the branch's current head is

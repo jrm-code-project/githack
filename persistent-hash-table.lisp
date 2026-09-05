@@ -43,6 +43,10 @@ unnamed function is not a serializable atom -- callers should pass a
 symbol (e.g. 'EQUAL) instead of #'EQUAL."))
 
 (defmethod %normalize-hash-test ((test symbol))
+  (unless (fboundp test)
+    (error 'invalid-argument-error
+           :format-control "TEST ~S does not name a callable function."
+           :format-arguments (list test)))
   test)
 
 (defmethod %normalize-hash-test ((test function))
@@ -286,7 +290,12 @@ the number of buckets (load factor > 1.0)."
 buckets, comparing keys via TEST (a symbol naming a two-argument
 equality predicate -- EQ, EQL, EQUAL, or EQUALP -- normalized via
 %NORMALIZE-HASH-TEST so it is always stored as a serializable
-symbol, never a raw function object)."
+symbol, never a raw function object). Signals INVALID-ARGUMENT-ERROR
+if SIZE is not a positive integer."
+  (unless (and (integerp size) (plusp size))
+    (error 'invalid-argument-error
+           :format-control "SIZE must be a positive integer, not ~S."
+           :format-arguments (list size)))
   (make-instance 'persistent-hash-table
                  :repository repository
                  :test (%normalize-hash-test test)

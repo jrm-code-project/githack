@@ -94,3 +94,22 @@ whatever BODY returns."
 supplied, exactly as CALL-WITH-REPOSITORY's own default does."
   (with-repository (repository) (+repo-path+ :author "The Boss <boss@githack.local>")
     (is (eq :read-only (get-mode repository)))))
+
+(test call-with-repository-signals-error-for-nil-repository-specifier
+  "CALL-WITH-REPOSITORY rejects a NIL REPOSITORY-SPECIFIER instead of
+silently constructing a useless GIT-REPOSITORY."
+  (signals invalid-argument-error
+    (call-with-repository nil :receiver (lambda (repository) (declare (ignore repository))))))
+
+(test call-with-repository-signals-error-for-invalid-mode
+  "CALL-WITH-REPOSITORY rejects a MODE other than :READ-ONLY or
+:READ-WRITE."
+  (signals invalid-argument-error
+    (call-with-repository +repo-path+ :mode :bogus
+                           :receiver (lambda (repository) (declare (ignore repository))))))
+
+(test call-with-repository-signals-error-for-non-callable-receiver
+  "CALL-WITH-REPOSITORY rejects a RECEIVER that is not a callable
+function or fbound symbol."
+  (signals invalid-argument-error
+    (call-with-repository +repo-path+ :receiver :not-a-function)))

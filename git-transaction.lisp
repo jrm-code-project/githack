@@ -293,8 +293,12 @@ HEAD-COMMIT to transparently retrieve its logical root object,
 whether that root is a GIT-TREE or (having been auto-wrapped by a
 prior commit) a bare atomic GIT-BLOB.
 
-Signals an error if MODE is :READ-WRITE but REPOSITORY was opened
-:READ-ONLY.
+Signals INVALID-ARGUMENT-ERROR if REPOSITORY is not a GIT-REPOSITORY,
+if MODE is not :READ-ONLY or :READ-WRITE, if RECEIVER is not a
+callable function, or if the effective BRANCH name (after cascading
+from REPOSITORY's own default) is not a non-empty string. Signals
+TRANSACTION-STATE-ERROR if MODE is :READ-WRITE but REPOSITORY was
+opened :READ-ONLY.
 
 If RECEIVER returns normally, it must return a GIT-OBJECT
 representing the desired new root state -- a GIT-TREE (or
@@ -338,6 +342,18 @@ problem -- detected via GIT-UPDATE-REF's own compare-and-swap check:
 
 Returns TRANSACTION."
   (check-type conflict-resolution (member :error :retry :lock))
+  (unless (typep repository 'git-repository)
+    (error 'invalid-argument-error
+           :format-control "REPOSITORY must be a GIT-REPOSITORY, not ~S."
+           :format-arguments (list repository)))
+  (unless (member mode '(:read-only :read-write))
+    (error 'invalid-argument-error
+           :format-control "MODE must be :READ-ONLY or :READ-WRITE, not ~S."
+           :format-arguments (list mode)))
+  (unless (or (functionp receiver) (and (symbolp receiver) receiver (fboundp receiver)))
+    (error 'invalid-argument-error
+           :format-control "RECEIVER must be a callable function, not ~S."
+           :format-arguments (list receiver)))
   (when (and (eq mode :read-write) (eq (get-mode repository) :read-only))
     (error 'transaction-state-error
            :format-control "Cannot open a :READ-WRITE transaction against a repository opened :READ-ONLY."))
@@ -345,6 +361,10 @@ Returns TRANSACTION."
          (final-author (or author (get-author repository)))
          (final-committer (or committer (get-committer repository) final-author))
          (final-message (or message (get-message repository))))
+    (unless (and (stringp branch-name) (plusp (length branch-name)))
+      (error 'invalid-argument-error
+             :format-control "BRANCH must be a non-empty string, not ~S."
+             :format-arguments (list branch-name)))
     (flet ((attempt ()
              (%call-with-git-transaction-attempt
               repository mode branch-name final-author final-committer final-message
