@@ -30,6 +30,7 @@
            "ENSURE-LIBRARY-INITIALIZED"
            "ADD-BOOK"
            "CHECKOUT-BOOK"
+           "CHECK-IN-BOOK"
            "LIST-BOOKS"
            "POPULATE-SATIRICAL-LIBRARY"))
 
@@ -127,33 +128,51 @@ then no CATALOG to add ISBN to."
                (catalog (phash-put isbn book (library-catalog library))))
           (make-instance 'library :repository repository-path :catalog catalog))))))
 
-(defun checkout-book (isbn)
-  "Mark the BOOK named ISBN in the \"database-example\" branch's
-LIBRARY catalog as checked out (CHECKED-OUT-P true), as a single real
-Git transaction (:RETRY conflict resolution). Signals an error if the
-library has never been initialized, or if ISBN is not present in its
+(defun %set-book-checked-out-p (isbn checked-out-p message)
+  "Shared implementation of CHECKOUT-BOOK/CHECK-IN-BOOK: replace the
+BOOK named ISBN in the \"database-example\" branch's LIBRARY catalog
+with an otherwise-identical copy whose CHECKED-OUT-P slot is
+CHECKED-OUT-P, as a single real Git transaction (:RETRY conflict
+resolution) committed under MESSAGE. Signals an error if the library
+has never been initialized, or if ISBN is not present in its
 catalog."
   (let ((repository-path (get-githack-repo-path)))
     (with-repository (repository) (repository-path :mode :read-write)
       (with-transaction (value) (repository :read-write
                                   :branch +library-branch+
                                   :author +library-signature+
-                                  :message (format nil "Check out book ISBN ~A." isbn)
+                                  :message message
                                   :conflict-resolution :retry)
         (let ((library (or (%resolve-persistent-object value)
-                            (error "Cannot check out ISBN ~S: the library has not been initialized yet. Call ENSURE-LIBRARY-INITIALIZED first." isbn))))
+                            (error "Cannot update ISBN ~S: the library has not been initialized yet. Call ENSURE-LIBRARY-INITIALIZED first." isbn))))
           (multiple-value-bind (raw-book found?) (phash-get isbn (library-catalog library))
             (unless found?
-              (error "Cannot check out ISBN ~S: no such book in the library's catalog." isbn))
+              (error "Cannot update ISBN ~S: no such book in the library's catalog." isbn))
             (let* ((book (%resolve-persistent-object raw-book))
-                   (checked-out-book (make-instance 'book
-                                                    :repository repository-path
-                                                    :isbn (book-isbn book)
-                                                    :title (book-title book)
-                                                    :author (book-author book)
-                                                    :checked-out-p t))
-                   (catalog (phash-put isbn checked-out-book (library-catalog library))))
+                   (updated-book (make-instance 'book
+                                                :repository repository-path
+                                                :isbn (book-isbn book)
+                                                :title (book-title book)
+                                                :author (book-author book)
+                                                :checked-out-p checked-out-p))
+                   (catalog (phash-put isbn updated-book (library-catalog library))))
               (make-instance 'library :repository repository-path :catalog catalog))))))))
+
+(defun checkout-book (isbn)
+  "Mark the BOOK named ISBN in the \"database-example\" branch's
+LIBRARY catalog as checked out (CHECKED-OUT-P true), as a single real
+Git transaction (:RETRY conflict resolution). Signals an error if the
+library has never been initialized, or if ISBN is not present in its
+catalog."
+  (%set-book-checked-out-p isbn t (format nil "Check out book ISBN ~A." isbn)))
+
+(defun check-in-book (isbn)
+  "Mark the BOOK named ISBN in the \"database-example\" branch's
+LIBRARY catalog as checked in (CHECKED-OUT-P false), as a single real
+Git transaction (:RETRY conflict resolution). Signals an error if the
+library has never been initialized, or if ISBN is not present in its
+catalog."
+  (%set-book-checked-out-p isbn nil (format nil "Check in book ISBN ~A." isbn)))
 
 (defun list-books ()
   "Return a fresh list of every BOOK currently in the \"database-
