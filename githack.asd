@@ -17,9 +17,11 @@
                 :depends-on ("git-object" "git-blob" "git-tree" "git-io" "package"))
                (:file "atomic-wrapper"
                 :depends-on ("git-object" "git-blob" "git-tree" "git-commit" "git-io" "package"))
+               (:file "persistent-vector"
+                :depends-on ("git-object" "git-blob" "git-tree" "git-io" "atomic-wrapper" "persistent-cons" "package"))
                (:file "git-transaction"
                 :depends-on ("git-object" "git-tree" "git-commit" "git-branch" "git-repository"
-                              "git-io" "persistent-cons" "atomic-wrapper" "package"))
+                              "git-io" "persistent-cons" "persistent-vector" "atomic-wrapper" "package"))
                (:file "transaction"
                 :depends-on ("git-object" "git-blob" "git-io" "atomic-wrapper" "git-transaction" "git-repository" "package"))))
 
@@ -36,6 +38,7 @@
                (:file "git-repository-tests" :depends-on ("test-package" "test-helpers"))
                (:file "persistent-cons-tests" :depends-on ("test-package" "test-helpers"))
                (:file "atomic-wrapper-tests" :depends-on ("test-package" "test-helpers"))
+               (:file "persistent-vector-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-transaction-tests" :depends-on ("test-package" "test-helpers"))
                (:file "transaction-tests" :depends-on ("test-package" "test-helpers")))
   :perform (test-op (op c)

@@ -28,15 +28,9 @@
 ;;; ATOMIC-WRAPPER-TREE as needed), creates the new commit, and
 ;;; advances the branch -- exactly as it would for any other caller.
 
-(defun %ensure-blob-loaded (blob)
-  "Ensure BLOB's PAYLOAD slot is populated, fetching and decoding its
-raw Git blob bytes via GIT-CAT-FILE and DESERIALIZE-ATOM if BLOB is
-not already loaded. Returns BLOB."
-  (unless (get-loaded? blob)
-    (setf (get-payload blob)
-          (deserialize-atom (git-cat-file (get-repository blob) (sha blob))))
-    (setf (get-loaded? blob) t))
-  blob)
+;;; %ENSURE-BLOB-LOADED now lives in atomic-wrapper.lisp, alongside
+;;; %ENSURE-TREE-ENTRIES-LOADED/%ENSURE-COMMIT-LOADED, so that
+;;; PERSISTENT-VECTOR's own lazy accessor can share it too.
 
 (defun %transaction-read-value (head-commit)
   "Return the plain Lisp value CALL-WITH-TRANSACTION's RECEIVER

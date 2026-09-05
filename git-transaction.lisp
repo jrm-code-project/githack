@@ -96,14 +96,16 @@ own SHA."
               (git-hash-object (get-repository tree) "tree" (serialize-tree tree))))))
 
 (defun %persist-git-object (git-object)
-  "Ensure GIT-OBJECT (a GIT-BLOB, GIT-TREE, or PERSISTENT-CONS) has
-a SHA, persisting it (and, for a GIT-TREE or PERSISTENT-CONS, its
-children) to Git's object database if it does not already. Returns
-GIT-OBJECT's SHA. Objects that already have a SHA are assumed
-already present in Git's object database and are left untouched."
+  "Ensure GIT-OBJECT (a GIT-BLOB, GIT-TREE, PERSISTENT-CONS, or
+PERSISTENT-VECTOR) has a SHA, persisting it (and, for a GIT-TREE,
+PERSISTENT-CONS, or PERSISTENT-VECTOR, its children) to Git's object
+database if it does not already. Returns GIT-OBJECT's SHA. Objects
+that already have a SHA are assumed already present in Git's object
+database and are left untouched."
   (or (sha git-object)
       (etypecase git-object
         (persistent-cons (serialize-persistent-cons git-object))
+        (persistent-vector (serialize-persistent-vector git-object))
         (git-tree (%persist-git-tree-object git-object))
         (git-blob
          (setf (sha git-object)

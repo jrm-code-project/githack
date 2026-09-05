@@ -61,6 +61,16 @@ already loaded. Returns TREE."
     (setf (get-loaded? tree) t))
   tree)
 
+(defun %ensure-blob-loaded (blob)
+  "Ensure BLOB's PAYLOAD slot is populated, fetching and decoding its
+raw Git blob bytes via GIT-CAT-FILE and DESERIALIZE-ATOM if BLOB is
+not already loaded. Returns BLOB."
+  (unless (get-loaded? blob)
+    (setf (get-payload blob)
+          (deserialize-atom (git-cat-file (get-repository blob) (sha blob))))
+    (setf (get-loaded? blob) t))
+  blob)
+
 (defun %atomic-wrapper-tree-p (repository tree)
   "Return true if TREE (with ENTRIES already loaded) is an
 ATOMIC-WRAPPER-TREE: one whose \".meta\" entry, fetched via

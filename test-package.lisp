@@ -62,7 +62,14 @@
                 "+ATOMIC-WRAPPER-README+"
                 "WITH-GIT-TRANSACTION"
                 "CALL-WITH-TRANSACTION"
-                "WITH-TRANSACTION")
+                "WITH-TRANSACTION"
+                "PERSISTENT-VECTOR"
+                "PERSISTENT-VECTOR-LENGTH"
+                "PERSISTENT-VECTOR-ELEMENT-TYPE"
+                "SERIALIZE-PERSISTENT-VECTOR"
+                "DESERIALIZE-PERSISTENT-VECTOR"
+                "PERSISTENT-VECTOR-REF"
+                "+PERSISTENT-VECTOR-README+")
   (:export "GITHACK-SUITE"
            "RUN-GITHACK-TESTS"))
 
