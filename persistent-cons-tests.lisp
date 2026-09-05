@@ -211,3 +211,55 @@ values as the original in-memory list."
            (head-sha (serialize-persistent-cons c1))
            (hollow (inflate-git-proxy :dummy-repo head-sha)))
       (is (equal '(1 2) (series:collect (scan-persistent-list hollow)))))))
+
+(test collect-persistent-list-of-nil-is-nil
+  "COLLECT-PERSISTENT-LIST of an empty list (NIL) is NIL."
+  (is (null (collect-persistent-list :dummy-repo nil))))
+
+(test collect-persistent-list-builds-a-chain-of-blob-wrapped-atoms
+  "COLLECT-PERSISTENT-LIST wraps every raw, non-GIT-OBJECT element
+of ITEMS in a fresh, already GET-LOADED? GIT-BLOB, chains them via
+PERSISTENT-CDR in ITEMS' own order, marks every new cons cell
+GET-LOADED?, and leaves every new cons cell's own SHA unset (not yet
+persisted)."
+  (let ((head (collect-persistent-list :dummy-repo (list 1 2 3))))
+    (is (typep head 'persistent-cons))
+    (is (null (sha head)))
+    (is (get-loaded? head))
+    (is (= 1 (get-payload (persistent-car head))))
+    (let ((tail (persistent-cdr head)))
+      (is (= 2 (get-payload (persistent-car tail))))
+      (let ((tail2 (persistent-cdr tail)))
+        (is (= 3 (get-payload (persistent-car tail2))))
+        (is (null (persistent-cdr tail2)))))))
+
+(test collect-persistent-list-passes-through-compound-elements-unchanged
+  "COLLECT-PERSISTENT-LIST stores an already-compound GIT-OBJECT
+element (a nested PERSISTENT-CONS, here) directly as that cons
+cell's own PERSISTENT-CAR, unwrapped, rather than re-wrapping it in
+a further GIT-BLOB."
+  (let* ((nested (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
+                                 :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload :inner :loaded? t)
+                                 :persistent-cdr nil))
+         (head (collect-persistent-list :dummy-repo (list nested))))
+    (is (eq nested (persistent-car head)))))
+
+(test collect-persistent-list-is-the-inverse-of-scan-persistent-list
+  "Round-tripping a plain list of atoms through COLLECT-PERSISTENT-
+LIST then SCAN-PERSISTENT-LIST (materialized via SERIES:COLLECT)
+reproduces the original list's elements, in order."
+  (let ((items (list :a :b :c)))
+    (is (equal items (series:collect (scan-persistent-list
+                                       (collect-persistent-list :dummy-repo items)))))))
+
+(test collect-persistent-list-result-serializes-with-serialize-persistent-cons
+  "The in-memory chain built by COLLECT-PERSISTENT-LIST can be
+persisted directly via SERIALIZE-PERSISTENT-CONS, exactly like any
+other hand-built PERSISTENT-CONS chain."
+  (let ((head (collect-persistent-list :dummy-repo (list 1 2 3))))
+    (with-fake-git-hash-object ()
+      (let ((sha (serialize-persistent-cons head)))
+        (is (stringp sha))
+        (is (string= sha (sha head)))))
+    (is (= 3 (persistent-cons-length head)))
+    (is (eq t (persistent-cons-proper head)))))

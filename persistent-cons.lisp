@@ -327,3 +327,44 @@ the resulting series is later consumed."
             (lambda (tail)
               (%persistent-cons-decode (persistent-car (%ensure-persistent-cons-loaded tail))))
             tails)))
+
+(defun %persistent-cons-encode (repository value)
+  "Inverse of %PERSISTENT-CONS-DECODE: return VALUE itself, unchanged,
+if it is already a GIT-OBJECT (a compound proxy -- a GIT-TREE,
+PERSISTENT-CONS, PERSISTENT-VECTOR, or GIT-BLOB -- to be stored
+directly as-is); otherwise wrap VALUE as the PAYLOAD of a freshly
+constructed, already GET-LOADED?, not-yet-persisted GIT-BLOB in
+REPOSITORY."
+  (if (typep value 'git-object)
+      value
+      (make-instance 'git-blob :repository repository :payload value :loaded? t)))
+
+(defun collect-persistent-list (repository items)
+  "Return a new, in-memory PERSISTENT-CONS chain built from the
+successive elements of ITEMS (an ordinary Lisp list -- e.g. the
+result of applying SERIES's own COLLECT to a series, exactly as
+COLLECT itself always terminates a series back into a concrete Lisp
+list before any further ordinary-Lisp processing), in the same order
+ITEMS itself holds them, or NIL if ITEMS is empty. Each element
+becomes one new cons cell's own PERSISTENT-CAR, via
+%PERSISTENT-CONS-ENCODE -- an already-compound GIT-OBJECT proxy (a
+GIT-TREE, PERSISTENT-CONS, PERSISTENT-VECTOR, or GIT-BLOB) is stored
+as-is, while any other, raw Lisp value is wrapped in a fresh
+GIT-BLOB. Exactly inverts SCAN-PERSISTENT-LIST composed with
+COLLECT: (COLLECT-PERSISTENT-LIST REPOSITORY (COLLECT
+(SCAN-PERSISTENT-LIST LIST))) reconstructs a chain equivalent to
+LIST, and (COLLECT (SCAN-PERSISTENT-LIST (COLLECT-PERSISTENT-LIST
+REPOSITORY ITEMS))) reproduces ITEMS' own elements. Every new cons
+cell is marked already GET-LOADED?, exactly as if it had been
+directly built via MAKE-INSTANCE with an explicit :PERSISTENT-CAR/
+:PERSISTENT-CDR, since it holds its real, in-memory CAR/CDR already
+-- but it still has no SHA, so callers must still call
+SERIALIZE-PERSISTENT-CONS on the returned head (or on any nested,
+newly built cons cell) to actually persist it to Git."
+  (reduce (lambda (value tail)
+            (make-instance 'persistent-cons :repository repository :loaded? t
+                                             :persistent-car (%persistent-cons-encode repository value)
+                                             :persistent-cdr tail))
+          items
+          :from-end t
+          :initial-value nil))
