@@ -122,7 +122,10 @@
                 "UNPERSISTED-OBJECT-ERROR"
                 "TRANSACTION-STATE-ERROR"
                 "INVALID-ARGUMENT-ERROR"
-                "BRANCH-NOT-FOUND-ERROR")
+                "BRANCH-NOT-FOUND-ERROR"
+                "GIT-NOT-FOUND-ERROR"
+                "%ENSURE-GIT-AVAILABLE"
+                "*GIT-AVAILABLE-P*")
   (:export "GITHACK-SUITE"
            "RUN-GITHACK-TESTS"))
 

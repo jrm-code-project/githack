@@ -13,7 +13,7 @@
                (:file "git-tree" :depends-on ("git-object" "conditions" "package"))
                (:file "git-commit" :depends-on ("git-object" "conditions" "package"))
                (:file "git-branch" :depends-on ("git-object" "conditions" "package"))
-               (:file "git-repository" :depends-on ("conditions" "package"))
+               (:file "git-repository" :depends-on ("git-io" "conditions" "package"))
                (:file "persistent-cons"
                 :depends-on ("git-object" "git-blob" "git-tree" "git-io" "conditions" "package"))
                (:file "atomic-wrapper"

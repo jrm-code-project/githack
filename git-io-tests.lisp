@@ -187,3 +187,68 @@ behind."
       (signals error
         (git-cat-file repository "dddddddddddddddddddddddddddddddddddddddd"))
       (is (= before (%count-githack-temp-files))))))
+
+(defmacro %with-fresh-git-availability-cache (() &body body)
+  "Within BODY, rebind *GIT-AVAILABLE-P* to NIL, so %ENSURE-GIT-
+AVAILABLE's memoization does not leak between tests (or reflect
+whatever earlier test in this suite already ran a real `git
+--version` check); restores the prior value afterward."
+  `(let ((*git-available-p* nil)) ,@body))
+
+(test ensure-git-available-succeeds-and-memoizes-against-a-real-git
+  "%ENSURE-GIT-AVAILABLE returns T when a real `git` executable is on
+PATH (as it must be, for every other test in this suite to work at
+all), and memoizes that result in *GIT-AVAILABLE-P* so a second call
+does not need to shell out again."
+  (%with-fresh-git-availability-cache ()
+    (is (eq t (%ensure-git-available)))
+    (is (eq t *git-available-p*))
+    (is (eq t (%ensure-git-available)))))
+
+(test ensure-git-available-signals-git-not-found-error-when-git-is-unreachable
+  "%ENSURE-GIT-AVAILABLE signals GIT-NOT-FOUND-ERROR, not some raw
+UIOP condition, when running `git --version` itself fails (e.g. no
+such executable on PATH), and does not memoize that failure."
+  (%with-fresh-git-availability-cache ()
+    (let ((was-bound (fboundp 'uiop:run-program))
+          (original (fdefinition 'uiop:run-program)))
+      (setf (fdefinition 'uiop:run-program)
+            (lambda (&rest args) (declare (ignore args)) (error "no such executable")))
+      (unwind-protect
+           (signals git-not-found-error (%ensure-git-available))
+        (if was-bound (setf (fdefinition 'uiop:run-program) original) (fmakunbound 'uiop:run-program)))
+      (is (null *git-available-p*)))))
+
+(test ensure-git-available-signals-git-not-found-error-for-a-nonzero-exit-status
+  "%ENSURE-GIT-AVAILABLE signals GIT-NOT-FOUND-ERROR when `git
+--version` itself runs but exits with a non-zero status, not just
+when the subprocess fails to start at all."
+  (%with-fresh-git-availability-cache ()
+    (let ((was-bound (fboundp 'uiop:run-program))
+          (original (fdefinition 'uiop:run-program)))
+      (setf (fdefinition 'uiop:run-program)
+            (lambda (&rest args)
+              (declare (ignore args))
+              (values "" "not git" 1)))
+      (unwind-protect
+           (signals git-not-found-error (%ensure-git-available))
+        (if was-bound (setf (fdefinition 'uiop:run-program) original) (fmakunbound 'uiop:run-program)))
+      (is (null *git-available-p*)))))
+
+(test call-with-repository-signals-git-not-found-error-when-git-is-unreachable
+  "CALL-WITH-REPOSITORY propagates %ENSURE-GIT-AVAILABLE's
+GIT-NOT-FOUND-ERROR up front, before ever constructing a
+GIT-REPOSITORY or invoking RECEIVER."
+  (%with-fresh-git-availability-cache ()
+    (let ((was-bound (fboundp 'uiop:run-program))
+          (original (fdefinition 'uiop:run-program))
+          (receiver-called nil))
+      (setf (fdefinition 'uiop:run-program)
+            (lambda (&rest args) (declare (ignore args)) (error "no such executable")))
+      (unwind-protect
+           (signals git-not-found-error
+             (call-with-repository #p"/fake/repo/"
+                                    :receiver (lambda (repository) (declare (ignore repository)) (setf receiver-called t))))
+        (if was-bound (setf (fdefinition 'uiop:run-program) original) (fmakunbound 'uiop:run-program)))
+      (is-false receiver-called))))
+

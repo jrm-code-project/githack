@@ -204,20 +204,21 @@ per-index caches) are synchronized. Each of those five functions also gets
 a short "Not thread-safe" docstring note pointing back at this policy, so
 it's discoverable at the actual mutation sites, not just centrally.
 
-### 11. Hardcoded/ambient dependence on `git` being on `PATH` (Low)
+### 11. Hardcoded/ambient dependence on `git` being on `PATH` (Resolved)
 
-Every Git-shelling call site invokes the bare executable name `"git"` with
-no configurable path, version check, or startup diagnostic:
-
-- `git-io.lisp:35-40`, `git-io.lisp:49-53`, `git-io.lisp:75-80`
-- `git-branch.lisp:42-49`, `git-branch.lisp:58-63`
-
-A misconfigured `PATH`, multiple installed Git versions, or an unusual
-shell environment fails at first use with whatever raw error
-`uiop:run-program` produces, rather than a clear diagnostic. Low priority
-since this is standard practice for tools that shell out to `git`, but
-worth a `(uiop:run-program '("git" "--version") ...)` sanity check with a
-clear error message if it's ever worth the complexity.
+**Resolved:** `git-io.lisp` now has a `%ENSURE-GIT-AVAILABLE` function that
+runs `git --version` once (memoized in `*git-available-p*`) and signals a
+new `GIT-NOT-FOUND-ERROR` condition (`conditions.lisp`), with a clear
+diagnostic message, if `git` cannot be run at all or exits non-zero.
+`CALL-WITH-REPOSITORY` (`git-repository.lisp`) calls it up front, before
+constructing a `GIT-REPOSITORY` or invoking `RECEIVER`, so a misconfigured
+`PATH` or missing Git install now fails fast with a clear error instead of
+whatever raw `UIOP:SUBPROCESS-ERROR` the first incidental Git call happens
+to hit. New tests in `git-io-tests.lisp` cover both success (against the
+real `git` every other test in the suite already depends on) and failure
+(by temporarily replacing `uiop:run-program`'s definition), for both
+`%ENSURE-GIT-AVAILABLE` directly and its propagation through
+`CALL-WITH-REPOSITORY`.
 
 ### 12. Untested pathname portability edge cases (Low)
 
@@ -274,10 +275,14 @@ cheaply set up others. Numbers refer back to the item numbers above.
 8. **#10 (document concurrency policy)** *(done)* — added a CONCURRENCY
    POLICY block to `git-transaction.lisp`'s file header plus short
    "Not thread-safe" notes at each unsynchronized lazy-load cache site.
-9. **#11/#12** (`git` PATH sanity check, pathname-portability tests) —
-   lowest priority; pick these up opportunistically whenever another
-   change already has you touching the same file, rather than as
-   dedicated work. **This is the next item to pick up.**
+9. **#11 (`git` PATH sanity check)** *(done)* — `%ensure-git-available`
+   (`git-io.lisp`) checks `git --version` once, memoized, and
+   `call-with-repository` calls it up front so a missing/misconfigured
+   `git` fails fast with a clear `git-not-found-error` diagnostic.
+10. **#12** (pathname-portability tests) — lowest priority; pick this up
+    opportunistically whenever another change already has you touching
+    the same file, rather than as dedicated work. **This is the next item
+    to pick up.**
 
 ---
 

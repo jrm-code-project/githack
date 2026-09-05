@@ -80,3 +80,14 @@ MALFORMED-GIT-OBJECT-ERROR) or an object's own persistence state
   (:documentation
    "Signaled by RESOLVE-BRANCH when no branch named NAME exists in
 REPOSITORY and :IF-DOES-NOT-EXIST is :ERROR (the default)."))
+
+(define-condition git-not-found-error (githack-error)
+  ()
+  (:documentation
+   "Signaled by %ENSURE-GIT-AVAILABLE (called by CALL-WITH-REPOSITORY)
+when no working `git` executable can be found and run on PATH --
+e.g. because `git` is not installed, PATH is misconfigured, or an
+unusual shell environment prevents subprocess creation entirely --
+so this fails fast with a clear diagnostic up front, rather than
+some arbitrary later GIT-IO.LISP call failing deep in a stack with a
+raw UIOP:SUBPROCESS-ERROR or OS-level ENOENT."))

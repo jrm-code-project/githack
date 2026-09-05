@@ -17,6 +17,48 @@ within the system's default temporary directory."
                    :type "tmp")
    (uiop:default-temporary-directory)))
 
+;;; --- `git` executable sanity check ---
+;;;
+;;; Every call site below (and in git-branch.lisp) shells out to the
+;;; bare executable name "git", with no configurable path. A
+;;; misconfigured PATH, a missing Git install, or an unusual shell
+;;; environment would otherwise only surface as whatever raw
+;;; UIOP:SUBPROCESS-ERROR or OS-level ENOENT the *first* such call
+;;; happens to hit, deep in some unrelated stack. %ENSURE-GIT-
+;;; AVAILABLE lets CALL-WITH-REPOSITORY check this once, up front,
+;;; and fail fast with a clear diagnostic instead.
+
+(defvar *git-available-p* nil
+  "True once %ENSURE-GIT-AVAILABLE has confirmed a working `git`
+executable is reachable on PATH in this Lisp image. Memoized so the
+check only ever shells out once per image (assuming success), not
+once per CALL-WITH-REPOSITORY call.")
+
+(defun %ensure-git-available ()
+  "Run `git --version` once, memoized in *GIT-AVAILABLE-P*, to
+confirm a working `git` executable is reachable on PATH. Signals
+GIT-NOT-FOUND-ERROR, with a clear diagnostic message, if `git
+--version` cannot be run at all (e.g. no such executable) or exits
+with a non-zero status. Returns T on success."
+  (or *git-available-p*
+      (handler-case
+          (multiple-value-bind (output error-output exit-code)
+              (uiop:run-program (list "git" "--version")
+                                 :output :string :error-output :string
+                                 :ignore-error-status t)
+            (if (zerop exit-code)
+                (setf *git-available-p* t)
+                (error 'git-not-found-error
+                       :format-control "`git --version` exited with status ~D; is `git` installed and on PATH?~@[~%~A~]~@[~%~A~]"
+                       :format-arguments (list exit-code
+                                                (and (plusp (length output)) output)
+                                                (and (plusp (length error-output)) error-output)))))
+        (git-not-found-error (condition) (error condition))
+        (error (condition)
+          (error 'git-not-found-error
+                 :format-control "Could not run the `git` executable; is it installed and on PATH? (~A)"
+                 :format-arguments (list condition))))))
+
 ;;; --- Persistent Git subprocess sessions ---
 ;;;
 ;;; Every read (GIT-TYPE, GIT-CAT-FILE) and write (GIT-HASH-OBJECT)
