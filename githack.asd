@@ -50,6 +50,7 @@
                (:file "git-tree-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-commit-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-branch-tests" :depends-on ("test-package" "test-helpers"))
+               (:file "pathname-portability-tests" :depends-on ("test-package" "test-helpers"))
                (:file "transaction-lock-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-repository-tests" :depends-on ("test-package" "test-helpers"))
                (:file "persistent-cons-tests" :depends-on ("test-package" "test-helpers"))

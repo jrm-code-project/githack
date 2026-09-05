@@ -220,13 +220,25 @@ real `git` every other test in the suite already depends on) and failure
 `%ENSURE-GIT-AVAILABLE` directly and its propagation through
 `CALL-WITH-REPOSITORY`.
 
-### 12. Untested pathname portability edge cases (Low)
+### 12. Untested pathname portability edge cases (Resolved)
 
-`git-io.lisp:37-40,49-53,75-78` and `git-branch.lisp:44-47,59-63` rely on
-`uiop:native-namestring`/`uiop:default-temporary-directory` rather than
-hardcoded separators, which is the right call, but there are no tests
-covering paths with spaces, non-ASCII characters, or (on Windows) UNC
-paths.
+**Resolved:** `test-helpers.lisp`'s `%e2e-unique-repository-pathname` and
+`with-temporary-git-repository` now accept an optional `name-prefix`
+argument, letting a test embed arbitrary characters (spaces, non-ASCII
+text) into the real temporary directory name a bare Git repository is
+created in, in addition to the usual random uniqueness suffix. New
+`pathname-portability-tests.lisp` exercises `git-hash-object`/
+`git-cat-file`/`git-type` round-tripping, and `git-show-ref-sha`/
+`git-update-ref` (via `resolve-branch`/`update-branch`) round-tripping a
+real branch ref, against real bare repositories whose own directory names
+contain spaces and non-ASCII characters, plus a full
+`call-with-repository`/`with-transaction` commit against a non-ASCII
+repository path. UNC-path testing (`\\server\share\...`) is deliberately
+left out of scope: exercising one for real would require an actual,
+reachable SMB network share, which is not available in an automated test
+environment; `uiop:native-namestring` is still relied on for UNC paths
+exactly as for any other pathname, so this is a conscious, documented
+scope reduction rather than an oversight.
 
 ---
 
@@ -279,10 +291,14 @@ cheaply set up others. Numbers refer back to the item numbers above.
    (`git-io.lisp`) checks `git --version` once, memoized, and
    `call-with-repository` calls it up front so a missing/misconfigured
    `git` fails fast with a clear `git-not-found-error` diagnostic.
-10. **#12** (pathname-portability tests) — lowest priority; pick this up
-    opportunistically whenever another change already has you touching
-    the same file, rather than as dedicated work. **This is the next item
-    to pick up.**
+10. **#12 (pathname-portability tests)** *(done)* — added a
+    `name-prefix`-aware variant of the real-repository test fixture and new
+    `pathname-portability-tests.lisp` covering Git object/ref round-trips
+    against repository paths containing spaces and non-ASCII characters;
+    UNC-path testing documented as an explicit, out-of-scope reduction.
+
+All P0-P3 items in this document have now been resolved. Future
+technical-debt work should start from a fresh audit rather than this list.
 
 ---
 
