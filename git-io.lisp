@@ -38,3 +38,48 @@ TYPE (\"blob\", \"tree\", or \"commit\"), and return the resulting
                                                   (uiop:native-namestring path))
                                             :output :string)))
       (ignore-errors (delete-file path)))))
+
+(defun git-cat-file (repository sha)
+  "Shell out to `git cat-file -p <SHA>` against REPOSITORY (a
+pathname naming a Git directory) and return that Git object's raw,
+already-decompressed content as a (VECTOR (UNSIGNED-BYTE 8)). Unlike
+GIT-HASH-OBJECT's counterpart write path, the object's content is
+captured through a temporary file (rather than a Lisp string) so
+that arbitrary binary content -- such as a tree's packed binary SHA
+entries -- round-trips exactly, with no character-encoding or
+line-ending translation."
+  (let ((path (%unique-temporary-pathname "githack-catfile-")))
+    (unwind-protect
+         (progn
+           (uiop:run-program (list "git"
+                                    (format nil "--git-dir=~A" (uiop:native-namestring repository))
+                                    "cat-file" "-p" sha)
+                              :output path
+                              :if-output-exists :supersede)
+           (with-open-file (stream path :direction :input :element-type '(unsigned-byte 8))
+             (let ((bytes (make-array (file-length stream) :element-type '(unsigned-byte 8))))
+               (read-sequence bytes stream)
+               bytes)))
+      (ignore-errors (delete-file path)))))
+
+(defun %serialize-plist (plist)
+  "Encode PLIST (a property list of keyword keys and simple values --
+integers, strings, keywords, T, or NIL) as a UTF-8 octet vector,
+suitable for storing as the raw, human-readable content of a Git
+blob (e.g. a \".meta\" file). *PACKAGE* is bound to the COMMON-LISP
+package while printing (rather than KEYWORD, as SERIALIZE-ATOM binds
+it) so that a T or NIL value prints as, and later reads back as, the
+familiar CL:T/CL:NIL rather than a same-named but distinct keyword."
+  (let ((*print-readably* t)
+        (*print-circle* nil)
+        (*print-pretty* nil)
+        (*print-case* :downcase)
+        (*package* (find-package "COMMON-LISP")))
+    (sb-ext:string-to-octets (prin1-to-string plist) :external-format :utf-8)))
+
+(defun %deserialize-plist (octets)
+  "Inverse of %SERIALIZE-PLIST: parse OCTETS -- the raw content of a
+Git blob holding an encoded property list -- and return that plist."
+  (let ((*read-eval* nil)
+        (*package* (find-package "COMMON-LISP")))
+    (read-from-string (sb-ext:octets-to-string octets :external-format :utf-8))))

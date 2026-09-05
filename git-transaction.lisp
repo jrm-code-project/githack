@@ -7,10 +7,12 @@
 ;;; GIT-BRANCH: CALL-WITH-GIT-TRANSACTION resolves a branch to its
 ;;; current head commit, invokes a user RECEIVER with a transient
 ;;; GIT-TRANSACTION and that head commit, and -- for a :READ-WRITE
-;;; transaction whose RECEIVER returns a GIT-TREE normally -- flushes
-;;; that tree (and any of its unpersisted children), a new GIT-COMMIT
-;;; built from the transaction's cascaded author/committer/message
-;;; and parents, and finally advances the branch to point at it.
+;;; transaction whose RECEIVER returns a root GIT-OBJECT normally --
+;;; flushes that root (and any of its unpersisted children, wrapping
+;;; it first in an ATOMIC-WRAPPER-TREE via WRAP-ATOMIC-COMMIT-ROOT if
+;;; it is a bare atom rather than a GIT-TREE), a new GIT-COMMIT built
+;;; from the transaction's cascaded author/committer/message and
+;;; parents, and finally advances the branch to point at it.
 ;;;
 ;;; If RECEIVER signals an error or otherwise exits abnormally,
 ;;; nothing is written: the transient Lisp objects are simply
@@ -119,15 +121,21 @@ otherwise)."
             (git-hash-object (get-repository commit) "commit"
                               (sb-ext:string-to-octets (serialize-commit commit) :external-format :utf-8)))))
 
-(defun %commit-git-transaction-now (transaction tree)
-  "Perform the actual work of committing TRANSACTION with root TREE:
-persist TREE (and its modified children), create and persist a new
+(defun %commit-git-transaction-now (transaction root)
+  "Perform the actual work of committing TRANSACTION with root
+GIT-OBJECT ROOT: persist ROOT (and its modified children), wrapping
+it first in an ATOMIC-WRAPPER-TREE via WRAP-ATOMIC-COMMIT-ROOT if it
+is not itself a GIT-TREE (a bare GIT-BLOB has no directory structure
+of its own for a Git commit to point at), create and persist a new
 GIT-COMMIT from TRANSACTION's cascaded AUTHOR/COMMITTER/MESSAGE and
 PARENTS, and advance TRANSACTION's TARGET-BRANCH to point at it.
 Records the new commit in TRANSACTION's RESULT slot and returns it."
-  (check-type tree git-tree)
-  (%persist-git-object tree)
+  (check-type root git-object)
+  (%persist-git-object root)
   (let* ((repository (get-pathname (get-git-repository transaction)))
+         (tree (if (typep root 'git-tree)
+                   root
+                   (wrap-atomic-commit-root repository root)))
          (commit (make-instance 'git-commit
                                  :repository repository
                                  :tree tree
@@ -142,11 +150,12 @@ Records the new commit in TRANSACTION's RESULT slot and returns it."
     (setf (get-result transaction) commit)
     commit))
 
-(defun commit-git-transaction (transaction tree)
-  "Explicitly and immediately commit TRANSACTION with root TREE (a
-GIT-TREE): persist TREE and its modified children, create and
-persist a new GIT-COMMIT from TRANSACTION's cascaded defaults, and
-advance its branch to point at that commit. Signals an error if
+(defun commit-git-transaction (transaction root)
+  "Explicitly and immediately commit TRANSACTION with root GIT-OBJECT
+ROOT: persist ROOT and its modified children (wrapping it in an
+ATOMIC-WRAPPER-TREE first if ROOT is not itself a GIT-TREE), create
+and persist a new GIT-COMMIT from TRANSACTION's cascaded defaults,
+and advance its branch to point at that commit. Signals an error if
 TRANSACTION is not :READ-WRITE or is no longer :ACTIVE. Immediately
 unwinds out of the enclosing CALL-WITH-GIT-TRANSACTION's RECEIVER,
 so any code after this call within RECEIVER never runs."
@@ -154,7 +163,7 @@ so any code after this call within RECEIVER never runs."
     (error "Transaction is not active (status is ~S)." (get-status transaction)))
   (unless (eq (get-mode transaction) :read-write)
     (error "Cannot commit a :READ-ONLY transaction."))
-  (%commit-git-transaction-now transaction tree)
+  (%commit-git-transaction-now transaction root)
   (setf (get-status transaction) :committed)
   (throw 'git-transaction-exit transaction))
 
@@ -173,19 +182,27 @@ defaults for any not explicitly supplied here. Resolves BRANCH to
 its current head GIT-COMMIT (via RESOLVE-BRANCH and
 INFLATE-GIT-PROXY) and, unless PARENTS is supplied, defaults PARENTS
 to a list of just that head commit. Invokes (FUNCALL RECEIVER
-TRANSACTION HEAD-COMMIT).
+TRANSACTION HEAD-COMMIT). RECEIVER may call RESOLVE-COMMIT-ROOT on
+HEAD-COMMIT to transparently retrieve its logical root object,
+whether that root is a GIT-TREE or (having been auto-wrapped by a
+prior commit) a bare atomic GIT-BLOB.
 
 Signals an error if MODE is :READ-WRITE but REPOSITORY was opened
 :READ-ONLY.
 
-If RECEIVER returns normally, it must return a GIT-TREE representing
-the desired new root state; when MODE is :READ-WRITE, that tree (and
-its modified children) is then automatically persisted, a new commit
-created and persisted from it, and the branch advanced -- exactly as
-COMMIT-GIT-TRANSACTION would. If RECEIVER instead calls
-COMMIT-GIT-TRANSACTION or ABORT-GIT-TRANSACTION itself, or signals an
-error, that explicit or abnormal exit is honored instead and nothing
-further is written. Returns TRANSACTION."
+If RECEIVER returns normally, it must return a GIT-OBJECT
+representing the desired new root state -- a GIT-TREE (or
+PERSISTENT-CONS or other GIT-TREE subtype), committed directly, or a
+bare atomic GIT-BLOB, transparently wrapped first in an
+ATOMIC-WRAPPER-TREE by WRAP-ATOMIC-COMMIT-ROOT, since Git itself
+requires every commit to point at a tree. When MODE is :READ-WRITE,
+that root (and its modified children) is then automatically
+persisted, a new commit created and persisted from it, and the
+branch advanced -- exactly as COMMIT-GIT-TRANSACTION would. If
+RECEIVER instead calls COMMIT-GIT-TRANSACTION or
+ABORT-GIT-TRANSACTION itself, or signals an error, that explicit or
+abnormal exit is honored instead and nothing further is written.
+Returns TRANSACTION."
   (when (and (eq mode :read-write) (eq (get-mode repository) :read-only))
     (error "Cannot open a :READ-WRITE transaction against a repository opened :READ-ONLY."))
   (let* ((branch-name (or branch (get-branch repository)))
@@ -203,10 +220,10 @@ further is written. Returns TRANSACTION."
                                       :committer final-committer
                                       :message final-message
                                       :parents final-parents)))
-    (let ((tree (catch 'git-transaction-exit
+    (let ((root (catch 'git-transaction-exit
                   (funcall receiver transaction head-commit))))
       (when (eq (get-status transaction) :active)
         (when (eq mode :read-write)
-          (%commit-git-transaction-now transaction tree))
+          (%commit-git-transaction-now transaction root))
         (setf (get-status transaction) :committed)))
     transaction))

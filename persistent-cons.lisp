@@ -84,32 +84,19 @@ DESERIALIZE-PERSISTENT-CONS for the on-disk representation."))
 
 (defun %serialize-persistent-cons-meta (length proper)
   "Encode the small property list (:TAG :CONS :LENGTH LENGTH :PROPER
-PROPER) as a UTF-8 octet vector: the exact raw content of a
-persistent cons's \".meta\" blob. *PACKAGE* is bound to the
-COMMON-LISP package (rather than KEYWORD, as SERIALIZE-ATOM binds
-it) so that a PROPER value of T or NIL prints as, and later reads
-back as, the familiar CL:T/CL:NIL rather than a same-named but
-distinct keyword."
-  (let ((*print-readably* t)
-        (*print-circle* nil)
-        (*print-pretty* nil)
-        (*print-case* :downcase)
-        (*package* (find-package "COMMON-LISP")))
-    (sb-ext:string-to-octets
-     (prin1-to-string (list :tag :cons :length length :proper proper))
-     :external-format :utf-8)))
+PROPER) as a UTF-8 octet vector, via %SERIALIZE-PLIST: the exact raw
+content of a persistent cons's \".meta\" blob."
+  (%serialize-plist (list :tag :cons :length length :proper proper)))
 
 (defun %deserialize-persistent-cons-meta (octets)
   "Inverse of %SERIALIZE-PERSISTENT-CONS-META: parse OCTETS -- the
-raw content of a persistent cons's \".meta\" blob -- and return two
-values, its :LENGTH and :PROPER. Signals an error if OCTETS is not a
-plist whose :TAG is :CONS."
-  (let ((*read-eval* nil)
-        (*package* (find-package "COMMON-LISP")))
-    (let ((plist (read-from-string (sb-ext:octets-to-string octets :external-format :utf-8))))
-      (unless (eq (getf plist :tag) :cons)
-        (error "Malformed persistent cons .meta blob: ~S." plist))
-      (values (getf plist :length) (getf plist :proper)))))
+raw content of a persistent cons's \".meta\" blob -- via
+%DESERIALIZE-PLIST, and return two values, its :LENGTH and :PROPER.
+Signals an error if OCTETS is not a plist whose :TAG is :CONS."
+  (let ((plist (%deserialize-plist octets)))
+    (unless (eq (getf plist :tag) :cons)
+      (error "Malformed persistent cons .meta blob: ~S." plist))
+    (values (getf plist :length) (getf plist :proper))))
 
 (defun %persist-cons-component (git-object)
   "Ensure GIT-OBJECT (a GIT-BLOB, a plain GIT-TREE, or a nested

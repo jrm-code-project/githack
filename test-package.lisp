@@ -55,7 +55,11 @@
                 "PERSISTENT-CONS-PROPER"
                 "SERIALIZE-PERSISTENT-CONS"
                 "DESERIALIZE-PERSISTENT-CONS"
-                "+PERSISTENT-CONS-README+")
+                "+PERSISTENT-CONS-README+"
+                "GIT-CAT-FILE"
+                "WRAP-ATOMIC-COMMIT-ROOT"
+                "RESOLVE-COMMIT-ROOT"
+                "+ATOMIC-WRAPPER-README+")
   (:export "GITHACK-SUITE"
            "RUN-GITHACK-TESTS"))
 

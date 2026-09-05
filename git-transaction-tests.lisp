@@ -167,6 +167,34 @@ is advanced to point at it."
                 (is (string= "main" name))
                 (is (string= (sha commit) sha))))))))))
 
+(test call-with-git-transaction-wraps-an-atomic-root-in-an-atomic-wrapper-tree
+  "A :READ-WRITE transaction whose RECEIVER returns a bare atomic
+GIT-BLOB (rather than any kind of GIT-TREE) is automatically wrapped
+in an ATOMIC-WRAPPER-TREE before being committed, since Git itself
+requires every commit to point at a tree; RESOLVE-COMMIT-ROOT then
+transparently retrieves the original blob back out again, making the
+wrapper invisible to application code."
+  (let ((repository (%make-test-repository :read-write))
+        (update-calls '()))
+    (with-fake-head-resolution ()
+      (with-fake-git-object-store ()
+        (with-recording-git-update-ref (update-calls)
+          (let* ((unsaved-blob (make-instance 'git-blob :repository +repo-path+ :payload 42))
+                 (transaction
+                   (call-with-git-transaction repository :read-write
+                                               :receiver (lambda (tx head)
+                                                           (declare (ignore tx head))
+                                                           unsaved-blob))))
+            (is (eq :committed (get-status transaction)))
+            (is (stringp (sha unsaved-blob)))
+            (let* ((commit (get-result transaction))
+                   (tree (get-tree commit)))
+              (is (typep tree 'git-tree))
+              (is (equal (list ".meta" "README.md" "value")
+                         (mapcar #'car (get-entries tree))))
+              (is (eq unsaved-blob (cdr (assoc "value" (get-entries tree) :test #'string=))))
+              (is (eq unsaved-blob (resolve-commit-root commit))))))))))
+
 (test commit-git-transaction-commits-immediately-and-skips-later-receiver-code
   "COMMIT-GIT-TRANSACTION, called explicitly inside RECEIVER, commits
 immediately and unwinds so any subsequent code in RECEIVER never runs."

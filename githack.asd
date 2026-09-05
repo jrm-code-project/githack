@@ -15,9 +15,11 @@
                (:file "git-repository" :depends-on ("package"))
                (:file "persistent-cons"
                 :depends-on ("git-object" "git-blob" "git-tree" "git-io" "package"))
+               (:file "atomic-wrapper"
+                :depends-on ("git-object" "git-blob" "git-tree" "git-commit" "git-io" "package"))
                (:file "git-transaction"
                 :depends-on ("git-object" "git-tree" "git-commit" "git-branch" "git-repository"
-                              "git-io" "persistent-cons" "package"))))
+                              "git-io" "persistent-cons" "atomic-wrapper" "package"))))
 
 (defsystem "githack/test"
   :description "FiveAM test suite for GitHack."
@@ -31,6 +33,7 @@
                (:file "git-branch-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-repository-tests" :depends-on ("test-package" "test-helpers"))
                (:file "persistent-cons-tests" :depends-on ("test-package" "test-helpers"))
+               (:file "atomic-wrapper-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-transaction-tests" :depends-on ("test-package" "test-helpers")))
   :perform (test-op (op c)
              (declare (ignore op c))
