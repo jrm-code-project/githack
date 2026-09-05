@@ -76,6 +76,27 @@ afterward."
              (setf (fdefinition 'git-hash-object) ,original)
              (fmakunbound 'git-hash-object))))))
 
+(defmacro with-recording-git-hash-object ((calls-var) &body body)
+  "Within BODY, GIT-HASH-OBJECT does not shell out to Git or touch
+the filesystem; instead each call pushes a (REPOSITORY TYPE OCTETS)
+list onto the setf-able place CALLS-VAR and returns a fake SHA
+deterministically derived from TYPE and OCTETS by %FAKE-SHA-FOR,
+exactly as WITH-FAKE-GIT-HASH-OBJECT's fake SHAs behave. The real
+definition (or lack of one) of GIT-HASH-OBJECT is restored
+afterward."
+  (let ((was-bound (gensym "WAS-BOUND"))
+        (original (gensym "ORIGINAL")))
+    `(let* ((,was-bound (fboundp 'git-hash-object))
+            (,original (and ,was-bound (fdefinition 'git-hash-object))))
+       (setf (fdefinition 'git-hash-object)
+             (lambda (repository type octets)
+               (push (list repository type octets) ,calls-var)
+               (%fake-sha-for type octets)))
+       (unwind-protect (progn ,@body)
+         (if ,was-bound
+             (setf (fdefinition 'git-hash-object) ,original)
+             (fmakunbound 'git-hash-object))))))
+
 (defmacro with-fake-git-type ((type-alist) &body body)
   "Within BODY, GIT-TYPE returns the string associated with a SHA in
 TYPE-ALIST (an alist of (sha . type) conses, compared with STRING=),

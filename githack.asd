@@ -7,13 +7,17 @@
   :depends-on ("alexandria" "fold" "function" "named-let" "series")
   :components ((:file "package")
                (:file "git-object" :depends-on ("package"))
+               (:file "git-io" :depends-on ("git-object" "package"))
                (:file "git-blob" :depends-on ("git-object" "package"))
                (:file "git-tree" :depends-on ("git-object" "package"))
                (:file "git-commit" :depends-on ("git-object" "package"))
                (:file "git-branch" :depends-on ("git-object" "package"))
                (:file "git-repository" :depends-on ("package"))
+               (:file "persistent-cons"
+                :depends-on ("git-object" "git-blob" "git-tree" "git-io" "package"))
                (:file "git-transaction"
-                :depends-on ("git-object" "git-tree" "git-commit" "git-branch" "git-repository" "package"))))
+                :depends-on ("git-object" "git-tree" "git-commit" "git-branch" "git-repository"
+                              "git-io" "persistent-cons" "package"))))
 
 (defsystem "githack/test"
   :description "FiveAM test suite for GitHack."
@@ -26,6 +30,7 @@
                (:file "git-commit-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-branch-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-repository-tests" :depends-on ("test-package" "test-helpers"))
+               (:file "persistent-cons-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-transaction-tests" :depends-on ("test-package" "test-helpers")))
   :perform (test-op (op c)
              (declare (ignore op c))

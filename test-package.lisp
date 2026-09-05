@@ -47,7 +47,15 @@
                 "GIT-HASH-OBJECT"
                 "CALL-WITH-GIT-TRANSACTION"
                 "COMMIT-GIT-TRANSACTION"
-                "ABORT-GIT-TRANSACTION")
+                "ABORT-GIT-TRANSACTION"
+                "PERSISTENT-CONS"
+                "PERSISTENT-CAR"
+                "PERSISTENT-CDR"
+                "PERSISTENT-CONS-LENGTH"
+                "PERSISTENT-CONS-PROPER"
+                "SERIALIZE-PERSISTENT-CONS"
+                "DESERIALIZE-PERSISTENT-CONS"
+                "+PERSISTENT-CONS-README+")
   (:export "GITHACK-SUITE"
            "RUN-GITHACK-TESTS"))
 

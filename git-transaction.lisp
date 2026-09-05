@@ -77,36 +77,8 @@ ABORT-GIT-TRANSACTION."))
   "Return the current time as an integer Unix epoch timestamp."
   (- (get-universal-time) (encode-universal-time 0 0 0 1 1 1970 0)))
 
-(defun %unique-temporary-pathname (prefix)
-  "Return a pathname, unlikely to collide with any other file, named
-PREFIX followed by random hexadecimal digits and a \".tmp\" type,
-within the system's default temporary directory."
-  (merge-pathnames
-   (make-pathname :name (format nil "~A~(~36,10,'0R~)" prefix (random (expt 36 10) (make-random-state t)))
-                   :type "tmp")
-   (uiop:default-temporary-directory)))
-
-(defun git-hash-object (repository type octets)
-  "Shell out to `git hash-object -w -t <TYPE>` against REPOSITORY (a
-pathname naming a Git directory), writing OCTETS -- a (VECTOR
-(UNSIGNED-BYTE 8)) -- into Git's object database as a new object of
-TYPE (\"blob\", \"tree\", or \"commit\"), and return the resulting
-40-character hexadecimal SHA."
-  (let ((path (%unique-temporary-pathname "githack-object-")))
-    (unwind-protect
-         (progn
-           (with-open-file (stream path :direction :output
-                                         :element-type '(unsigned-byte 8)
-                                         :if-exists :supersede
-                                         :if-does-not-exist :create)
-             (write-sequence octets stream))
-           (string-trim '(#\Space #\Newline #\Return)
-                         (uiop:run-program (list "git"
-                                                  (format nil "--git-dir=~A" (uiop:native-namestring repository))
-                                                  "hash-object" "-w" "-t" type
-                                                  (uiop:native-namestring path))
-                                            :output :string)))
-      (ignore-errors (delete-file path)))))
+;;; %UNIQUE-TEMPORARY-PATHNAME and GIT-HASH-OBJECT now live in
+;;; git-io.lisp, shared with PERSISTENT-CONS's own persistence logic.
 
 (defun %persist-git-tree-object (tree)
   "Ensure TREE (a GIT-TREE) and every one of its ENTRIES not yet
@@ -122,13 +94,14 @@ own SHA."
               (git-hash-object (get-repository tree) "tree" (serialize-tree tree))))))
 
 (defun %persist-git-object (git-object)
-  "Ensure GIT-OBJECT (a GIT-BLOB or GIT-TREE) has a SHA, persisting
-it (and, for a GIT-TREE, its children) to Git's object database if
-it does not already. Returns GIT-OBJECT's SHA. Objects that already
-have a SHA are assumed already present in Git's object database and
-are left untouched."
+  "Ensure GIT-OBJECT (a GIT-BLOB, GIT-TREE, or PERSISTENT-CONS) has
+a SHA, persisting it (and, for a GIT-TREE or PERSISTENT-CONS, its
+children) to Git's object database if it does not already. Returns
+GIT-OBJECT's SHA. Objects that already have a SHA are assumed
+already present in Git's object database and are left untouched."
   (or (sha git-object)
       (etypecase git-object
+        (persistent-cons (serialize-persistent-cons git-object))
         (git-tree (%persist-git-tree-object git-object))
         (git-blob
          (setf (sha git-object)

@@ -1,0 +1,160 @@
+;;; -*- Mode: Lisp; coding: utf-8; -*-
+
+(in-package "GITHACK-TEST")
+
+(def-suite persistent-cons-suite
+  :in githack-suite
+  :description "Tests for the PERSISTENT-CONS proxy, SERIALIZE-PERSISTENT-CONS, and DESERIALIZE-PERSISTENT-CONS.")
+
+(in-suite persistent-cons-suite)
+
+(test persistent-cons-is-a-git-tree
+  "A PERSISTENT-CONS is a GIT-TREE (so it reuses ENTRIES,
+INFER-GIT-MODE, and SERIALIZE-TREE), holding its own PERSISTENT-CAR
+and PERSISTENT-CDR."
+  (let* ((car-blob (make-instance 'git-blob :repository :dummy-repo :payload 42))
+         (cons (make-instance 'persistent-cons :repository :dummy-repo
+                                                :persistent-car car-blob
+                                                :persistent-cdr nil)))
+    (is (typep cons 'git-tree))
+    (is (eq car-blob (persistent-car cons)))
+    (is (null (persistent-cdr cons)))
+    (is (string= "40000" (infer-git-mode cons)))))
+
+(test serialize-persistent-cons-singleton-list
+  "Serializing a cons whose PERSISTENT-CDR is NIL (a singleton
+proper list) computes LENGTH 1 and PROPER T, synthesizes a GIT-BLOB
+encoding the atom NIL as its persisted CDR, and produces the
+standard four tree entries in sorted order."
+  (let* ((calls '())
+         (car-blob (make-instance 'git-blob :repository :dummy-repo :payload 42))
+         (cons (make-instance 'persistent-cons :repository :dummy-repo
+                                                :persistent-car car-blob
+                                                :persistent-cdr nil)))
+    (with-recording-git-hash-object (calls)
+      (let ((sha (serialize-persistent-cons cons)))
+        (is (stringp sha))
+        (is (string= sha (sha cons)))))
+    (is (= 1 (persistent-cons-length cons)))
+    (is (eq t (persistent-cons-proper cons)))
+    (is (get-loaded? cons))
+    (let ((entries (get-entries cons)))
+      (is (equal (list ".meta" "README.md" "car" "cdr") (mapcar #'car entries)))
+      (is (eq car-blob (cdr (assoc "car" entries :test #'string=))))
+      (let ((cdr-object (cdr (assoc "cdr" entries :test #'string=))))
+        (is (eq cdr-object (persistent-cdr cons)))
+        (is (typep cdr-object 'git-blob))
+        (is (null (get-payload cdr-object)))
+        (is (string= (%fake-sha-for "blob" (serialize-atom nil)) (sha cdr-object)))))))
+
+(test serialize-persistent-cons-dotted-pair
+  "Serializing a cons whose PERSISTENT-CDR is an ordinary,
+already-persisted GIT-OBJECT (not another PERSISTENT-CONS and not
+NIL) computes LENGTH 1 and PROPER NIL."
+  (let* ((car-blob (make-instance 'git-blob :repository :dummy-repo :payload :a))
+         (cdr-blob (make-instance 'git-blob :repository :dummy-repo :payload :b
+                                             :sha "cccccccccccccccccccccccccccccccccccccccc"))
+         (cons (make-instance 'persistent-cons :repository :dummy-repo
+                                                :persistent-car car-blob
+                                                :persistent-cdr cdr-blob)))
+    (with-fake-git-hash-object ()
+      (serialize-persistent-cons cons))
+    (is (= 1 (persistent-cons-length cons)))
+    (is (null (persistent-cons-proper cons)))
+    (is (eq cdr-blob (persistent-cdr cons)))))
+
+(test serialize-persistent-cons-nested-cons
+  "Serializing a cons whose PERSISTENT-CDR is itself an unpersisted
+PERSISTENT-CONS recursively persists that tail first, computes
+LENGTH as one more than the tail's own LENGTH, and inherits the
+tail's PROPER flag."
+  (let* ((tail-car (make-instance 'git-blob :repository :dummy-repo :payload 2))
+         (tail (make-instance 'persistent-cons :repository :dummy-repo
+                                                :persistent-car tail-car
+                                                :persistent-cdr nil))
+         (head-car (make-instance 'git-blob :repository :dummy-repo :payload 1))
+         (head (make-instance 'persistent-cons :repository :dummy-repo
+                                                :persistent-car head-car
+                                                :persistent-cdr tail)))
+    (with-fake-git-hash-object ()
+      (serialize-persistent-cons head))
+    (is (stringp (sha tail)))
+    (is (= 1 (persistent-cons-length tail)))
+    (is (eq t (persistent-cons-proper tail)))
+    (is (= 2 (persistent-cons-length head)))
+    (is (eq t (persistent-cons-proper head)))))
+
+(test serialize-persistent-cons-requires-a-car
+  "SERIALIZE-PERSISTENT-CONS signals an error when PERSISTENT-CAR
+has not been set."
+  (let ((cons (make-instance 'persistent-cons :repository :dummy-repo)))
+    (with-fake-git-hash-object ()
+      (signals error (serialize-persistent-cons cons)))))
+
+(test serialize-persistent-cons-is-idempotent
+  "SERIALIZE-PERSISTENT-CONS does nothing (beyond returning the
+existing SHA) for a cons that has already been persisted."
+  (let* ((sha "dddddddddddddddddddddddddddddddddddddddd")
+         (cons (make-instance 'persistent-cons :repository :dummy-repo :sha sha)))
+    (is (string= sha (serialize-persistent-cons cons)))
+    (is (null (get-entries cons)))))
+
+(test serialize-persistent-cons-writes-standard-readme-and-meta
+  "SERIALIZE-PERSISTENT-CONS writes the exact, fixed README.md
+markdown content as raw (non-atom-envelope) UTF-8 bytes. (Its
+\".meta\" blob's content is verified indirectly, by the round-trip
+test below via the exported DESERIALIZE-PERSISTENT-CONS.)"
+  (let* ((calls '())
+         (car-blob (make-instance 'git-blob :repository :dummy-repo :payload 1))
+         (cons (make-instance 'persistent-cons :repository :dummy-repo
+                                                :persistent-car car-blob
+                                                :persistent-cdr nil)))
+    (with-recording-git-hash-object (calls)
+      (serialize-persistent-cons cons))
+    (is (find (sb-ext:string-to-octets +persistent-cons-readme+ :external-format :utf-8)
+              calls :key #'third :test #'equalp))))
+
+(test deserialize-persistent-cons-round-trips-with-serialize
+  "Deserializing the tree bytes and .meta bytes produced by
+SERIALIZE-PERSISTENT-CONS reconstructs an equivalent PERSISTENT-CONS
+with the same LENGTH/PROPER and hollow CAR/CDR proxies for the same
+SHAs."
+  (let* ((car-blob-sha "1111111111111111111111111111111111111111")
+         (car-blob (make-instance 'git-blob :repository :dummy-repo :payload 7 :sha car-blob-sha))
+         (original (make-instance 'persistent-cons :repository :dummy-repo
+                                                    :persistent-car car-blob
+                                                    :persistent-cdr nil))
+         (calls '()))
+    (with-recording-git-hash-object (calls)
+      (serialize-persistent-cons original))
+    (let* ((tree-octets (serialize-tree original))
+           (meta-entry (cdr (assoc ".meta" (get-entries original) :test #'string=)))
+           (readme-entry (cdr (assoc "README.md" (get-entries original) :test #'string=)))
+           (cdr-entry (cdr (assoc "cdr" (get-entries original) :test #'string=)))
+           (meta-octets (third (find (sha meta-entry) calls
+                                      :key (lambda (call) (%fake-sha-for (second call) (third call)))
+                                      :test #'string=)))
+           (hollow (make-instance 'persistent-cons :repository :dummy-repo :sha (sha original))))
+      (is (not (null meta-octets)))
+      (with-fake-git-type ((list (cons car-blob-sha "blob")
+                                  (cons (sha cdr-entry) "blob")
+                                  (cons (sha meta-entry) "blob")
+                                  (cons (sha readme-entry) "blob")))
+        (deserialize-persistent-cons hollow tree-octets meta-octets))
+      (is (= (persistent-cons-length original) (persistent-cons-length hollow)))
+      (is (eq (persistent-cons-proper original) (persistent-cons-proper hollow)))
+      (is (get-loaded? hollow))
+      (is (string= car-blob-sha (sha (persistent-car hollow))))
+      (is (string= (sha cdr-entry) (sha (persistent-cdr hollow)))))))
+
+(test deserialize-persistent-cons-signals-error-for-missing-entries
+  "DESERIALIZE-PERSISTENT-CONS signals an error if the underlying
+tree is missing any of the four required entries."
+  (let* ((blob-sha "2222222222222222222222222222222222222222")
+         (blob (make-instance 'git-blob :repository :dummy-repo :sha blob-sha))
+         (incomplete-tree (make-instance 'git-tree :repository :dummy-repo
+                                                    :entries (list (cons "car" blob))))
+         (tree-octets (serialize-tree incomplete-tree))
+         (hollow (make-instance 'persistent-cons :repository :dummy-repo)))
+    (with-fake-git-type ((list (cons blob-sha "blob")))
+      (signals error (deserialize-persistent-cons hollow tree-octets #())))))
