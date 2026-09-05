@@ -4,6 +4,7 @@
   :version "0.1"
   :license "MIT"
   :in-order-to ((test-op (test-op "githack/test")))
+  :depends-on ("alexandria" "fold" "function" "named-let" "series")
   :components ((:file "package")
                (:file "git-object" :depends-on ("package"))
                (:file "git-blob" :depends-on ("git-object" "package"))
