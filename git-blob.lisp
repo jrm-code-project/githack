@@ -45,7 +45,9 @@ fully-qualified convention -- regardless of whether it is external
 in its home package."
   (let ((home (symbol-package symbol)))
     (unless home
-      (error "Cannot serialize the uninterned symbol ~S." symbol))
+      (error 'invalid-argument-error
+             :format-control "Cannot serialize the uninterned symbol ~S."
+             :format-arguments (list symbol)))
     (list :symbol (%normalize-string (package-name home)) (%normalize-string (symbol-name symbol)))))
 
 (defun %character->envelope (char)
@@ -97,13 +99,17 @@ methods respectively."))
       (call-next-method)))
 
 (defmethod %atom->envelope ((atom t))
-  (error "SERIALIZE-ATOM does not support objects of type ~S." (type-of atom)))
+  (error 'invalid-argument-error
+         :format-control "SERIALIZE-ATOM does not support objects of type ~S."
+         :format-arguments (list (type-of atom))))
 
 (defun %envelope->atom (envelope)
   "Inverse of %ATOM->ENVELOPE: reconstructs the exact Lisp atom
 described by ENVELOPE."
   (unless (consp envelope)
-    (error "Malformed atom envelope: ~S." envelope))
+    (error 'malformed-git-object-error
+           :format-control "Malformed atom envelope: ~S."
+           :format-arguments (list envelope)))
   (destructuring-bind (tag &rest data) envelope
     (ecase tag
       (:integer (first data))
@@ -112,7 +118,9 @@ described by ENVELOPE."
        (destructuring-bind (package-name symbol-name) data
          (let ((package (find-package package-name)))
            (unless package
-             (error "Cannot deserialize symbol: no package named ~S." package-name))
+             (error 'malformed-git-object-error
+                    :format-control "Cannot deserialize symbol: no package named ~S."
+                    :format-arguments (list package-name)))
            (intern symbol-name package))))
       ((:single-float :double-float)
        (let ((*read-eval* nil))
@@ -120,7 +128,9 @@ described by ENVELOPE."
       (:character (first data))
       (:named-character
        (or (name-char (first data))
-           (error "Unknown character name ~S." (first data))))
+           (error 'malformed-git-object-error
+                  :format-control "Unknown character name ~S."
+                  :format-arguments (list (first data)))))
       (:character-code (code-char (first data)))
       (:string (first data))
       (:bit-vector

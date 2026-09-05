@@ -95,7 +95,9 @@ raw content of a persistent cons's \".meta\" blob -- via
 Signals an error if OCTETS is not a plist whose :TAG is :CONS."
   (let ((plist (%deserialize-plist octets)))
     (unless (eq (getf plist :tag) :cons)
-      (error "Malformed persistent cons .meta blob: ~S." plist))
+      (error 'malformed-git-object-error
+             :format-control "Malformed persistent cons .meta blob: ~S."
+             :format-arguments (list plist)))
     (values (getf plist :length) (getf plist :proper))))
 
 (defgeneric %persist-cons-component-etypecase (git-object)
@@ -177,7 +179,8 @@ CONS's own SHA, doing nothing further if CONS already has one."
                (cdr-object (or (persistent-cdr cons)
                                 (make-instance 'git-blob :repository repository :payload nil))))
           (unless car-object
-            (error "Cannot serialize persistent cons: its PERSISTENT-CAR has not been set."))
+            (error 'unpersisted-object-error
+                   :format-control "Cannot serialize persistent cons: its PERSISTENT-CAR has not been set."))
           (%persist-cons-component car-object)
           (%persist-cons-component cdr-object)
           (setf (persistent-cdr cons) cdr-object)
@@ -208,13 +211,17 @@ error if TREE-OCTETS' entries do not include \".meta\", \"README.md\",
          (car-entry (assoc "car" entries :test #'string=))
          (cdr-entry (assoc "cdr" entries :test #'string=)))
     (unless (assoc ".meta" entries :test #'string=)
-      (error "Malformed persistent cons tree: missing \".meta\" entry."))
+      (error 'malformed-git-object-error
+             :format-control "Malformed persistent cons tree: missing \".meta\" entry."))
     (unless (assoc "README.md" entries :test #'string=)
-      (error "Malformed persistent cons tree: missing \"README.md\" entry."))
+      (error 'malformed-git-object-error
+             :format-control "Malformed persistent cons tree: missing \"README.md\" entry."))
     (unless car-entry
-      (error "Malformed persistent cons tree: missing \"car\" entry."))
+      (error 'malformed-git-object-error
+             :format-control "Malformed persistent cons tree: missing \"car\" entry."))
     (unless cdr-entry
-      (error "Malformed persistent cons tree: missing \"cdr\" entry."))
+      (error 'malformed-git-object-error
+             :format-control "Malformed persistent cons tree: missing \"cdr\" entry."))
     (multiple-value-bind (length proper) (%deserialize-persistent-cons-meta meta-octets)
       (setf (get-entries cons) entries)
       (setf (persistent-car cons) (cdr car-entry))

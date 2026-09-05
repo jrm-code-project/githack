@@ -26,7 +26,7 @@ attempts to acquire a busy repository transaction lock.")
 acquire a busy repository transaction lock before giving up and
 signaling TRANSACTION-LOCK-TIMEOUT-ERROR.")
 
-(define-condition transaction-lock-timeout-error (error)
+(define-condition transaction-lock-timeout-error (githack-error)
   ((pathname :initarg :pathname :reader get-pathname))
   (:report
    (lambda (condition stream)

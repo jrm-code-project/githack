@@ -89,7 +89,9 @@ raw content of a persistent array's \".meta\" blob -- via
 is :ARRAY."
   (let ((plist (%deserialize-plist octets)))
     (unless (eq (getf plist :tag) :array)
-      (error "Malformed persistent array .meta blob: ~S." plist))
+      (error 'malformed-git-object-error
+             :format-control "Malformed persistent array .meta blob: ~S."
+             :format-arguments (list plist)))
     (values (getf plist :dimensions) (getf plist :element-type))))
 
 (defun %persistent-array-volume (dimensions)
@@ -99,7 +101,9 @@ every dimension size, or 1 for a zero-dimensional (scalar) array.
 Signals an error if DIMENSIONS is not a proper list of non-negative
 integers."
   (unless (and (listp dimensions) (every (lambda (d) (and (integerp d) (>= d 0))) dimensions))
-    (error "Invalid persistent array dimensions: ~S." dimensions))
+    (error 'invalid-argument-error
+           :format-control "Invalid persistent array dimensions: ~S."
+           :format-arguments (list dimensions)))
   (reduce #'* dimensions :initial-value 1))
 
 (defun %persistent-array-row-major-index (dimensions subscripts)
@@ -113,13 +117,16 @@ I*(D2*D3) + J*D3 + K. Signals an error immediately, without any Git
 access, if SUBSCRIPTS' length does not match DIMENSIONS' length, or
 if any individual subscript is out of bounds for its own dimension."
   (unless (= (length dimensions) (length subscripts))
-    (error "Wrong number of subscripts ~S for persistent array of dimensions ~S."
-           subscripts dimensions))
+    (error 'invalid-argument-error
+           :format-control "Wrong number of subscripts ~S for persistent array of dimensions ~S."
+           :format-arguments (list subscripts dimensions)))
   (let ((index 0))
     (loop for dimension in dimensions
           for subscript in subscripts
           do (unless (and (integerp subscript) (<= 0 subscript) (< subscript dimension))
-               (error "Subscript ~S out of bounds for dimension size ~S." subscript dimension))
+               (error 'invalid-argument-error
+                      :format-control "Subscript ~S out of bounds for dimension size ~S."
+                      :format-arguments (list subscript dimension)))
              (setf index (+ (* index dimension) subscript)))
     index))
 
@@ -141,14 +148,17 @@ already has one."
              (data (%persistent-array-data array))
              (repository (get-repository array)))
         (unless dimensions
-          (error "Cannot serialize persistent array: its DIMENSIONS have not been set."))
+          (error 'unpersisted-object-error
+                 :format-control "Cannot serialize persistent array: its DIMENSIONS have not been set."))
         (unless data
-          (error "Cannot serialize persistent array: its DATA (underlying persistent-vector) has not been set."))
+          (error 'unpersisted-object-error
+                 :format-control "Cannot serialize persistent array: its DATA (underlying persistent-vector) has not been set."))
         (let ((volume (%persistent-array-volume dimensions)))
           (serialize-persistent-vector data)
           (unless (= volume (persistent-vector-length data))
-            (error "Persistent array of dimensions ~S implies ~D element~:P, but its underlying persistent-vector has ~D."
-                   dimensions volume (persistent-vector-length data)))
+            (error 'malformed-git-object-error
+                   :format-control "Persistent array of dimensions ~S implies ~D element~:P, but its underlying persistent-vector has ~D."
+                   :format-arguments (list dimensions volume (persistent-vector-length data))))
           (let* ((meta-blob (make-instance 'git-blob :repository repository
                                                       :sha (git-hash-object
                                                             repository "blob"
@@ -183,11 +193,14 @@ ARRAY loaded and returns it."
          (entries (deserialize-tree repository tree-octets))
          (data-entry (assoc "data" entries :test #'string=)))
     (unless (assoc ".meta" entries :test #'string=)
-      (error "Malformed persistent array tree: missing \".meta\" entry."))
+      (error 'malformed-git-object-error
+             :format-control "Malformed persistent array tree: missing \".meta\" entry."))
     (unless (assoc "README.md" entries :test #'string=)
-      (error "Malformed persistent array tree: missing \"README.md\" entry."))
+      (error 'malformed-git-object-error
+             :format-control "Malformed persistent array tree: missing \"README.md\" entry."))
     (unless data-entry
-      (error "Malformed persistent array tree: missing \"data\" entry."))
+      (error 'malformed-git-object-error
+             :format-control "Malformed persistent array tree: missing \"data\" entry."))
     (multiple-value-bind (dimensions element-type) (%deserialize-persistent-array-meta meta-octets)
       (setf (get-entries array) entries)
       (setf (persistent-array-dimensions array) dimensions)
@@ -212,7 +225,8 @@ responsibility. Returns ARRAY."
     (unless (persistent-array-dimensions array)
       (let ((meta-entry (assoc ".meta" (get-entries array) :test #'string=)))
         (unless meta-entry
-          (error "Malformed persistent array tree: missing \".meta\" entry."))
+          (error 'malformed-git-object-error
+                 :format-control "Malformed persistent array tree: missing \".meta\" entry."))
         (multiple-value-bind (dimensions element-type)
             (%deserialize-persistent-array-meta (git-cat-file repository (sha (cdr meta-entry))))
           (setf (persistent-array-dimensions array) dimensions)
@@ -220,7 +234,8 @@ responsibility. Returns ARRAY."
     (unless (%persistent-array-data array)
       (let ((data-entry (assoc "data" (get-entries array) :test #'string=)))
         (unless data-entry
-          (error "Malformed persistent array tree: missing \"data\" entry."))
+          (error 'malformed-git-object-error
+                 :format-control "Malformed persistent array tree: missing \"data\" entry."))
         (setf (%persistent-array-data array)
               (make-instance 'persistent-vector :repository repository :sha (sha (cdr data-entry)))))))
   array)

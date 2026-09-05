@@ -50,7 +50,7 @@ NIL if no branch named NAME exists in REPOSITORY."
     (and (zerop exit-code)
          (string-trim '(#\Space #\Newline #\Return) output))))
 
-(define-condition concurrent-modification-error (error)
+(define-condition concurrent-modification-error (githack-error)
   ((repository :initarg :repository :reader get-repository)
    (name :initarg :name :reader get-name)
    (expected-sha :initarg :expected-sha :reader get-expected-sha)
@@ -126,7 +126,7 @@ callers distinguish a not-yet-existing branch (an empty repository,
 awaiting its initial commit) from one whose commit failed to load."
   (let ((sha (git-show-ref-sha repository name)))
     (unless (or sha (not (eq if-does-not-exist :error)))
-      (error "No branch named ~S in repository ~A." name repository))
+      (error 'branch-not-found-error :repository repository :name name))
     (make-instance 'git-branch
                    :repository repository
                    :name name
@@ -146,7 +146,8 @@ check fails against Git's own current state for the ref. Returns
 BRANCH."
   (let ((sha (sha (get-target branch))))
     (unless sha
-      (error "Cannot update branch ~S: its TARGET commit has no SHA (not yet persisted)."
-             (get-name branch)))
+      (error 'unpersisted-object-error
+             :format-control "Cannot update branch ~S: its TARGET commit has no SHA (not yet persisted)."
+             :format-arguments (list (get-name branch))))
     (git-update-ref (get-repository branch) (get-name branch) sha :expected-sha expected-sha)
     branch))

@@ -20,13 +20,17 @@
   "Return the integer 0-15 that hex digit CHAR denotes, signaling an
 error if CHAR is not a valid hex digit."
   (or (digit-char-p char 16)
-      (error "~S is not a valid hexadecimal digit." char)))
+      (error 'malformed-git-object-error
+             :format-control "~S is not a valid hexadecimal digit."
+             :format-arguments (list char))))
 
 (defun %sha-hex->bytes (hex)
   "Convert the 40-character hexadecimal SHA-1 string HEX into the
 raw 20-byte binary octet vector Git itself uses inside tree entries."
   (unless (= (length hex) 40)
-    (error "Invalid SHA string ~S: must be exactly 40 characters." hex))
+    (error 'malformed-git-object-error
+           :format-control "Invalid SHA string ~S: must be exactly 40 characters."
+           :format-arguments (list hex)))
   (let ((bytes (make-array 20 :element-type '(unsigned-byte 8))))
     (dotimes (i 20 bytes)
       (setf (aref bytes i)
@@ -76,8 +80,9 @@ associated OBJECT's inferred mode, a space, NAME itself, a NUL byte,
 and OBJECT's SHA packed into 20 raw binary bytes."
   (let ((sha (sha object)))
     (unless sha
-      (error "Cannot serialize tree entry ~S: its GIT-OBJECT has no SHA (not yet persisted)."
-             name))
+      (error 'unpersisted-object-error
+             :format-control "Cannot serialize tree entry ~S: its GIT-OBJECT has no SHA (not yet persisted)."
+             :format-arguments (list name)))
     (concatenate '(simple-array (unsigned-byte 8) (*))
                  (sb-ext:string-to-octets (infer-git-mode object) :external-format :utf-8)
                  #(32)
@@ -102,7 +107,9 @@ SHA, and the index in OCTETS immediately following the entry."
          (nul (position 0 octets :start space))
          (sha-end (+ nul 1 20)))
     (unless (and space nul (<= sha-end (length octets)))
-      (error "Malformed Git tree entry at offset ~D." start))
+      (error 'malformed-git-object-error
+             :format-control "Malformed Git tree entry at offset ~D."
+             :format-arguments (list start)))
     (values (sb-ext:octets-to-string octets :start (1+ space) :end nul :external-format :utf-8)
             (%sha-bytes->hex octets (1+ nul))
             sha-end)))

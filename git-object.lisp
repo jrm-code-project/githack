@@ -35,7 +35,8 @@ its subclasses, typically via INFLATE-GIT-PROXY."))
   "Signal an error if OBJECT is a direct instance of the abstract
 GIT-OBJECT class rather than one of its concrete subclasses."
   (when (eq (class-of object) (find-class 'git-object))
-    (error "GIT-OBJECT is abstract and may not be instantiated directly.")))
+    (error 'invalid-argument-error
+           :format-control "GIT-OBJECT is abstract and may not be instantiated directly.")))
 
 (defclass git-blob (git-object)
   ((payload
@@ -134,6 +135,8 @@ object type as reported by GIT-TYPE."
        ((string= type "blob") 'git-blob)
        ((string= type "tree") 'git-tree)
        ((string= type "commit") 'git-commit)
-       (t (error "Unrecognized Git object type ~S for SHA ~S." type sha)))
+       (t (error 'malformed-git-object-error
+                 :format-control "Unrecognized Git object type ~S for SHA ~S."
+                 :format-arguments (list type sha))))
      :sha sha
      :repository repository)))

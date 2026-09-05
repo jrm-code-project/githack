@@ -47,8 +47,9 @@ symbol (e.g. 'EQUAL) instead of #'EQUAL."))
 
 (defmethod %normalize-hash-test ((test function))
   (or (nth-value 2 (function-lambda-expression test))
-      (error "Cannot determine a symbol name for the function ~S; pass TEST as a symbol (e.g. 'EQUAL) instead."
-             test)))
+      (error 'invalid-argument-error
+             :format-control "Cannot determine a symbol name for the function ~S; pass TEST as a symbol (e.g. 'EQUAL) instead."
+             :format-arguments (list test))))
 
 (defun %phash-test-function (table)
   "Return the two-argument equality predicate function named by

@@ -35,7 +35,9 @@ integer, and the default timezone offset."
 error mentioning DESCRIPTION if GIT-OBJECT has not yet been
 persisted (and so has no SHA)."
   (or (sha git-object)
-      (error "Cannot serialize commit: its ~A has no SHA (not yet persisted)." description)))
+      (error 'unpersisted-object-error
+             :format-control "Cannot serialize commit: its ~A has no SHA (not yet persisted)."
+             :format-arguments (list description))))
 
 (defun serialize-commit (commit)
   "Compile COMMIT into the exact plain-text format Git uses for a
@@ -92,7 +94,9 @@ discarding the trailing timezone offset."
   (let* ((timezone-space (position #\Space remainder :from-end t))
          (timestamp-space (position #\Space remainder :from-end t :end timezone-space)))
     (unless (and timezone-space timestamp-space)
-      (error "Malformed Git commit signature line ~S." remainder))
+      (error 'malformed-git-object-error
+             :format-control "Malformed Git commit signature line ~S."
+             :format-arguments (list remainder)))
     (values (subseq remainder 0 timestamp-space)
             (parse-integer remainder :start (1+ timestamp-space) :end timezone-space))))
 
@@ -120,11 +124,14 @@ COMMIT loaded and returns it."
             ((setf remainder (%parse-commit-header-line "committer" line))
              (setf committer-remainder remainder)))))
       (unless tree-sha
-        (error "Malformed Git commit object: missing \"tree\" header."))
+        (error 'malformed-git-object-error
+               :format-control "Malformed Git commit object: missing \"tree\" header."))
       (unless author-remainder
-        (error "Malformed Git commit object: missing \"author\" header."))
+        (error 'malformed-git-object-error
+               :format-control "Malformed Git commit object: missing \"author\" header."))
       (unless committer-remainder
-        (error "Malformed Git commit object: missing \"committer\" header."))
+        (error 'malformed-git-object-error
+               :format-control "Malformed Git commit object: missing \"committer\" header."))
       (setf parent-shas (nreverse parent-shas))
       (multiple-value-bind (author timestamp) (%parse-commit-signature-line author-remainder)
         (multiple-value-bind (committer committer-timestamp) (%parse-commit-signature-line committer-remainder)

@@ -294,10 +294,13 @@ its \".meta\" blob's :TAG is not :CLOS."
          (entries (deserialize-tree repository (git-cat-file repository (sha tree))))
          (meta-entry (assoc ".meta" entries :test #'string=)))
     (unless meta-entry
-      (error "Malformed persistent object tree: missing \".meta\" entry."))
+      (error 'malformed-git-object-error
+             :format-control "Malformed persistent object tree: missing \".meta\" entry."))
     (let ((meta (%deserialize-plist (git-cat-file repository (sha (cdr meta-entry))))))
       (unless (eq (getf meta :tag) :clos)
-        (error "Malformed persistent object .meta blob: ~S." meta))
+        (error 'malformed-git-object-error
+               :format-control "Malformed persistent object .meta blob: ~S."
+               :format-arguments (list meta)))
       (let* ((class-name (intern (getf meta :class) (getf meta :package)))
              (version (getf meta :version))
              (initargs

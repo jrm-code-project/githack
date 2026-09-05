@@ -225,9 +225,12 @@ TRANSACTION is not :READ-WRITE or is no longer :ACTIVE. Immediately
 unwinds out of the enclosing CALL-WITH-GIT-TRANSACTION's RECEIVER,
 so any code after this call within RECEIVER never runs."
   (unless (eq (get-status transaction) :active)
-    (error "Transaction is not active (status is ~S)." (get-status transaction)))
+    (error 'transaction-state-error
+           :format-control "Transaction is not active (status is ~S)."
+           :format-arguments (list (get-status transaction))))
   (unless (eq (get-mode transaction) :read-write)
-    (error "Cannot commit a :READ-ONLY transaction."))
+    (error 'transaction-state-error
+           :format-control "Cannot commit a :READ-ONLY transaction."))
   (%commit-git-transaction-now transaction root)
   (setf (get-status transaction) :committed)
   (throw 'git-transaction-exit transaction))
@@ -336,7 +339,8 @@ problem -- detected via GIT-UPDATE-REF's own compare-and-swap check:
 Returns TRANSACTION."
   (check-type conflict-resolution (member :error :retry :lock))
   (when (and (eq mode :read-write) (eq (get-mode repository) :read-only))
-    (error "Cannot open a :READ-WRITE transaction against a repository opened :READ-ONLY."))
+    (error 'transaction-state-error
+           :format-control "Cannot open a :READ-WRITE transaction against a repository opened :READ-ONLY."))
   (let* ((branch-name (or branch (get-branch repository)))
          (final-author (or author (get-author repository)))
          (final-committer (or committer (get-committer repository) final-author))

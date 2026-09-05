@@ -96,7 +96,9 @@ raw content of a persistent vector's \".meta\" blob -- via
 is :VECTOR."
   (let ((plist (%deserialize-plist octets)))
     (unless (eq (getf plist :tag) :vector)
-      (error "Malformed persistent vector .meta blob: ~S." plist))
+      (error 'malformed-git-object-error
+             :format-control "Malformed persistent vector .meta blob: ~S."
+             :format-arguments (list plist)))
     (values (getf plist :length) (getf plist :element-type))))
 
 (defun %persistent-vector-index-entries (vector)
@@ -194,9 +196,11 @@ TREE-OCTETS' entries do not include \".meta\" and \"README.md\".
 Marks VECTOR loaded and returns it."
   (let* ((entries (deserialize-tree (get-repository vector) tree-octets)))
     (unless (assoc ".meta" entries :test #'string=)
-      (error "Malformed persistent vector tree: missing \".meta\" entry."))
+      (error 'malformed-git-object-error
+             :format-control "Malformed persistent vector tree: missing \".meta\" entry."))
     (unless (assoc "README.md" entries :test #'string=)
-      (error "Malformed persistent vector tree: missing \"README.md\" entry."))
+      (error 'malformed-git-object-error
+             :format-control "Malformed persistent vector tree: missing \"README.md\" entry."))
     (multiple-value-bind (length element-type) (%deserialize-persistent-vector-meta meta-octets)
       (setf (get-entries vector) entries)
       (setf (persistent-vector-length vector) length)
@@ -221,7 +225,8 @@ VECTOR."
     (unless (persistent-vector-length vector)
       (let ((meta-entry (assoc ".meta" (get-entries vector) :test #'string=)))
         (unless meta-entry
-          (error "Malformed persistent vector tree: missing \".meta\" entry."))
+          (error 'malformed-git-object-error
+                 :format-control "Malformed persistent vector tree: missing \".meta\" entry."))
         (multiple-value-bind (length element-type)
             (%deserialize-persistent-vector-meta (git-cat-file repository (sha (cdr meta-entry))))
           (setf (persistent-vector-length vector) length)
@@ -247,7 +252,9 @@ own bounds without first consulting Git."
   (%ensure-persistent-vector-loaded vector)
   (let ((length (persistent-vector-length vector)))
     (unless (and (integerp index) (<= 0 index) (< index length))
-      (error "Index ~S out of bounds for persistent vector of length ~S." index length))
+      (error 'invalid-argument-error
+             :format-control "Index ~S out of bounds for persistent vector of length ~S."
+             :format-arguments (list index length)))
     (let ((cache (or (%persistent-vector-cache vector)
                       (setf (%persistent-vector-cache vector)
                             (make-array length :initial-element +persistent-vector-unloaded+)))))
@@ -257,7 +264,9 @@ own bounds without first consulting Git."
             (let* ((entries (get-entries vector))
                    (entry (assoc (princ-to-string index) entries :test #'string=)))
               (unless entry
-                (error "Malformed persistent vector tree: missing entry ~S." index))
+                (error 'malformed-git-object-error
+                       :format-control "Malformed persistent vector tree: missing entry ~S."
+                       :format-arguments (list index)))
               (let* ((object (cdr entry))
                      (value (if (typep object 'git-blob)
                                 (get-payload (%ensure-blob-loaded object))

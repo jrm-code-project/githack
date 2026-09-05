@@ -33,7 +33,9 @@ explanatory text), and \"value\" (GIT-OBJECT itself) -- transparently
 reversed by RESOLVE-COMMIT-ROOT. Signals an error if GIT-OBJECT has
 no SHA (is not yet persisted)."
   (unless (sha git-object)
-    (error "Cannot wrap unpersisted GIT-OBJECT ~S in an atomic-wrapper tree." git-object))
+    (error 'unpersisted-object-error
+           :format-control "Cannot wrap unpersisted GIT-OBJECT ~S in an atomic-wrapper tree."
+           :format-arguments (list git-object)))
   (let* ((meta-blob (make-instance 'git-blob :repository repository
                                               :sha (git-hash-object
                                                     repository "blob"

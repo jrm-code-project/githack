@@ -6,34 +6,35 @@
   :in-order-to ((test-op (test-op "githack/test")))
   :depends-on ("alexandria" "fold" "function" "named-let" "series")
   :components ((:file "package")
-               (:file "git-object" :depends-on ("package"))
+               (:file "conditions" :depends-on ("package"))
+               (:file "git-object" :depends-on ("conditions" "package"))
                (:file "git-io" :depends-on ("git-object" "package"))
-               (:file "git-blob" :depends-on ("git-object" "package"))
-               (:file "git-tree" :depends-on ("git-object" "package"))
-               (:file "git-commit" :depends-on ("git-object" "package"))
-               (:file "git-branch" :depends-on ("git-object" "package"))
+               (:file "git-blob" :depends-on ("git-object" "conditions" "package"))
+               (:file "git-tree" :depends-on ("git-object" "conditions" "package"))
+               (:file "git-commit" :depends-on ("git-object" "conditions" "package"))
+               (:file "git-branch" :depends-on ("git-object" "conditions" "package"))
                (:file "git-repository" :depends-on ("package"))
                (:file "persistent-cons"
-                :depends-on ("git-object" "git-blob" "git-tree" "git-io" "package"))
+                :depends-on ("git-object" "git-blob" "git-tree" "git-io" "conditions" "package"))
                (:file "atomic-wrapper"
-                :depends-on ("git-object" "git-blob" "git-tree" "git-commit" "git-io" "package"))
+                :depends-on ("git-object" "git-blob" "git-tree" "git-commit" "git-io" "conditions" "package"))
                (:file "persistent-vector"
-                :depends-on ("git-object" "git-blob" "git-tree" "git-io" "atomic-wrapper" "persistent-cons" "package"))
+                :depends-on ("git-object" "git-blob" "git-tree" "git-io" "atomic-wrapper" "persistent-cons" "conditions" "package"))
                (:file "persistent-array"
-                :depends-on ("git-object" "git-blob" "git-tree" "git-io" "atomic-wrapper" "persistent-vector" "package"))
+                :depends-on ("git-object" "git-blob" "git-tree" "git-io" "atomic-wrapper" "persistent-vector" "conditions" "package"))
                (:file "persistent-standard-class"
                 :depends-on ("git-object" "git-blob" "git-tree" "git-io" "atomic-wrapper"
-                              "persistent-cons" "persistent-vector" "persistent-array" "package"))
+                              "persistent-cons" "persistent-vector" "persistent-array" "conditions" "package"))
                (:file "persistent-struct"
                 :depends-on ("git-object" "git-blob" "git-tree" "persistent-standard-class" "package"))
                (:file "persistent-hash-table"
                 :depends-on ("git-object" "git-blob" "git-tree" "git-io" "atomic-wrapper"
-                              "persistent-cons" "persistent-vector" "persistent-struct" "package"))
-               (:file "transaction-lock" :depends-on ("package"))
+                              "persistent-cons" "persistent-vector" "persistent-struct" "conditions" "package"))
+               (:file "transaction-lock" :depends-on ("conditions" "package"))
                (:file "git-transaction"
                 :depends-on ("git-object" "git-tree" "git-commit" "git-branch" "git-repository"
                               "git-io" "persistent-cons" "persistent-vector" "persistent-array"
-                              "persistent-standard-class" "atomic-wrapper" "transaction-lock" "package"))
+                              "persistent-standard-class" "atomic-wrapper" "transaction-lock" "conditions" "package"))
                (:file "transaction"
                 :depends-on ("git-object" "git-blob" "git-io" "atomic-wrapper" "git-transaction" "git-repository" "package"))))
 

@@ -70,29 +70,30 @@ runtime cost of the system today and will not scale well.
 (writes) session per repository/transaction, falling back to today's
 one-shot subprocess calls only when unavailable.
 
-### 4. No custom condition hierarchy (Medium)
+### 4. No custom condition hierarchy (Resolved)
 
-No `define-condition` forms exist anywhere in the codebase. Every error
-path signals a plain `cl:error` with a format string, e.g.:
-
-- `git-object.lisp:35-38`, `git-object.lisp:137`
-- `git-tree.lisp:23`, `git-tree.lisp:29`
-- `git-branch.lisp:79`
-- `git-transaction.lisp:206-208`
-- `persistent-vector.lisp:250`
-- `persistent-array.lisp:116-122`
-
-Callers cannot programmatically distinguish "malformed Git object data" from
-"invalid API argument" from "missing branch" from "transaction already
-committed" except by pattern-matching the error message string. This makes
-building any retry/recovery logic (see item #1 above) or friendlier
-end-user error handling brittle.
-
-**Suggested fix:** introduce a small condition hierarchy rooted at a
-`githack-error` (or `git-object-error`) base condition, with a handful of
-specific subtypes (e.g. `malformed-git-object`, `unpersisted-object-error`,
-`transaction-state-error`, `branch-not-found`), and migrate the call sites
-above incrementally.
+**Resolved:** `conditions.lisp` now defines a `githack-error` base condition
+(itself a `simple-error` subclass, so most subtypes reuse `simple-error`'s
+`:format-control`/`:format-arguments`-based `:report`) with five leaf
+subtypes: `malformed-git-object-error` (corrupt/unexpected Git object bytes
+or text), `unpersisted-object-error` (an operation needs a SHA or other
+required state that has not been set yet), `transaction-state-error` (a
+`git-transaction`/`git-repository` operation attempted in the wrong
+status/mode), `invalid-argument-error` (a public entry point called with a
+malformed argument), and `branch-not-found-error` (`resolve-branch` found no
+such branch, with `repository`/`name` slots and a custom `:report`). The
+previously-existing `concurrent-modification-error` (`git-branch.lisp`) and
+`transaction-lock-timeout-error` (`transaction-lock.lisp`) were retrofitted
+to inherit from `githack-error` as well, so every condition GitHack itself
+signals is now `typep githack-error`. All ~50 real (non-test) `cl:error`
+call sites across `git-object.lisp`, `git-tree.lisp`, `git-commit.lisp`,
+`git-blob.lisp`, `git-branch.lisp`, `git-transaction.lisp`,
+`persistent-cons.lisp`, `persistent-vector.lisp`, `persistent-array.lisp`,
+`persistent-standard-class.lisp`, and `persistent-hash-table.lisp` were
+migrated to signal the appropriate subtype instead of a bare `cl:error`.
+Test-only call sites simulating arbitrary failures (in `test-helpers.lisp`
+and various `*-tests.lisp` files) were deliberately left as plain `cl:error`,
+since they are not part of GitHack's own public API surface.
 
 ### 5. No test file for `git-io.lisp` (Medium)
 

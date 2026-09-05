@@ -113,7 +113,13 @@
                 "TRANSACTION-LOCK-TIMEOUT-ERROR"
                 "WITH-REPOSITORY-TRANSACTION-LOCK"
                 "%TRANSACTION-LOCK-PATHNAME"
-                "%CALL-WITH-GIT-TRANSACTION-ATTEMPT")
+                "%CALL-WITH-GIT-TRANSACTION-ATTEMPT"
+                "GITHACK-ERROR"
+                "MALFORMED-GIT-OBJECT-ERROR"
+                "UNPERSISTED-OBJECT-ERROR"
+                "TRANSACTION-STATE-ERROR"
+                "INVALID-ARGUMENT-ERROR"
+                "BRANCH-NOT-FOUND-ERROR")
   (:export "GITHACK-SUITE"
            "RUN-GITHACK-TESTS"))
 
