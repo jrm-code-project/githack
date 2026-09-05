@@ -376,6 +376,59 @@ one shared, single underlying (key . value) Lisp cons series."
     (values (map-fn t #'car pairs)
             (map-fn t #'cdr pairs))))
 
+(defun scan-persistent-plist (list)
+  "Analogous to SERIES's own SCAN-PLIST: return two series -- the
+successive indicators and, correspondingly, values -- scanned from
+LIST (a PERSISTENT-CONS spine, a not-yet-retyped GIT-TREE proxy for
+one, or NIL for the empty plist) whose successive PERSISTENT-CAR
+elements directly alternate indicator, value, indicator, value, ...
+-- a flat spine of 2*N cons cells for N indicator/value pairs, unlike
+SCAN-PERSISTENT-ALIST's spine of N pairs each itself a further
+PERSISTENT-CONS. Each indicator and value is decoded via
+%PERSISTENT-CONS-DECODE, precisely as SCAN-PERSISTENT-LIST decodes
+its own elements. Terminates at the first indicator-position tail
+for which %PERSISTENT-CONS-TAIL-P is false, exactly as
+SCAN-PERSISTENT-LIST does; LIST is assumed to hold an even number of
+elements, exactly as CL:GETF/SCAN-PLIST assume of an ordinary plist.
+
+Unlike CL:SCAN-PLIST, this does NOT suppress shadowed duplicate
+indicators (SCAN-PLIST re-walks the entire plist from its head for
+every pair, comparing each against every earlier one, which would
+force fetching -- from Git -- every remaining cons cell of LIST just
+to decide whether to keep the current pair, defeating the entire
+purpose of a lazy, incremental scan). LIST is assumed to already
+hold at most one pair per indicator.
+
+An OPTIMIZABLE-SERIES-FUNCTION producing 2 output series, built
+entirely from the primitive SCAN-FN/MAP-FN series functions exactly
+as SCAN-PERSISTENT-LIST is, so it can be spliced and fused into a
+surrounding series expression by the SERIES compiler -- only the
+prefix of LIST actually demanded is ever fetched from Git. Each
+indicator/value pair's two cons cells are fetched and decoded into
+indicators/values only once, regardless of how many of the two
+returned series are actually consumed, since both are derived (via
+cheap, no-fetch CAR/CDR) from one shared, single underlying
+(indicator . value) Lisp cons series; and since %ENSURE-PERSISTENT-
+CONS-LOADED is idempotent (a no-op once a cons is already loaded),
+the value cons cell fetched while advancing to the next pair's own
+indicator-position tail is not re-fetched when later decoded."
+  (declare (optimizable-series-function 2))
+  (let* ((tails (scan-fn t
+                         (lambda () list)
+                         (lambda (tail)
+                           (persistent-cdr (%ensure-persistent-cons-loaded
+                                             (persistent-cdr (%ensure-persistent-cons-loaded tail)))))
+                         (lambda (tail) (not (%persistent-cons-tail-p tail)))))
+         (pairs (map-fn t
+                        (lambda (tail)
+                          (let* ((indicator-cons (%ensure-persistent-cons-loaded tail))
+                                 (value-cons (%ensure-persistent-cons-loaded (persistent-cdr indicator-cons))))
+                            (cons (%persistent-cons-decode (persistent-car indicator-cons))
+                                  (%persistent-cons-decode (persistent-car value-cons)))))
+                        tails)))
+    (values (map-fn t #'car pairs)
+            (map-fn t #'cdr pairs))))
+
 (defun %persistent-cons-encode (repository value)
   "Inverse of %PERSISTENT-CONS-DECODE: return VALUE itself, unchanged,
 if it is already a GIT-OBJECT (a compound proxy -- a GIT-TREE,

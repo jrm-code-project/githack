@@ -345,3 +345,74 @@ keys/values as the original in-memory alist."
       (multiple-value-bind (keys values) (scan-persistent-alist hollow)
         (is (equal '(:a :b) (series:collect keys)))
         (is (equal '(1 2) (series:collect values)))))))
+
+(defun %make-persistent-plist-spine (plist)
+  "Helper for the SCAN-PERSISTENT-PLIST tests below: build an
+in-memory, already GET-LOADED? PERSISTENT-CONS spine holding the
+successive elements of PLIST (an ordinary Lisp plist -- a flat list
+alternating indicator, value, indicator, value, ...) in order,
+wrapping each raw, non-GIT-OBJECT element in a fresh GIT-BLOB."
+  (reduce (lambda (value tail)
+            (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
+                                             :persistent-car (if (typep value 'git-object) value
+                                                                  (make-instance 'git-blob :repository :dummy-repo :payload value :loaded? t))
+                                             :persistent-cdr tail))
+          plist
+          :from-end t
+          :initial-value nil))
+
+(test scan-persistent-plist-of-nil-is-empty
+  "SCAN-PERSISTENT-PLIST of NIL (the empty plist) produces two empty
+series, for indicators and values respectively."
+  (multiple-value-bind (indicators values) (scan-persistent-plist nil)
+    (is (null (series:collect indicators)))
+    (is (null (series:collect values)))))
+
+(test scan-persistent-plist-collects-decoded-indicator-value-pairs
+  "SCAN-PERSISTENT-PLIST of an in-memory, already-loaded flat spine
+of alternating indicator/value elements produces two series --
+indicators and, respectively, values -- each decoded via
+%PERSISTENT-CONS-DECODE (a GIT-BLOB's own PAYLOAD, here plain
+keywords/integers), in the spine's own order."
+  (let ((spine (%make-persistent-plist-spine (list :a 1 :b 2 :c 3))))
+    (multiple-value-bind (indicators values) (scan-persistent-plist spine)
+      (is (equal '(:a :b :c) (series:collect indicators)))
+      (is (equal '(1 2 3) (series:collect values))))))
+
+(test scan-persistent-plist-passes-through-compound-values-unchanged
+  "SCAN-PERSISTENT-PLIST leaves an already-compound GIT-OBJECT value
+(a nested PERSISTENT-CONS, here) unwrapped, exactly as
+%PERSISTENT-CONS-DECODE always does for any non-GIT-BLOB element."
+  (let* ((nested (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
+                                 :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload :inner :loaded? t)
+                                 :persistent-cdr nil))
+         (spine (%make-persistent-plist-spine (list :a nested))))
+    (multiple-value-bind (indicators values) (scan-persistent-plist spine)
+      (is (equal '(:a) (series:collect indicators)))
+      (is (eq nested (first (series:collect values)))))))
+
+(test scan-persistent-plist-round-trips-through-a-fake-git-repository
+  "SCAN-PERSISTENT-PLIST correctly walks a flat spine of alternating
+indicator/value elements that must be lazily fetched and inflated
+from Git: after serializing an in-memory plist and obtaining only a
+hollow proxy for its head SHA (via INFLATE-GIT-PROXY, exactly as a
+fresh repository read would), scanning the hollow proxy yields the
+same decoded indicators/values as the original in-memory plist."
+  (with-fake-git-repository ()
+    (let* ((c4 (make-instance 'persistent-cons :repository :dummy-repo
+                               :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload 2)
+                               :persistent-cdr nil))
+           (c3 (make-instance 'persistent-cons :repository :dummy-repo
+                               :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload :b)
+                               :persistent-cdr c4))
+           (c2 (make-instance 'persistent-cons :repository :dummy-repo
+                               :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload 1)
+                               :persistent-cdr c3))
+           (c1 (make-instance 'persistent-cons :repository :dummy-repo
+                               :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload :a)
+                               :persistent-cdr c2))
+           (head-sha (serialize-persistent-cons c1))
+           (hollow (inflate-git-proxy :dummy-repo head-sha)))
+      (multiple-value-bind (indicators values) (scan-persistent-plist hollow)
+        (is (equal '(:a :b) (series:collect indicators)))
+        (is (equal '(1 2) (series:collect values)))))))

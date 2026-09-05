@@ -70,6 +70,7 @@
                 "%ENSURE-PERSISTENT-CONS-LOADED"
                 "SCAN-PERSISTENT-LIST"
                 "SCAN-PERSISTENT-ALIST"
+                "SCAN-PERSISTENT-PLIST"
                 "COLLECT-PERSISTENT-LIST"
                 "WRAP-ATOMIC-COMMIT-ROOT"
                 "RESOLVE-COMMIT-ROOT"
