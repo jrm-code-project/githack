@@ -69,7 +69,15 @@
                 "SERIALIZE-PERSISTENT-VECTOR"
                 "DESERIALIZE-PERSISTENT-VECTOR"
                 "PERSISTENT-VECTOR-REF"
-                "+PERSISTENT-VECTOR-README+")
+                "+PERSISTENT-VECTOR-README+"
+                "PERSISTENT-ARRAY"
+                "PERSISTENT-ARRAY-DIMENSIONS"
+                "PERSISTENT-ARRAY-ELEMENT-TYPE"
+                "SERIALIZE-PERSISTENT-ARRAY"
+                "DESERIALIZE-PERSISTENT-ARRAY"
+                "PERSISTENT-ARRAY-REF"
+                "+PERSISTENT-ARRAY-README+"
+                "%PERSISTENT-ARRAY-DATA")
   (:export "GITHACK-SUITE"
            "RUN-GITHACK-TESTS"))
 

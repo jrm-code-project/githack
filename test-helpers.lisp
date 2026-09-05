@@ -52,10 +52,18 @@ hexadecimal string from TYPE and OCTETS, suitable for use as a fake
 Git SHA in tests: identical TYPE/OCTETS pairs always produce the
 same fake SHA, and different pairs are (with overwhelming
 likelihood) different, without ever touching the filesystem or an
-external process."
-  (let ((hash (mod (logxor (sxhash type) (sxhash (coerce octets 'list)) (length octets))
-                    (expt 16 40))))
-    (format nil "~(~40,'0X~)" hash)))
+external process. Folds every byte of OCTETS individually (an
+FNV-1a-style hash) rather than hashing OCTETS as a whole via SXHASH,
+since SBCL's SXHASH on a list is only required to examine a bounded
+prefix and so can (and does, e.g. for octet vectors as short and as
+similar as the serialized envelopes of small, adjacent integers)
+collide for distinct OCTETS that merely share a long enough common
+prefix."
+  (let ((hash (logand (sxhash type) #xFFFFFFFFFFFFFFFF)))
+    (loop for byte across octets
+          do (setf hash (logand (* (logxor hash byte) 1099511628211) #xFFFFFFFFFFFFFFFF)))
+    (setf hash (logxor hash (length octets)))
+    (format nil "~(~40,'0X~)" (mod hash (expt 16 40)))))
 
 (defmacro with-fake-git-hash-object (() &body body)
   "Within BODY, GIT-HASH-OBJECT does not shell out to Git or touch
