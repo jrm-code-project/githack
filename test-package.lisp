@@ -60,7 +60,9 @@
                 "WRAP-ATOMIC-COMMIT-ROOT"
                 "RESOLVE-COMMIT-ROOT"
                 "+ATOMIC-WRAPPER-README+"
-                "WITH-GIT-TRANSACTION")
+                "WITH-GIT-TRANSACTION"
+                "CALL-WITH-TRANSACTION"
+                "WITH-TRANSACTION")
   (:export "GITHACK-SUITE"
            "RUN-GITHACK-TESTS"))
 

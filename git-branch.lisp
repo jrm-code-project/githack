@@ -63,18 +63,24 @@ Returns SHA."
                      :output :string)
   sha)
 
-(defun resolve-branch (repository name)
+(defun resolve-branch (repository name &key (if-does-not-exist :error))
   "Return a new GIT-BRANCH naming NAME in REPOSITORY, whose TARGET
 slot holds a lazily-loaded GIT-COMMIT proxy (via INFLATE-GIT-PROXY)
 for the SHA that branch currently points to, as reported by
-GIT-SHOW-REF-SHA. Signals an error if no such branch exists."
+GIT-SHOW-REF-SHA.
+
+IF-DOES-NOT-EXIST controls what happens when no such branch exists
+yet: :ERROR (the default) signals an error; any other value (e.g.
+NIL) instead returns a GIT-BRANCH whose TARGET slot is NIL, letting
+callers distinguish a not-yet-existing branch (an empty repository,
+awaiting its initial commit) from one whose commit failed to load."
   (let ((sha (git-show-ref-sha repository name)))
-    (unless sha
+    (unless (or sha (not (eq if-does-not-exist :error)))
       (error "No branch named ~S in repository ~A." name repository))
     (make-instance 'git-branch
                    :repository repository
                    :name name
-                   :target (inflate-git-proxy repository sha))))
+                   :target (and sha (inflate-git-proxy repository sha)))))
 
 (defun update-branch (branch)
   "Force Git to advance BRANCH's ref (refs/heads/<name>) to the SHA

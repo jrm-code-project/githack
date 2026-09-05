@@ -143,7 +143,8 @@ Records the new commit in TRANSACTION's RESULT slot and returns it."
                                  :author (get-author transaction)
                                  :committer (get-committer transaction)
                                  :timestamp (%unix-time-now)
-                                 :message (get-message transaction))))
+                                 :message (get-message transaction)
+                                 :loaded? t)))
     (%persist-git-commit-object commit)
     (setf (get-target (get-target-branch transaction)) commit)
     (update-branch (get-target-branch transaction))
@@ -181,7 +182,9 @@ cascading BRANCH/AUTHOR/COMMITTER/MESSAGE from REPOSITORY's own
 defaults for any not explicitly supplied here. Resolves BRANCH to
 its current head GIT-COMMIT (via RESOLVE-BRANCH and
 INFLATE-GIT-PROXY) and, unless PARENTS is supplied, defaults PARENTS
-to a list of just that head commit. Invokes (FUNCALL RECEIVER
+to a list of just that head commit -- or to the empty list if BRANCH
+does not exist yet (an empty repository, awaiting its initial
+commit), in which case HEAD-COMMIT is NIL. Invokes (FUNCALL RECEIVER
 TRANSACTION HEAD-COMMIT). RECEIVER may call RESOLVE-COMMIT-ROOT on
 HEAD-COMMIT to transparently retrieve its logical root object,
 whether that root is a GIT-TREE or (having been auto-wrapped by a
@@ -198,8 +201,9 @@ ATOMIC-WRAPPER-TREE by WRAP-ATOMIC-COMMIT-ROOT, since Git itself
 requires every commit to point at a tree. When MODE is :READ-WRITE,
 that root (and its modified children) is then automatically
 persisted, a new commit created and persisted from it, and the
-branch advanced -- exactly as COMMIT-GIT-TRANSACTION would. If
-RECEIVER instead calls COMMIT-GIT-TRANSACTION or
+branch advanced -- exactly as COMMIT-GIT-TRANSACTION would (this
+also creates BRANCH's ref for the first time, if it did not already
+exist). If RECEIVER instead calls COMMIT-GIT-TRANSACTION or
 ABORT-GIT-TRANSACTION itself, or signals an error, that explicit or
 abnormal exit is honored instead and nothing further is written.
 Returns TRANSACTION."
@@ -209,9 +213,9 @@ Returns TRANSACTION."
          (final-author (or author (get-author repository)))
          (final-committer (or committer (get-committer repository) final-author))
          (final-message (or message (get-message repository)))
-         (target-branch (resolve-branch (get-pathname repository) branch-name))
+         (target-branch (resolve-branch (get-pathname repository) branch-name :if-does-not-exist nil))
          (head-commit (get-target target-branch))
-         (final-parents (or parents (list head-commit)))
+         (final-parents (or parents (and head-commit (list head-commit))))
          (transaction (make-instance 'git-transaction
                                       :git-repository repository
                                       :mode mode

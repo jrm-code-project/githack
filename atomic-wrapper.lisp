@@ -72,6 +72,19 @@ ordinary tree with no \".meta\" entry at all."
          (eq (getf (%deserialize-plist (git-cat-file repository (sha (cdr meta-entry)))) :tag)
              :atomic-wrapper))))
 
+(defun %ensure-commit-loaded (commit)
+  "Ensure COMMIT's TREE/PARENTS/AUTHOR/COMMITTER/TIMESTAMP/MESSAGE
+slots are populated, fetching and parsing its raw Git commit text
+via GIT-CAT-FILE and DESERIALIZE-COMMIT if COMMIT is not already
+loaded (as is the case for a freshly INFLATE-GIT-PROXY'd commit,
+e.g. a GIT-BRANCH's TARGET). Returns COMMIT."
+  (unless (get-loaded? commit)
+    (deserialize-commit commit
+                         (sb-ext:octets-to-string
+                          (git-cat-file (get-repository commit) (sha commit))
+                          :external-format :utf-8)))
+  commit)
+
 (defun resolve-commit-root (commit)
   "Return the logical root GIT-OBJECT proxy for COMMIT: ordinarily
 COMMIT's own GET-TREE, loaded if necessary, but transparently
@@ -79,7 +92,10 @@ unwrapped to the single underlying GIT-OBJECT held in its \"value\"
 entry if that tree turns out to be an ATOMIC-WRAPPER-TREE (as
 created by WRAP-ATOMIC-COMMIT-ROOT). The wrapper is thus entirely
 invisible to callers: they receive back whatever kind of GIT-OBJECT
-was originally committed as the root, tree or atom alike."
+was originally committed as the root, tree or atom alike. COMMIT
+itself is loaded first (via %ENSURE-COMMIT-LOADED) if necessary, so
+this works equally well on a freshly INFLATE-GIT-PROXY'd commit."
+  (%ensure-commit-loaded commit)
   (let* ((repository (get-repository commit))
          (tree (%ensure-tree-entries-loaded repository (get-tree commit))))
     (if (%atomic-wrapper-tree-p repository tree)

@@ -45,7 +45,8 @@ not any kind of wrapper)."
                                          :sha "5555555555555555555555555555555555555555"
                                          :loaded? t))
          (commit (make-instance 'git-commit :repository :dummy-repo :tree tree
-                                             :sha "6666666666666666666666666666666666666666")))
+                                             :sha "6666666666666666666666666666666666666666"
+                                             :loaded? t)))
     (is (eq tree (resolve-commit-root commit)))))
 
 (test resolve-commit-root-unwraps-an-atomic-wrapper-tree
@@ -60,10 +61,40 @@ WRAP-ATOMIC-COMMIT-ROOT and a real (fake) Git tree/commit."
              (commit (make-instance 'git-commit :repository :dummy-repo
                                                  :tree (make-instance 'git-tree :repository :dummy-repo
                                                                                  :sha (sha wrapper))
-                                                 :sha "8888888888888888888888888888888888888888")))
+                                                 :sha "8888888888888888888888888888888888888888"
+                                                 :loaded? t)))
         (with-fake-git-type ((list (cons blob-sha "blob")
                                     (cons (sha (cdr (assoc ".meta" wrapper-entries :test #'string=))) "blob")
                                     (cons (sha (cdr (assoc "README.md" wrapper-entries :test #'string=))) "blob")))
           (let ((resolved (resolve-commit-root commit)))
             (is (typep resolved 'git-blob))
             (is (string= blob-sha (sha resolved)))))))))
+
+(test resolve-commit-root-loads-a-genuinely-unloaded-commit-first
+  "RESOLVE-COMMIT-ROOT works on a genuinely unloaded GIT-COMMIT proxy
+-- as INFLATE-GIT-PROXY would produce for a GIT-BRANCH's TARGET --
+fetching and parsing its raw commit text via GIT-CAT-FILE and
+DESERIALIZE-COMMIT before inspecting its tree, exactly as it would
+for an already fully in-memory commit."
+  (let* ((blob-sha "9999999999999999999999999999999999999999")
+         (blob (make-instance 'git-blob :repository :dummy-repo :payload 7 :sha blob-sha)))
+    (with-fake-git-object-store ()
+      (let* ((tree (make-instance 'git-tree :repository :dummy-repo
+                                             :entries (list (cons "f.txt" blob))))
+             (tree-sha (progn
+                         (setf (sha tree) (git-hash-object :dummy-repo "tree" (serialize-tree tree)))
+                         (sha tree)))
+             (commit (make-instance 'git-commit :repository :dummy-repo
+                                                 :tree tree :parents '()
+                                                 :author "A <a@b.c>" :committer "A <a@b.c>"
+                                                 :timestamp 1000 :message "initial")))
+        (setf (sha commit)
+              (git-hash-object :dummy-repo "commit"
+                                (sb-ext:string-to-octets (serialize-commit commit) :external-format :utf-8)))
+        (let ((unloaded-commit (make-instance 'git-commit :repository :dummy-repo :sha (sha commit))))
+          (is (null (get-loaded? unloaded-commit)))
+          (with-fake-git-type ((list (cons tree-sha "tree") (cons blob-sha "blob")))
+            (let ((resolved (resolve-commit-root unloaded-commit)))
+              (is (eq t (get-loaded? unloaded-commit)))
+              (is (typep resolved 'git-tree))
+              (is (string= tree-sha (sha resolved))))))))))
