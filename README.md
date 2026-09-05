@@ -4,4 +4,4 @@ A PERSISTENT-STRUCT (and so, transitively, a PERSISTENT-OBJECT, GIT-TREE, and ST
 
 ## Slots
 
-  * **catalog**: The CATALOG slot of a CATALOG instance.
+  * **catalog**: The CATALOG slot of a LIBRARY instance.

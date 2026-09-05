@@ -6,6 +6,6 @@ A PERSISTENT-STRUCT (and so, transitively, a PERSISTENT-OBJECT, GIT-TREE, and ST
 
 ## Slots
 
-  * **test**: The TEST slot of a TEST instance.
-  * **count**: The COUNT slot of a COUNT instance.
-  * **buckets**: The BUCKETS slot of a BUCKETS instance.
+  * **test**: The TEST slot of a PERSISTENT-HASH-TABLE instance.
+  * **count**: The COUNT slot of a PERSISTENT-HASH-TABLE instance.
+  * **buckets**: The BUCKETS slot of a PERSISTENT-HASH-TABLE instance.

@@ -7,7 +7,7 @@ A PERSISTENT-STRUCT (and so, transitively, a PERSISTENT-OBJECT, GIT-TREE, and ST
 
 ## Slots
 
-  * **isbn**: The ISBN slot of a ISBN instance.
-  * **title**: The TITLE slot of a TITLE instance.
-  * **author**: The AUTHOR slot of a AUTHOR instance.
-  * **checked-out-p**: The CHECKED-OUT-P slot of a CHECKED-OUT-P instance.
+  * **isbn**: The ISBN slot of a BOOK instance.
+  * **title**: The TITLE slot of a BOOK instance.
+  * **author**: The AUTHOR slot of a BOOK instance.
+  * **checked-out-p**: The CHECKED-OUT-P slot of a BOOK instance.
