@@ -9,6 +9,17 @@
 ;;; UNBOUND-VARIABLE.
 (defvar *repository*)
 
+;; DEFVAR's own DOCUMENTATION argument cannot be supplied without
+;; also supplying an INITIAL-VALUE (which would leave *REPOSITORY*
+;; bound instead of unbound by default), so its docstring is attached
+;; separately here via (SETF DOCUMENTATION).
+(setf (documentation '*repository* 'variable)
+      "The GIT-REPOSITORY context object currently in dynamic scope,
+dynamically bound by CALL-WITH-REPOSITORY to the GIT-REPOSITORY it
+constructs, for the duration of its call to RECEIVER. Unbound at the
+top level -- referencing it outside the dynamic extent of a
+CALL-WITH-REPOSITORY call signals UNBOUND-VARIABLE.")
+
 ;;; GIT-REPOSITORY is a lightweight context object: it bundles a Git
 ;;; repository's on-disk location (its --git-dir PATHNAME) together
 ;;; with the cascading defaults (BRANCH, AUTHOR, COMMITTER, MESSAGE,
