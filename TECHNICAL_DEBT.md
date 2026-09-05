@@ -30,34 +30,16 @@ acquires an exclusive, repository-wide lock file
 (`transaction-lock.lisp`) before even reading the branch's head, so
 concurrent `:lock`-mode transactions serialize instead of racing.
 
-### 2. Documentation describes an architecture that no longer exists (High)
+### 2. Documentation describes an architecture that no longer exists (Resolved)
 
-`README.md` and `GEMINI.md` extensively document the old CFFI/libgit2-based
-CID/mapper/versioned-object prototype system (persistent WTTrees,
-`CID-OBJECT`, `CID-SET`, `CID-DETAIL-TABLE`, `CID-MASTER-TABLE`,
-distributed identifiers, mappers, `CVI`/`CVFILE`) — all of which was
-deliberately deleted from the codebase (see `git log` for the deletion of
-`githack.lisp`, `tests.lisp`, `cid-*.lisp`, `mapper.lisp`,
-`integer-mapper.lisp`, `versioned-object.lisp`, `versioned-value.lisp`,
-`persistent-wttree.lisp`, etc.) in favor of the current `git-object` proxy
-architecture (`git-blob`/`git-tree`/`git-commit`/`git-branch`,
-`call-with-repository`/`call-with-git-transaction`).
-
-- `README.md:47-113` (CID/mapper/versioned-value sections, none of which
-  exist in the current tree)
-- `GEMINI.md` (describes `githack.lisp`, `git2.dll`/`d:\lib\git2.dll` CFFI
-  loading, and the old `tests.lisp`/`run-githack-tests` raw-assert suite,
-  none of which are accurate for the current architecture)
-
-This actively misleads new contributors (and any AI coding assistant reading
-these files) about what files exist, what to load, and how to run tests.
-This should be rewritten (or clearly marked "historical/superseded") as a
-priority, since it is pure onboarding risk with no upside.
-
-**Suggested fix:** rewrite `README.md` to describe the current `git-object`
-proxy architecture (mirroring the accurate description already present in
-this repo's Copilot custom instructions), and either delete `GEMINI.md` or
-mark it explicitly as a historical snapshot that predates the rewrite.
+**Resolved:** `README.md` and `GEMINI.md` are rewritten to describe the
+current `git-object` proxy architecture (`git-blob`/`git-tree`/
+`git-commit`/`git-branch`, the persistent-data-structure layer, the
+`persistent-standard-class` MOP integration, and the
+`git-repository`/`git-transaction`/`transaction` layer with its
+`:conflict-resolution` modes), and both now correctly note that GitHack has
+no `libgit2`/CFFI bindings at all — every Git operation shells out to the
+`git` executable via `uiop:run-program`.
 
 ---
 
