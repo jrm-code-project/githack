@@ -81,7 +81,7 @@ GIT-SHOW-REF-SHA. Signals an error if no such branch exists."
 of the GIT-COMMIT currently held in its TARGET slot, via
 GIT-UPDATE-REF. Signals an error if TARGET has no SHA (not yet
 persisted). Returns BRANCH."
-  (let ((sha (get-sha (get-target branch))))
+  (let ((sha (sha (get-target branch))))
     (unless sha
       (error "Cannot update branch ~S: its TARGET commit has no SHA (not yet persisted)."
              (get-name branch)))

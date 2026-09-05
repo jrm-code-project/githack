@@ -114,11 +114,11 @@ persisted -- recursively -- has a SHA, writing each unpersisted
 GIT-BLOB's PAYLOAD and each unpersisted GIT-TREE's serialized
 ENTRIES to Git's object database via GIT-HASH-OBJECT. Returns TREE's
 own SHA."
-  (or (get-sha tree)
+  (or (sha tree)
       (progn
         (dolist (entry (get-entries tree))
           (%persist-git-object (cdr entry)))
-        (setf (get-sha tree)
+        (setf (sha tree)
               (git-hash-object (get-repository tree) "tree" (serialize-tree tree))))))
 
 (defun %persist-git-object (git-object)
@@ -127,11 +127,11 @@ it (and, for a GIT-TREE, its children) to Git's object database if
 it does not already. Returns GIT-OBJECT's SHA. Objects that already
 have a SHA are assumed already present in Git's object database and
 are left untouched."
-  (or (get-sha git-object)
+  (or (sha git-object)
       (etypecase git-object
         (git-tree (%persist-git-tree-object git-object))
         (git-blob
-         (setf (get-sha git-object)
+         (setf (sha git-object)
                (git-hash-object (get-repository git-object) "blob"
                                  (serialize-atom (get-payload git-object))))))))
 
@@ -141,8 +141,8 @@ form to Git's object database via GIT-HASH-OBJECT if it does not
 already have one. Returns COMMIT's SHA. Assumes COMMIT's TREE and
 PARENTS are already persisted (SERIALIZE-COMMIT signals an error
 otherwise)."
-  (or (get-sha commit)
-      (setf (get-sha commit)
+  (or (sha commit)
+      (setf (sha commit)
             (git-hash-object (get-repository commit) "commit"
                               (sb-ext:string-to-octets (serialize-commit commit) :external-format :utf-8)))))
 

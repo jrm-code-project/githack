@@ -12,7 +12,7 @@
   ((sha
     :initarg :sha
     :initform nil
-    :accessor get-sha
+    :accessor sha
     :type (or null string)
     :documentation "The object's Git SHA-1, or NIL if not yet computed.")
    (repository

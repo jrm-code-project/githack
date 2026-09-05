@@ -65,10 +65,10 @@ correctly-typed, correctly-SHA'd proxy objects."
         (destructuring-bind (first second) result
           (is (string= "file.txt" (car first)))
           (is (typep (cdr first) 'git-blob))
-          (is (string= +blob-sha+ (get-sha (cdr first))))
+          (is (string= +blob-sha+ (sha (cdr first))))
           (is (string= "subdir" (car second)))
           (is (typep (cdr second) 'git-tree))
-          (is (string= +tree-sha+ (get-sha (cdr second)))))))))
+          (is (string= +tree-sha+ (sha (cdr second)))))))))
 
 (test deserialize-tree-orders-file-before-similarly-named-directory
   "Git's directory-suffix sorting rule means a file named \"ab.txt\"

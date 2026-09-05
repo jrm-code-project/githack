@@ -34,7 +34,7 @@ integer, and the default timezone offset."
   "Return GIT-OBJECT's 40-character hexadecimal SHA, signaling an
 error mentioning DESCRIPTION if GIT-OBJECT has not yet been
 persisted (and so has no SHA)."
-  (or (get-sha git-object)
+  (or (sha git-object)
       (error "Cannot serialize commit: its ~A has no SHA (not yet persisted)." description)))
 
 (defun serialize-commit (commit)

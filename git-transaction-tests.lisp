@@ -54,7 +54,7 @@ resolved and passed to RECEIVER."
         (is (string= "The Boss <boss@githack.local>" (get-committer captured-transaction)))
         (is (string= "default message" (get-message captured-transaction)))
         (is (typep captured-head 'git-commit))
-        (is (string= +head-sha+ (get-sha captured-head)))
+        (is (string= +head-sha+ (sha captured-head)))
         (is (equal (list captured-head) (get-parents captured-transaction)))))))
 
 (test call-with-git-transaction-respects-explicit-overrides
@@ -150,22 +150,22 @@ is advanced to point at it."
                                                            (declare (ignore tx head))
                                                            tree))))
             (is (eq :committed (get-status transaction)))
-            (is (stringp (get-sha unsaved-blob)))
-            (is (stringp (get-sha tree)))
+            (is (stringp (sha unsaved-blob)))
+            (is (stringp (sha tree)))
             (let ((commit (get-result transaction)))
               (is (typep commit 'git-commit))
-              (is (stringp (get-sha commit)))
+              (is (stringp (sha commit)))
               (is (eq tree (get-tree commit)))
               (is (string= "The Boss <boss@githack.local>" (get-author commit)))
               (is (string= "The Boss <boss@githack.local>" (get-committer commit)))
               (is (string= "default message" (get-message commit)))
               (is (= 1 (length (get-parents commit))))
-              (is (string= +head-sha+ (get-sha (first (get-parents commit)))))
+              (is (string= +head-sha+ (sha (first (get-parents commit)))))
               (is (= 1 (length update-calls)))
               (destructuring-bind (called-repository name sha) (first update-calls)
                 (is (equal +repo-path+ called-repository))
                 (is (string= "main" name))
-                (is (string= (get-sha commit) sha))))))))))
+                (is (string= (sha commit) sha))))))))))
 
 (test commit-git-transaction-commits-immediately-and-skips-later-receiver-code
   "COMMIT-GIT-TRANSACTION, called explicitly inside RECEIVER, commits

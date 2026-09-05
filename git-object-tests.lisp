@@ -12,10 +12,10 @@
   "GIT-OBJECT itself must never be directly instantiable."
   (signals error (make-instance 'git-object)))
 
-(test get-sha-defaults-to-nil
+(test sha-defaults-to-nil
   "A newly created proxy with no :SHA supplied has a NIL SHA and is unloaded."
   (let ((blob (make-instance 'git-blob :repository :dummy-repo)))
-    (is (null (get-sha blob)))
+    (is (null (sha blob)))
     (is (null (get-loaded? blob)))))
 
 (test git-blob-instantiates
@@ -23,7 +23,7 @@
   (let ((blob (make-instance 'git-blob :sha "abc123" :repository :dummy-repo)))
     (is (typep blob 'git-object))
     (is (typep blob 'git-blob))
-    (is (string= (get-sha blob) "abc123"))
+    (is (string= (sha blob) "abc123"))
     (is (eq (get-repository blob) :dummy-repo))
     (is (null (get-loaded? blob)))))
 
@@ -32,14 +32,14 @@
   (let ((tree (make-instance 'git-tree :sha "def456" :repository :dummy-repo)))
     (is (typep tree 'git-object))
     (is (typep tree 'git-tree))
-    (is (string= (get-sha tree) "def456"))))
+    (is (string= (sha tree) "def456"))))
 
 (test git-commit-instantiates
   "GIT-COMMIT is a concrete GIT-OBJECT subclass whose SHA reads back as constructed."
   (let ((commit (make-instance 'git-commit :sha "ghi789" :repository :dummy-repo)))
     (is (typep commit 'git-object))
     (is (typep commit 'git-commit))
-    (is (string= (get-sha commit) "ghi789"))))
+    (is (string= (sha commit) "ghi789"))))
 
 (test get-loaded?-can-be-set-explicitly
   "LOADED? can be supplied at construction time via the :loaded? initarg."
@@ -52,7 +52,7 @@
   (with-fake-git-type ((list (cons "b1" "blob")))
     (let ((object (inflate-git-proxy :dummy-repo "b1")))
       (is (typep object 'git-blob))
-      (is (string= (get-sha object) "b1"))
+      (is (string= (sha object) "b1"))
       (is (eq (get-repository object) :dummy-repo)))))
 
 (test inflate-git-proxy-dispatches-tree

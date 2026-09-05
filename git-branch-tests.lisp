@@ -31,7 +31,7 @@ lazily-loaded GIT-COMMIT proxy for that SHA."
         (is (string= "main" (get-name branch)))
         (is (eq :dummy-repo (get-repository branch)))
         (is (typep (get-target branch) 'git-commit))
-        (is (string= +commit-sha+ (get-sha (get-target branch))))
+        (is (string= +commit-sha+ (sha (get-target branch))))
         (is (null (get-loaded? (get-target branch))))))))
 
 (test resolve-branch-signals-error-for-unknown-branch

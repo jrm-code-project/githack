@@ -74,7 +74,7 @@ leaving PARENTS empty."
         (is (eq commit result))
         (is (eq t (get-loaded? commit)))
         (is (typep (get-tree commit) 'git-tree))
-        (is (string= +root-tree-sha+ (get-sha (get-tree commit))))
+        (is (string= +root-tree-sha+ (sha (get-tree commit))))
         (is (null (get-parents commit)))
         (is (string= "The Boss <boss@githack.local>" (get-author commit)))
         (is (string= "The Boss <boss@githack.local>" (get-committer commit)))
@@ -94,9 +94,9 @@ the order they appear, as lazily-loaded GIT-COMMIT proxies."
       (is (= 2 (length (get-parents commit))))
       (destructuring-bind (first-parent second-parent) (get-parents commit)
         (is (typep first-parent 'git-commit))
-        (is (string= +parent-1-sha+ (get-sha first-parent)))
+        (is (string= +parent-1-sha+ (sha first-parent)))
         (is (typep second-parent 'git-commit))
-        (is (string= +parent-2-sha+ (get-sha second-parent)))))))
+        (is (string= +parent-2-sha+ (sha second-parent)))))))
 
 (test deserialize-commit-preserves-multiline-message
   "DESERIALIZE-COMMIT's MESSAGE includes everything after the blank
@@ -119,9 +119,9 @@ into a fresh GIT-COMMIT reconstructs equivalent slot values."
     (with-fake-git-type ((list (cons +root-tree-sha+ "tree")
                                (cons +parent-1-sha+ "commit")))
       (deserialize-commit reloaded text)
-      (is (string= +root-tree-sha+ (get-sha (get-tree reloaded))))
+      (is (string= +root-tree-sha+ (sha (get-tree reloaded))))
       (is (= 1 (length (get-parents reloaded))))
-      (is (string= +parent-1-sha+ (get-sha (first (get-parents reloaded)))))
+      (is (string= +parent-1-sha+ (sha (first (get-parents reloaded)))))
       (is (string= (get-author original) (get-author reloaded)))
       (is (string= (get-committer original) (get-committer reloaded)))
       (is (= (get-timestamp original) (get-timestamp reloaded)))

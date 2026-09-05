@@ -70,7 +70,7 @@ cons) sorted into the exact order Git requires for tree hashing."
   "Return the raw byte-vector encoding of one tree entry: NAME's
 associated OBJECT's inferred mode, a space, NAME itself, a NUL byte,
 and OBJECT's SHA packed into 20 raw binary bytes."
-  (let ((sha (get-sha object)))
+  (let ((sha (sha object)))
     (unless sha
       (error "Cannot serialize tree entry ~S: its GIT-OBJECT has no SHA (not yet persisted)."
              name))

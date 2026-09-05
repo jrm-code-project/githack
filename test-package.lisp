@@ -4,7 +4,7 @@
   (:use "COMMON-LISP" "FIVEAM")
   (:import-from "GITHACK"
                 "GIT-OBJECT"
-                "GET-SHA"
+                "SHA"
                 "GET-REPOSITORY"
                 "GET-LOADED?"
                 "GIT-BLOB"
