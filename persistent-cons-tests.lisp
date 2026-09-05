@@ -416,3 +416,138 @@ same decoded indicators/values as the original in-memory plist."
       (multiple-value-bind (indicators values) (scan-persistent-plist hollow)
         (is (equal '(:a :b) (series:collect indicators)))
         (is (equal '(1 2) (series:collect values)))))))
+
+(test collect-persistent-alist-of-nil-is-nil
+  "COLLECT-PERSISTENT-ALIST of two empty lists (KEYS and VALUES both
+NIL) is NIL."
+  (is (null (collect-persistent-alist :dummy-repo nil nil))))
+
+(test collect-persistent-alist-signals-error-for-mismatched-lengths
+  "COLLECT-PERSISTENT-ALIST signals an error if KEYS and VALUES are
+not the same length."
+  (signals error (collect-persistent-alist :dummy-repo (list :a :b) (list 1))))
+
+(test collect-persistent-alist-builds-a-spine-of-blob-wrapped-pairs
+  "COLLECT-PERSISTENT-ALIST wraps every raw, non-GIT-OBJECT key/value
+of KEYS/VALUES in a fresh, already GET-LOADED? GIT-BLOB, pairs them
+into a further PERSISTENT-CONS per entry, chains those pairs via the
+outer spine's own PERSISTENT-CDR in KEYS/VALUES' own order, marks
+every new cons cell (outer spine and inner pairs) GET-LOADED?, and
+leaves every new cons cell's own SHA unset (not yet persisted)."
+  (let ((spine (collect-persistent-alist :dummy-repo (list :a :b :c) (list 1 2 3))))
+    (is (typep spine 'persistent-cons))
+    (is (null (sha spine)))
+    (is (get-loaded? spine))
+    (let ((pair1 (persistent-car spine)))
+      (is (typep pair1 'persistent-cons))
+      (is (get-loaded? pair1))
+      (is (eq :a (get-payload (persistent-car pair1))))
+      (is (= 1 (get-payload (persistent-cdr pair1)))))
+    (let* ((tail2 (persistent-cdr spine))
+           (pair2 (persistent-car tail2)))
+      (is (eq :b (get-payload (persistent-car pair2))))
+      (is (= 2 (get-payload (persistent-cdr pair2))))
+      (let* ((tail3 (persistent-cdr tail2))
+             (pair3 (persistent-car tail3)))
+        (is (eq :c (get-payload (persistent-car pair3))))
+        (is (= 3 (get-payload (persistent-cdr pair3))))
+        (is (null (persistent-cdr tail3)))))))
+
+(test collect-persistent-alist-passes-through-compound-elements-unchanged
+  "COLLECT-PERSISTENT-ALIST stores an already-compound GIT-OBJECT
+key or value (a nested PERSISTENT-CONS, here) directly as that
+pair's own PERSISTENT-CAR/PERSISTENT-CDR, unwrapped, rather than
+re-wrapping it in a further GIT-BLOB."
+  (let* ((nested (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
+                                 :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload :inner :loaded? t)
+                                 :persistent-cdr nil))
+         (spine (collect-persistent-alist :dummy-repo (list :a) (list nested))))
+    (is (eq nested (persistent-cdr (persistent-car spine))))))
+
+(test collect-persistent-alist-is-the-inverse-of-scan-persistent-alist
+  "Round-tripping two plain lists of keys/values through
+COLLECT-PERSISTENT-ALIST then SCAN-PERSISTENT-ALIST (materialized via
+SERIES:COLLECT) reproduces the original keys/values, in order."
+  (let ((keys (list :a :b :c))
+        (values (list 1 2 3)))
+    (multiple-value-bind (scanned-keys scanned-values)
+        (scan-persistent-alist (collect-persistent-alist :dummy-repo keys values))
+      (is (equal keys (series:collect scanned-keys)))
+      (is (equal values (series:collect scanned-values))))))
+
+(test collect-persistent-alist-result-serializes-with-serialize-persistent-cons
+  "The in-memory spine built by COLLECT-PERSISTENT-ALIST can be
+persisted directly via SERIALIZE-PERSISTENT-CONS, exactly like any
+other hand-built PERSISTENT-CONS chain."
+  (let ((spine (collect-persistent-alist :dummy-repo (list :a :b) (list 1 2))))
+    (with-fake-git-hash-object ()
+      (let ((sha (serialize-persistent-cons spine)))
+        (is (stringp sha))
+        (is (string= sha (sha spine)))))
+    (is (= 2 (persistent-cons-length spine)))
+    (is (eq t (persistent-cons-proper spine)))))
+
+(test collect-persistent-plist-of-nil-is-nil
+  "COLLECT-PERSISTENT-PLIST of two empty lists (INDICATORS and VALUES
+both NIL) is NIL."
+  (is (null (collect-persistent-plist :dummy-repo nil nil))))
+
+(test collect-persistent-plist-signals-error-for-mismatched-lengths
+  "COLLECT-PERSISTENT-PLIST signals an error if INDICATORS and VALUES
+are not the same length."
+  (signals error (collect-persistent-plist :dummy-repo (list :a :b) (list 1))))
+
+(test collect-persistent-plist-builds-a-flat-spine-of-blob-wrapped-elements
+  "COLLECT-PERSISTENT-PLIST wraps every raw, non-GIT-OBJECT indicator/
+value of INDICATORS/VALUES in a fresh, already GET-LOADED? GIT-BLOB,
+chains them via PERSISTENT-CDR into one flat spine alternating
+indicator, value, indicator, value, ... in INDICATORS/VALUES' own
+order, marks every new cons cell GET-LOADED?, and leaves every new
+cons cell's own SHA unset (not yet persisted)."
+  (let ((spine (collect-persistent-plist :dummy-repo (list :a :b) (list 1 2))))
+    (is (typep spine 'persistent-cons))
+    (is (null (sha spine)))
+    (is (get-loaded? spine))
+    (is (eq :a (get-payload (persistent-car spine))))
+    (let ((tail1 (persistent-cdr spine)))
+      (is (= 1 (get-payload (persistent-car tail1))))
+      (let ((tail2 (persistent-cdr tail1)))
+        (is (eq :b (get-payload (persistent-car tail2))))
+        (let ((tail3 (persistent-cdr tail2)))
+          (is (= 2 (get-payload (persistent-car tail3))))
+          (is (null (persistent-cdr tail3))))))))
+
+(test collect-persistent-plist-passes-through-compound-elements-unchanged
+  "COLLECT-PERSISTENT-PLIST stores an already-compound GIT-OBJECT
+value (a nested PERSISTENT-CONS, here) directly as its own cons
+cell's PERSISTENT-CAR, unwrapped, rather than re-wrapping it in a
+further GIT-BLOB."
+  (let* ((nested (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
+                                 :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload :inner :loaded? t)
+                                 :persistent-cdr nil))
+         (spine (collect-persistent-plist :dummy-repo (list :a) (list nested))))
+    (is (eq nested (persistent-car (persistent-cdr spine))))))
+
+(test collect-persistent-plist-is-the-inverse-of-scan-persistent-plist
+  "Round-tripping two plain lists of indicators/values through
+COLLECT-PERSISTENT-PLIST then SCAN-PERSISTENT-PLIST (materialized via
+SERIES:COLLECT) reproduces the original indicators/values, in
+order."
+  (let ((indicators (list :a :b :c))
+        (values (list 1 2 3)))
+    (multiple-value-bind (scanned-indicators scanned-values)
+        (scan-persistent-plist (collect-persistent-plist :dummy-repo indicators values))
+      (is (equal indicators (series:collect scanned-indicators)))
+      (is (equal values (series:collect scanned-values))))))
+
+(test collect-persistent-plist-result-serializes-with-serialize-persistent-cons
+  "The in-memory spine built by COLLECT-PERSISTENT-PLIST can be
+persisted directly via SERIALIZE-PERSISTENT-CONS, exactly like any
+other hand-built PERSISTENT-CONS chain."
+  (let ((spine (collect-persistent-plist :dummy-repo (list :a :b) (list 1 2))))
+    (with-fake-git-hash-object ()
+      (let ((sha (serialize-persistent-cons spine)))
+        (is (stringp sha))
+        (is (string= sha (sha spine)))))
+    (is (= 4 (persistent-cons-length spine)))
+    (is (eq t (persistent-cons-proper spine)))))

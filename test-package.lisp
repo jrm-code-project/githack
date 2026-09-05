@@ -72,6 +72,8 @@
                 "SCAN-PERSISTENT-ALIST"
                 "SCAN-PERSISTENT-PLIST"
                 "COLLECT-PERSISTENT-LIST"
+                "COLLECT-PERSISTENT-ALIST"
+                "COLLECT-PERSISTENT-PLIST"
                 "WRAP-ATOMIC-COMMIT-ROOT"
                 "RESOLVE-COMMIT-ROOT"
                 "+ATOMIC-WRAPPER-README+"

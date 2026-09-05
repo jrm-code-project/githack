@@ -469,3 +469,69 @@ newly built cons cell) to actually persist it to Git."
           items
           :from-end t
           :initial-value nil))
+
+(defun collect-persistent-alist (repository keys values)
+  "Inverse of SCAN-PERSISTENT-ALIST, analogous to SERIES's own
+COLLECT-ALIST: return a new, in-memory PERSISTENT-CONS spine built
+from the successive elements of KEYS and VALUES (two ordinary Lisp
+lists of equal length -- e.g. the two results of applying SERIES's
+own COLLECT to SCAN-PERSISTENT-ALIST's own two output series), or
+NIL if both are empty. Each corresponding (KEYS[i] . VALUES[i]) pair
+becomes one new \"pair\" cons cell -- a further PERSISTENT-CONS whose
+PERSISTENT-CAR/PERSISTENT-CDR are KEYS[i]/VALUES[i], each via
+%PERSISTENT-CONS-ENCODE exactly as COLLECT-PERSISTENT-LIST encodes
+its own elements -- chained via the outer spine's own
+PERSISTENT-CDR, in KEYS/VALUES' own order: the same PERSISTENT-CONS-
+of-PERSISTENT-CONSes shape SCAN-PERSISTENT-ALIST expects and
+PERSISTENT-HASH-TABLE.LISP's own bucket chains already use. Signals
+an error if KEYS and VALUES are not the same length. Every new cons
+cell (both the outer spine and each inner pair) is marked already
+GET-LOADED?, but none has a SHA yet -- callers must still call
+SERIALIZE-PERSISTENT-CONS on the returned head to persist it to Git.
+Exactly inverts SCAN-PERSISTENT-ALIST composed with COLLECT on each
+of its two output series, and vice versa."
+  (unless (= (length keys) (length values))
+    (error "COLLECT-PERSISTENT-ALIST: KEYS and VALUES must be the same length, but got ~D key~:P and ~D value~:P."
+           (length keys) (length values)))
+  (reduce (lambda (pair tail)
+            (make-instance 'persistent-cons :repository repository :loaded? t
+                                             :persistent-car (make-instance 'persistent-cons :repository repository :loaded? t
+                                                                             :persistent-car (%persistent-cons-encode repository (car pair))
+                                                                             :persistent-cdr (%persistent-cons-encode repository (cdr pair)))
+                                             :persistent-cdr tail))
+          (mapcar #'cons keys values)
+          :from-end t
+          :initial-value nil))
+
+(defun collect-persistent-plist (repository indicators values)
+  "Inverse of SCAN-PERSISTENT-PLIST, analogous to SERIES's own
+COLLECT-PLIST: return a new, in-memory, flat PERSISTENT-CONS spine
+built from the successive elements of INDICATORS and VALUES (two
+ordinary Lisp lists of equal length -- e.g. the two results of
+applying SERIES's own COLLECT to SCAN-PERSISTENT-PLIST's own two
+output series), or NIL if both are empty. Each corresponding
+(INDICATORS[i] . VALUES[i]) pair becomes two successive cons cells
+of the same spine -- INDICATORS[i] then VALUES[i], each via
+%PERSISTENT-CONS-ENCODE exactly as COLLECT-PERSISTENT-LIST encodes
+its own elements -- alternating indicator, value, indicator, value,
+... in INDICATORS/VALUES' own order: the same flat, 2*N-cons-cell
+shape SCAN-PERSISTENT-PLIST expects, unlike COLLECT-PERSISTENT-
+ALIST's spine of pairs each itself a further PERSISTENT-CONS. Signals
+an error if INDICATORS and VALUES are not the same length. Every new
+cons cell is marked already GET-LOADED?, but none has a SHA yet --
+callers must still call SERIALIZE-PERSISTENT-CONS on the returned
+head to persist it to Git. Exactly inverts SCAN-PERSISTENT-PLIST
+composed with COLLECT on each of its two output series, and vice
+versa."
+  (unless (= (length indicators) (length values))
+    (error "COLLECT-PERSISTENT-PLIST: INDICATORS and VALUES must be the same length, but got ~D indicator~:P and ~D value~:P."
+           (length indicators) (length values)))
+  (reduce (lambda (pair tail)
+            (make-instance 'persistent-cons :repository repository :loaded? t
+                                             :persistent-car (%persistent-cons-encode repository (car pair))
+                                             :persistent-cdr (make-instance 'persistent-cons :repository repository :loaded? t
+                                                                             :persistent-car (%persistent-cons-encode repository (cdr pair))
+                                                                             :persistent-cdr tail)))
+          (mapcar #'cons indicators values)
+          :from-end t
+          :initial-value nil))
