@@ -59,7 +59,8 @@
                 "GIT-CAT-FILE"
                 "WRAP-ATOMIC-COMMIT-ROOT"
                 "RESOLVE-COMMIT-ROOT"
-                "+ATOMIC-WRAPPER-README+")
+                "+ATOMIC-WRAPPER-README+"
+                "WITH-GIT-TRANSACTION")
   (:export "GITHACK-SUITE"
            "RUN-GITHACK-TESTS"))
 

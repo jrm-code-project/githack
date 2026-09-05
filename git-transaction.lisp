@@ -227,3 +227,29 @@ Returns TRANSACTION."
           (%commit-git-transaction-now transaction root))
         (setf (get-status transaction) :committed)))
     transaction))
+
+(defmacro with-git-transaction ((transaction-var head-commit-var) (repository mode &key branch author committer message parents) &body body)
+  "Macro wrapper around CALL-WITH-GIT-TRANSACTION: expands into a
+call to CALL-WITH-GIT-TRANSACTION on REPOSITORY and MODE (evaluated
+once each), passing BRANCH/AUTHOR/COMMITTER/MESSAGE/PARENTS through
+unchanged, with :RECEIVER bound to a closure over BODY. Within BODY,
+TRANSACTION-VAR is bound to the transient GIT-TRANSACTION and
+HEAD-COMMIT-VAR to the resolved head GIT-COMMIT, exactly as they
+would be passed to an explicit RECEIVER function.
+
+BODY's normal return value is subject to the same auto-commit
+semantics as CALL-WITH-GIT-TRANSACTION's RECEIVER: for a :READ-WRITE
+transaction, BODY must return a GIT-OBJECT (a GIT-TREE, or a bare
+atomic GIT-BLOB to be auto-wrapped) representing the desired new
+root, which is then automatically committed and the branch advanced,
+unless BODY has already called COMMIT-GIT-TRANSACTION or
+ABORT-GIT-TRANSACTION itself. Returns the GIT-TRANSACTION, exactly
+as CALL-WITH-GIT-TRANSACTION does."
+  `(call-with-git-transaction ,repository ,mode
+                               :branch ,branch
+                               :author ,author
+                               :committer ,committer
+                               :message ,message
+                               :parents ,parents
+                               :receiver (lambda (,transaction-var ,head-commit-var)
+                                           ,@body)))

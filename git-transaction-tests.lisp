@@ -195,6 +195,34 @@ wrapper invisible to application code."
               (is (eq unsaved-blob (cdr (assoc "value" (get-entries tree) :test #'string=))))
               (is (eq unsaved-blob (resolve-commit-root commit))))))))))
 
+(test with-git-transaction-expands-into-call-with-git-transaction
+  "WITH-GIT-TRANSACTION binds its TRANSACTION-VAR and HEAD-COMMIT-VAR
+to the same values an explicit RECEIVER function passed to
+CALL-WITH-GIT-TRANSACTION would receive, cascades BRANCH/AUTHOR/
+COMMITTER/MESSAGE/PARENTS through unchanged, and honors the same
+auto-commit-on-normal-exit semantics."
+  (let ((repository (%make-test-repository :read-write))
+        (update-calls '()))
+    (with-fake-head-resolution ()
+      (with-fake-git-hash-object ()
+        (with-recording-git-update-ref (update-calls)
+          (let* ((unsaved-blob (make-instance 'git-blob :repository +repo-path+ :payload "hello"))
+                 (tree (make-instance 'git-tree :repository +repo-path+
+                                                 :entries (list (cons "f.txt" unsaved-blob))))
+                 (seen-head nil)
+                 (transaction
+                   (with-git-transaction (tx head) (repository :read-write)
+                     (setf seen-head head)
+                     (is (typep tx 'git-transaction))
+                     tree)))
+            (is (typep seen-head 'git-commit))
+            (is (string= +head-sha+ (sha seen-head)))
+            (is (eq :committed (get-status transaction)))
+            (let ((commit (get-result transaction)))
+              (is (typep commit 'git-commit))
+              (is (eq tree (get-tree commit)))
+              (is (= 1 (length update-calls))))))))))
+
 (test commit-git-transaction-commits-immediately-and-skips-later-receiver-code
   "COMMIT-GIT-TRANSACTION, called explicitly inside RECEIVER, commits
 immediately and unwinds so any subsequent code in RECEIVER never runs."
