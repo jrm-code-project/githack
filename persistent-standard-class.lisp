@@ -15,6 +15,10 @@
 ;;;   README.md    a blob holding a Markdown "# " title line naming
 ;;;                INSTANCE's own class, followed by that class's
 ;;;                own DOCUMENTATION string (its DEFCLASS's own
+;;;                :DOCUMENTATION option), and then, for any
+;;;                non-TRANSIENT slot, a "## Slots" bullet list
+;;;                naming each such slot alongside its own
+;;;                DOCUMENTATION string (its DEFCLASS's own per-slot
 ;;;                :DOCUMENTATION option), for a human Git user
 ;;;                browsing the object database -- see
 ;;;                %PERSISTENT-OBJECT-README-CONTENT
@@ -295,19 +299,51 @@ a load-order cycle."
 writes for an instance of a class with no DOCUMENTATION string of
 its own (i.e. (DOCUMENTATION (CLASS-OF INSTANCE) T) returns NIL).")
 
+(defparameter +persistent-object-no-slot-documentation-readme+
+  "(No documentation string was provided for this slot.)"
+  "The fixed README.md bullet-list body content
+%PERSISTENT-OBJECT-README-CONTENT writes for a non-TRANSIENT slot
+with no DOCUMENTATION string of its own (i.e. (DOCUMENTATION
+SLOT-DEFINITION T) returns NIL).")
+
+(defun %persistent-object-readme-slot-lines (instance)
+  "Return a single string, one Markdown bullet-list line per
+non-TRANSIENT effective slot of INSTANCE's own class (in
+SB-MOP:CLASS-SLOTS order), each reading \"  * **<slot-name>**:
+<slot-documentation>\\n\", where <slot-name> is that slot's own name,
+downcased, and <slot-documentation> is that slot's own DOCUMENTATION
+string (its DEFCLASS's own per-slot :DOCUMENTATION option) or, if it
+has none, +PERSISTENT-OBJECT-NO-SLOT-DOCUMENTATION-README+. TRANSIENT
+slots (internal PERSISTENT-OBJECT bookkeeping, never serialized) are
+entirely excluded. Returns the empty string if INSTANCE's class has
+no non-TRANSIENT slots at all."
+  (with-output-to-string (stream)
+    (dolist (slot (%persistent-object-effective-slots instance))
+      (unless (and (typep slot 'persistent-effective-slot-definition)
+                   (persistent-slot-definition-transient slot))
+        (format stream "  * **~(~A~)**: ~A~%"
+                (sb-mop:slot-definition-name slot)
+                (or (documentation slot t)
+                    +persistent-object-no-slot-documentation-readme+))))))
+
 (defun %persistent-object-readme-content (instance)
   "Return the UTF-8-encoded octet vector SERIALIZE-PERSISTENT-OBJECT
 writes as INSTANCE's own \"README.md\" entry: a Markdown \"# \"
 title line naming INSTANCE's own class (via CLASS-NAME), followed by
-a blank line and that class's own DOCUMENTATION string -- i.e. its
+a blank line, that class's own DOCUMENTATION string -- i.e. its
 DEFCLASS's own :DOCUMENTATION option -- or, if that class has none,
-+PERSISTENT-OBJECT-NO-DOCUMENTATION-README+."
-  (let ((class-symbol (class-name (class-of instance))))
++PERSISTENT-OBJECT-NO-DOCUMENTATION-README+, and then, if INSTANCE's
+class has any non-TRANSIENT slots, a further blank line, a \"##
+Slots\" heading, another blank line, and a Markdown bullet-list line
+per such slot (via %PERSISTENT-OBJECT-README-SLOT-LINES)."
+  (let* ((class-symbol (class-name (class-of instance)))
+         (body (or (documentation (class-of instance) t)
+                   +persistent-object-no-documentation-readme+))
+         (slot-lines (%persistent-object-readme-slot-lines instance)))
     (sb-ext:string-to-octets
-     (format nil "# ~A~%~%~A~%"
-             class-symbol
-             (or (documentation (class-of instance) t)
-                 +persistent-object-no-documentation-readme+))
+     (if (zerop (length slot-lines))
+         (format nil "# ~A~%~%~A~%" class-symbol body)
+         (format nil "# ~A~%~%~A~%~%## Slots~%~%~A" class-symbol body slot-lines))
      :external-format :utf-8)))
 
 (defun serialize-persistent-object (instance)
@@ -315,14 +351,14 @@ DEFCLASS's own :DOCUMENTATION option -- or, if that class has none,
 \".meta\" entry holding (:TAG :CLOS :CLASS \"CLASS-NAME\" :PACKAGE
 \"PACKAGE-NAME\" :VERSION n), a \"README.md\" entry holding a
 Markdown title naming INSTANCE's own class followed by that class's
-own DOCUMENTATION string (via %PERSISTENT-OBJECT-README-CONTENT),
-and one further entry per non-transient initarg recorded in
-INSTANCE's %INITIALIZER-PAYLOAD (via %PERSISTENT-OBJECT-FILTERED-
-PAYLOAD) -- filename the initarg's own downcased name, each a proxy
-pointer to that initarg's own (recursively persisted, via
-%PERSIST-OBJECT-COMPONENT) GIT-OBJECT value. INSTANCE's own
-transient slots (VERSION, and any other slot marked :TRANSIENT T)
-are entirely excluded, appearing nowhere in the
+own DOCUMENTATION string and a bullet list of its non-TRANSIENT
+slots (via %PERSISTENT-OBJECT-README-CONTENT), and one further entry
+per non-transient initarg recorded in INSTANCE's %INITIALIZER-
+PAYLOAD (via %PERSISTENT-OBJECT-FILTERED-PAYLOAD) -- filename the
+initarg's own downcased name, each a proxy pointer to that initarg's
+own (recursively persisted, via %PERSIST-OBJECT-COMPONENT) GIT-OBJECT
+value. INSTANCE's own transient slots (VERSION, and any other slot
+marked :TRANSIENT T) are entirely excluded, appearing nowhere in the
 Git tree. Returns INSTANCE's own SHA, doing nothing further if
 INSTANCE already has one."
   (or (sha instance)

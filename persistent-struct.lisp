@@ -54,12 +54,25 @@ generates as SLOT's :ACCESSOR (or :READER, if SLOT is :READ-ONLY):
 CONC-NAME concatenated with SLOT's own :NAME."
   (intern (concatenate 'string conc-name (string (getf slot :name))) package))
 
-(defun %persistent-struct-class-slot-spec (slot conc-name package)
+(defun %persistent-struct-slot-documentation (name slot)
+  "Return the docstring DEFINE-PERSISTENT-STRUCT attaches, via the
+generated DEFCLASS's own per-slot :DOCUMENTATION option, to SLOT
+itself (as opposed to its generated accessor/reader function -- see
+%PERSISTENT-STRUCT-ACCESSOR-DOCUMENTATION), templated from NAME and
+SLOT (a plist as returned by
+%PERSISTENT-STRUCT-PARSE-SLOT-DESCRIPTION). This is what
+%PERSISTENT-OBJECT-README-CONTENT lists in a persisted instance's own
+\"README.md\" bullet list of slots."
+  (format nil "The ~:@(~A~) slot of a ~:@(~A~) instance~:[~; (a TRANSIENT slot, excluded from serialization)~]."
+          (getf slot :name) name (getf slot :transient)))
+
+(defun %persistent-struct-class-slot-spec (struct-name slot conc-name package)
   "Return the CLOS slot specifier DEFINE-PERSISTENT-STRUCT emits for
-SLOT within its generated DEFCLASS: :INITARG the keyword version of
-SLOT's :NAME, :INITFORM its :INITFORM, :ACCESSOR (or :READER, if
-:READ-ONLY) CONC-NAME concatenated with :NAME (via
-%PERSISTENT-STRUCT-SLOT-ACCESSOR-NAME), and, if present, SLOT's own
+SLOT within its generated DEFCLASS (named STRUCT-NAME): :INITARG the
+keyword version of SLOT's :NAME, :INITFORM its :INITFORM, :ACCESSOR
+(or :READER, if :READ-ONLY) CONC-NAME concatenated with :NAME (via
+%PERSISTENT-STRUCT-SLOT-ACCESSOR-NAME), :DOCUMENTATION templated via
+%PERSISTENT-STRUCT-SLOT-DOCUMENTATION, and, if present, SLOT's own
 :TYPE and :TRANSIENT passed through verbatim so
 PERSISTENT-STANDARD-CLASS's MOP can see them."
   (let ((name (getf slot :name))
@@ -68,6 +81,7 @@ PERSISTENT-STANDARD-CLASS's MOP can see them."
       :initarg ,(intern (symbol-name name) "KEYWORD")
       :initform ,(getf slot :initform)
       ,(if (getf slot :read-only) :reader :accessor) ,accessor
+      :documentation ,(%persistent-struct-slot-documentation struct-name slot)
       ,@(when (getf slot :type) (list :type (getf slot :type)))
       ,@(when (getf slot :transient) (list :transient t)))))
 
@@ -124,11 +138,14 @@ SLOT-DESCRIPTIONS (via %PERSISTENT-STRUCT-CLASS-DOCUMENTATION,
 %PERSISTENT-STRUCT-PREDICATE-DOCUMENTATION, and
 %PERSISTENT-STRUCT-ACCESSOR-DOCUMENTATION), so no
 DEFINE-PERSISTENT-STRUCT-generated public symbol is ever left
-undocumented."
+undocumented. Each generated slot itself also gets its own
+:DOCUMENTATION option (via %PERSISTENT-STRUCT-SLOT-DOCUMENTATION),
+which %PERSISTENT-OBJECT-README-CONTENT lists in a persisted
+instance's own \"README.md\" bullet list of slots."
   (multiple-value-bind (name conc-name) (%persistent-struct-parse-name-and-options name-and-options)
     (let* ((package (symbol-package name))
            (slots (mapcar #'%persistent-struct-parse-slot-description slot-descriptions))
-           (class-slot-specs (mapcar (lambda (slot) (%persistent-struct-class-slot-spec slot conc-name package))
+           (class-slot-specs (mapcar (lambda (slot) (%persistent-struct-class-slot-spec name slot conc-name package))
                                       slots))
            (make-name (intern (concatenate 'string "MAKE-" (string name)) package))
            (predicate-name (intern (concatenate 'string (string name) "-P") package)))

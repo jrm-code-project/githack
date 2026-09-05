@@ -16,7 +16,8 @@
   ((name
     :initarg :name
     :initform nil
-    :accessor widget-name)
+    :accessor widget-name
+    :documentation "The widget's own display name, a string.")
    (tag
     :initarg :tag
     :initform nil
@@ -25,7 +26,12 @@
     :initarg :cache
     :initform nil
     :accessor widget-cache
-    :transient t))
+    :transient t
+    :documentation
+    "A TRANSIENT slot, deliberately excluded from serialization (and
+so also from the persisted instance's own README.md slot bullet
+list) -- used to confirm TRANSIENT slots never appear there even
+when documented."))
   (:metaclass persistent-standard-class)
   (:documentation
    "A fixture class used to test PERSISTENT-STANDARD-CLASS/
@@ -93,7 +99,11 @@ GIT-TREE slot, marked :TRANSIENT T by PERSISTENT-OBJECT itself)."
 (test serialize-persistent-object-writes-readme-from-class-documentation
   "SERIALIZE-PERSISTENT-OBJECT's \"README.md\" entry begins with a
 Markdown \"# \" title line naming INSTANCE's own class, followed by
-that class's own DOCUMENTATION string, UTF-8 encoded."
+that class's own DOCUMENTATION string, and then a \"## Slots\"
+bullet list naming each non-TRANSIENT slot alongside its own
+DOCUMENTATION string (or the fallback placeholder, for an
+undocumented slot) -- entirely omitting any TRANSIENT slot -- all
+UTF-8 encoded."
   (let* ((widget (make-instance 'persistent-widget :repository :dummy-repo :name "Bob" :tag :x))
          (calls '()))
     (with-recording-git-hash-object (calls)
@@ -104,12 +114,19 @@ that class's own DOCUMENTATION string, UTF-8 encoded."
                                         :test #'string=)))
            (readme-text (sb-ext:octets-to-string readme-octets :external-format :utf-8)))
       (is (eql 0 (search (format nil "# PERSISTENT-WIDGET~%") readme-text)))
-      (is (search (documentation (find-class 'persistent-widget) t) readme-text)))))
+      (is (search (documentation (find-class 'persistent-widget) t) readme-text))
+      (is (search "## Slots" readme-text))
+      (is (search "  * **name**: The widget's own display name, a string." readme-text))
+      (is (search (format nil "  * **tag**: ~A" githack::+persistent-object-no-slot-documentation-readme+)
+                  readme-text))
+      (is (not (search "**cache**" readme-text))))))
 
 (test serialize-persistent-object-writes-placeholder-readme-for-undocumented-class
   "SERIALIZE-PERSISTENT-OBJECT falls back to +PERSISTENT-OBJECT-NO-
 DOCUMENTATION-README+ (after the usual class-name title line) for a
-class with no DOCUMENTATION string of its own."
+class with no DOCUMENTATION string of its own, and likewise falls
+back to +PERSISTENT-OBJECT-NO-SLOT-DOCUMENTATION-README+ in the \"##
+Slots\" bullet list for each of its own undocumented slots."
   (let* ((owner (make-instance 'persistent-owner :repository :dummy-repo :label "Alice"))
          (calls '()))
     (is (null (documentation (find-class 'persistent-owner) t)))
@@ -121,7 +138,12 @@ class with no DOCUMENTATION string of its own."
                                         :test #'string=)))
            (readme-text (sb-ext:octets-to-string readme-octets :external-format :utf-8)))
       (is (eql 0 (search (format nil "# PERSISTENT-OWNER~%") readme-text)))
-      (is (search githack::+persistent-object-no-documentation-readme+ readme-text)))))
+      (is (search githack::+persistent-object-no-documentation-readme+ readme-text))
+      (is (search "## Slots" readme-text))
+      (is (search (format nil "  * **label**: ~A" githack::+persistent-object-no-slot-documentation-readme+)
+                  readme-text))
+      (is (search (format nil "  * **widget**: ~A" githack::+persistent-object-no-slot-documentation-readme+)
+                  readme-text)))))
 
 (test serialize-persistent-object-writes-standard-meta
   "SERIALIZE-PERSISTENT-OBJECT's \".meta\" blob holds (:TAG :CLOS
