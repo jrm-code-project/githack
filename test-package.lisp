@@ -88,7 +88,16 @@
                 "DESERIALIZE-PERSISTENT-OBJECT"
                 "%PERSISTENT-OBJECT-INITIALIZER-PAYLOAD"
                 "PERSISTENT-STRUCT"
-                "DEFINE-PERSISTENT-STRUCT")
+                "DEFINE-PERSISTENT-STRUCT"
+                "PERSISTENT-HASH-TABLE"
+                "PERSISTENT-HASH-TABLE-P"
+                "PERSISTENT-HASH-TABLE-TEST"
+                "PERSISTENT-HASH-TABLE-COUNT"
+                "PERSISTENT-HASH-TABLE-BUCKETS"
+                "PHASH-MAKE"
+                "PHASH-GET"
+                "PHASH-PUT"
+                "PHASH-REMOVE")
   (:export "GITHACK-SUITE"
            "RUN-GITHACK-TESTS"))
 
