@@ -32,20 +32,23 @@
   "The number of buckets PHASH-MAKE allocates when the caller does
 not request a specific SIZE.")
 
-(defun %normalize-hash-test (test)
-  "Return TEST as a symbol suitable for PERSISTENT-HASH-TABLE-TEST:
+(defgeneric %normalize-hash-test (test)
+  (:documentation
+   "Return TEST as a symbol suitable for PERSISTENT-HASH-TABLE-TEST:
 TEST itself, if already a symbol (e.g. 'EQL, 'EQUAL); or, if TEST is
 a function object, the symbol naming it, via
 FUNCTION-LAMBDA-EXPRESSION's third value. Signals an error if TEST is
 a function whose name cannot be determined this way, since an
 unnamed function is not a serializable atom -- callers should pass a
-symbol (e.g. 'EQUAL) instead of #'EQUAL."
-  (etypecase test
-    (symbol test)
-    (function
-     (or (nth-value 2 (function-lambda-expression test))
-         (error "Cannot determine a symbol name for the function ~S; pass TEST as a symbol (e.g. 'EQUAL) instead."
-                test)))))
+symbol (e.g. 'EQUAL) instead of #'EQUAL."))
+
+(defmethod %normalize-hash-test ((test symbol))
+  test)
+
+(defmethod %normalize-hash-test ((test function))
+  (or (nth-value 2 (function-lambda-expression test))
+      (error "Cannot determine a symbol name for the function ~S; pass TEST as a symbol (e.g. 'EQUAL) instead."
+             test)))
 
 (defun %phash-test-function (table)
   "Return the two-argument equality predicate function named by

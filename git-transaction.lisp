@@ -113,21 +113,33 @@ own SHA."
         (setf (sha tree)
               (git-hash-object (get-repository tree) "tree" (serialize-tree tree))))))
 
-(defun %persist-git-object-etypecase (git-object)
-  "Persist GIT-OBJECT (which is known not to have a SHA yet) to
+(defgeneric %persist-git-object-etypecase (git-object)
+  (:documentation
+   "Persist GIT-OBJECT (which is known not to have a SHA yet) to
 Git's object database according to its concrete type, and return the
-resulting SHA. Broken out of %PERSIST-GIT-OBJECT so this ETYPECASE
-dispatch is its own function's outermost form."
-  (etypecase git-object
-    (persistent-object (serialize-persistent-object git-object))
-    (persistent-cons (serialize-persistent-cons git-object))
-    (persistent-vector (serialize-persistent-vector git-object))
-    (persistent-array (serialize-persistent-array git-object))
-    (git-tree (%persist-git-tree-object git-object))
-    (git-blob
-     (setf (sha git-object)
-           (git-hash-object (get-repository git-object) "blob"
-                             (serialize-atom (get-payload git-object)))))))
+resulting SHA. Broken out of %PERSIST-GIT-OBJECT so this dispatch is
+its own generic function, with one DEFMETHOD per concrete type in
+place of an ETYPECASE clause."))
+
+(defmethod %persist-git-object-etypecase ((git-object persistent-object))
+  (serialize-persistent-object git-object))
+
+(defmethod %persist-git-object-etypecase ((git-object persistent-cons))
+  (serialize-persistent-cons git-object))
+
+(defmethod %persist-git-object-etypecase ((git-object persistent-vector))
+  (serialize-persistent-vector git-object))
+
+(defmethod %persist-git-object-etypecase ((git-object persistent-array))
+  (serialize-persistent-array git-object))
+
+(defmethod %persist-git-object-etypecase ((git-object git-tree))
+  (%persist-git-tree-object git-object))
+
+(defmethod %persist-git-object-etypecase ((git-object git-blob))
+  (setf (sha git-object)
+        (git-hash-object (get-repository git-object) "blob"
+                          (serialize-atom (get-payload git-object)))))
 
 (defun %persist-git-object (git-object)
   "Ensure GIT-OBJECT (a GIT-BLOB, GIT-TREE, PERSISTENT-CONS,

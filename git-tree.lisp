@@ -42,13 +42,17 @@ START into the familiar lowercase 40-character hexadecimal string."
         (setf (char hex (* 2 i)) (char-downcase (digit-char (ldb (byte 4 4) byte) 16)))
         (setf (char hex (1+ (* 2 i))) (char-downcase (digit-char (ldb (byte 4 0) byte) 16)))))))
 
-(defun infer-git-mode (git-object)
-  "Return the Git permission-mode string appropriate for the
+(defgeneric infer-git-mode (git-object)
+  (:documentation
+   "Return the Git permission-mode string appropriate for the
 concrete type of GIT-OBJECT: \"40000\" for a GIT-TREE (directory),
-or \"100644\" for a GIT-BLOB (regular file)."
-  (etypecase git-object
-    (git-tree "40000")
-    (git-blob "100644")))
+or \"100644\" for a GIT-BLOB (regular file)."))
+
+(defmethod infer-git-mode ((git-object git-tree))
+  "40000")
+
+(defmethod infer-git-mode ((git-object git-blob))
+  "100644")
 
 (defun %tree-sort-key (name object)
   "Return the string Git itself sorts tree entries by: NAME as-is

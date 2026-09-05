@@ -58,21 +58,46 @@ one exists, falling back to their raw CHAR-CODE otherwise."
     ((char-name char) (list :named-character (%normalize-string (char-name char))))
     (t (list :character-code (char-code char)))))
 
-(defun %atom->envelope (atom)
-  "Return an envelope list describing ATOM, suitable for printing
+(defgeneric %atom->envelope (atom)
+  (:documentation
+   "Return an envelope list describing ATOM, suitable for printing
 with PRIN1 and later reconstructing with %ENVELOPE->ATOM. Signals an
-error if ATOM's type is not supported."
-  (etypecase atom
-    (integer (list :integer atom))
-    (keyword (list :keyword (%normalize-string (symbol-name atom))))
-    (symbol (%symbol->envelope atom))
-    (single-float (list :single-float (%float->marked-string atom 'double-float)))
-    (double-float (list :double-float (%float->marked-string atom 'single-float)))
-    (character (%character->envelope atom))
-    (string (list :string (%normalize-string atom)))
-    (bit-vector (list :bit-vector (coerce atom 'list)))
-    ((array (unsigned-byte 8) (*)) (list :byte-vector (coerce atom 'list)))
-    (t (error "SERIALIZE-ATOM does not support objects of type ~S." (type-of atom)))))
+error if ATOM's type is not supported. Dispatches on ATOM's concrete
+class; KEYWORD and (ARRAY (UNSIGNED-BYTE 8) (*)) are not themselves
+CLOS classes usable as method specializers, so those two cases are
+distinguished by an explicit type check inside the SYMBOL and VECTOR
+methods respectively."))
+
+(defmethod %atom->envelope ((atom integer))
+  (list :integer atom))
+
+(defmethod %atom->envelope ((atom symbol))
+  (if (keywordp atom)
+      (list :keyword (%normalize-string (symbol-name atom)))
+      (%symbol->envelope atom)))
+
+(defmethod %atom->envelope ((atom single-float))
+  (list :single-float (%float->marked-string atom 'double-float)))
+
+(defmethod %atom->envelope ((atom double-float))
+  (list :double-float (%float->marked-string atom 'single-float)))
+
+(defmethod %atom->envelope ((atom character))
+  (%character->envelope atom))
+
+(defmethod %atom->envelope ((atom string))
+  (list :string (%normalize-string atom)))
+
+(defmethod %atom->envelope ((atom bit-vector))
+  (list :bit-vector (coerce atom 'list)))
+
+(defmethod %atom->envelope ((atom vector))
+  (if (typep atom '(array (unsigned-byte 8) (*)))
+      (list :byte-vector (coerce atom 'list))
+      (call-next-method)))
+
+(defmethod %atom->envelope ((atom t))
+  (error "SERIALIZE-ATOM does not support objects of type ~S." (type-of atom)))
 
 (defun %envelope->atom (envelope)
   "Inverse of %ATOM->ENVELOPE: reconstructs the exact Lisp atom

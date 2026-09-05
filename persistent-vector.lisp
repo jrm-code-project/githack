@@ -106,19 +106,28 @@ order GET-ENTRIES currently holds them."
   (remove-if (lambda (entry) (member (car entry) '(".meta" "README.md") :test #'string=))
              (get-entries vector)))
 
-(defun %persist-vector-component-etypecase (git-object)
-  "Persist GIT-OBJECT (which is known not to have a SHA yet) to
+(defgeneric %persist-vector-component-etypecase (git-object)
+  (:documentation
+   "Persist GIT-OBJECT (which is known not to have a SHA yet) to
 Git's object database according to its concrete type, and return the
 resulting SHA. Broken out of %PERSIST-VECTOR-COMPONENT so this
-ETYPECASE dispatch is its own function's outermost form."
-  (etypecase git-object
-    (persistent-vector (serialize-persistent-vector git-object))
-    (persistent-cons (serialize-persistent-cons git-object))
-    (git-tree (setf (sha git-object)
-                     (git-hash-object (get-repository git-object) "tree" (serialize-tree git-object))))
-    (git-blob (setf (sha git-object)
-                     (git-hash-object (get-repository git-object) "blob"
-                                      (serialize-atom (get-payload git-object)))))))
+dispatch is its own generic function, with one DEFMETHOD per
+concrete type in place of an ETYPECASE clause."))
+
+(defmethod %persist-vector-component-etypecase ((git-object persistent-vector))
+  (serialize-persistent-vector git-object))
+
+(defmethod %persist-vector-component-etypecase ((git-object persistent-cons))
+  (serialize-persistent-cons git-object))
+
+(defmethod %persist-vector-component-etypecase ((git-object git-tree))
+  (setf (sha git-object)
+        (git-hash-object (get-repository git-object) "tree" (serialize-tree git-object))))
+
+(defmethod %persist-vector-component-etypecase ((git-object git-blob))
+  (setf (sha git-object)
+        (git-hash-object (get-repository git-object) "blob"
+                          (serialize-atom (get-payload git-object)))))
 
 (defun %persist-vector-component (git-object)
   "Ensure GIT-OBJECT (a GIT-BLOB, a plain GIT-TREE, a PERSISTENT-CONS,

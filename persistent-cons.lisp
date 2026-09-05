@@ -98,18 +98,25 @@ Signals an error if OCTETS is not a plist whose :TAG is :CONS."
       (error "Malformed persistent cons .meta blob: ~S." plist))
     (values (getf plist :length) (getf plist :proper))))
 
-(defun %persist-cons-component-etypecase (git-object)
-  "Persist GIT-OBJECT (which is known not to have a SHA yet) to
+(defgeneric %persist-cons-component-etypecase (git-object)
+  (:documentation
+   "Persist GIT-OBJECT (which is known not to have a SHA yet) to
 Git's object database according to its concrete type, and return the
 resulting SHA. Broken out of %PERSIST-CONS-COMPONENT so this
-ETYPECASE dispatch is its own function's outermost form."
-  (etypecase git-object
-    (persistent-cons (serialize-persistent-cons git-object))
-    (git-tree (setf (sha git-object)
-                     (git-hash-object (get-repository git-object) "tree" (serialize-tree git-object))))
-    (git-blob (setf (sha git-object)
-                     (git-hash-object (get-repository git-object) "blob"
-                                      (serialize-atom (get-payload git-object)))))))
+dispatch is its own generic function, with one DEFMETHOD per
+concrete type in place of an ETYPECASE clause."))
+
+(defmethod %persist-cons-component-etypecase ((git-object persistent-cons))
+  (serialize-persistent-cons git-object))
+
+(defmethod %persist-cons-component-etypecase ((git-object git-tree))
+  (setf (sha git-object)
+        (git-hash-object (get-repository git-object) "tree" (serialize-tree git-object))))
+
+(defmethod %persist-cons-component-etypecase ((git-object git-blob))
+  (setf (sha git-object)
+        (git-hash-object (get-repository git-object) "blob"
+                          (serialize-atom (get-payload git-object)))))
 
 (defun %persist-cons-component (git-object)
   "Ensure GIT-OBJECT (a GIT-BLOB, a plain GIT-TREE, or a nested
