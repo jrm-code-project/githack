@@ -12,6 +12,11 @@
 ;;;   .meta        a blob holding the plist (:TAG :CLOS :CLASS
 ;;;                "CLASS-NAME" :VERSION n) -- structural metadata
 ;;;                only, never any application data
+;;;   README.md    a blob holding INSTANCE's own class's
+;;;                DOCUMENTATION string (its DEFCLASS's own
+;;;                :DOCUMENTATION option), for a human Git user
+;;;                browsing the object database -- see
+;;;                %PERSISTENT-OBJECT-README-CONTENT
 ;;;   <initarg>    one further entry per non-transient initarg
 ;;;                recorded when the instance was created, named
 ;;;                with that initarg's keyword name, downcased, with
@@ -283,13 +288,32 @@ a load-order cycle."
                                 :payload value
                                 :loaded? t)))
 
+(defparameter +persistent-object-no-documentation-readme+
+  "(No documentation string was provided for this class.)"
+  "The fixed README.md content SERIALIZE-PERSISTENT-OBJECT writes
+for an instance of a class with no DOCUMENTATION string of its own
+(i.e. (DOCUMENTATION (CLASS-OF INSTANCE) T) returns NIL).")
+
+(defun %persistent-object-readme-content (instance)
+  "Return the UTF-8-encoded octet vector SERIALIZE-PERSISTENT-OBJECT
+writes as INSTANCE's own \"README.md\" entry: INSTANCE's own class's
+DOCUMENTATION string -- i.e. its DEFCLASS's own :DOCUMENTATION
+option -- or, if that class has none, +PERSISTENT-OBJECT-NO-
+DOCUMENTATION-README+."
+  (sb-ext:string-to-octets
+   (or (documentation (class-of instance) t)
+       +persistent-object-no-documentation-readme+)
+   :external-format :utf-8))
+
 (defun serialize-persistent-object (instance)
   "Compile INSTANCE (a PERSISTENT-OBJECT) into a Git tree: a
 \".meta\" entry holding (:TAG :CLOS :CLASS \"CLASS-NAME\" :PACKAGE
-\"PACKAGE-NAME\" :VERSION n), and one further entry per non-transient
-initarg recorded in INSTANCE's %INITIALIZER-PAYLOAD (via
-%PERSISTENT-OBJECT-FILTERED-PAYLOAD) -- filename the initarg's own
-downcased name, each a proxy pointer to that initarg's own
+\"PACKAGE-NAME\" :VERSION n), a \"README.md\" entry holding
+INSTANCE's own class's DOCUMENTATION string (via
+%PERSISTENT-OBJECT-README-CONTENT), and one further entry per
+non-transient initarg recorded in INSTANCE's %INITIALIZER-PAYLOAD
+(via %PERSISTENT-OBJECT-FILTERED-PAYLOAD) -- filename the initarg's
+own downcased name, each a proxy pointer to that initarg's own
 (recursively persisted, via %PERSIST-OBJECT-COMPONENT) GIT-OBJECT
 value. INSTANCE's own transient slots (VERSION, and any other slot
 marked :TRANSIENT T) are entirely excluded, appearing nowhere in the
@@ -313,8 +337,14 @@ INSTANCE already has one."
                                                (list :tag :clos
                                                      :class class-name
                                                     :package class-package
-                                                    :version (persistent-object-version instance)))))))
-        (setf (get-entries instance) (list* (cons ".meta" meta-blob) tree-entries))
+                                                    :version (persistent-object-version instance))))))
+             (readme-blob (make-instance 'git-blob :repository repository
+                                          :sha (git-hash-object
+                                                repository "blob"
+                                                (%persistent-object-readme-content instance)))))
+        (setf (get-entries instance) (list* (cons ".meta" meta-blob)
+                                             (cons "README.md" readme-blob)
+                                             tree-entries))
         (setf (sha instance) (git-hash-object repository "tree" (serialize-tree instance)))
         (setf (get-loaded? instance) t)
         (sha instance))))
@@ -325,14 +355,18 @@ INFLATE-GIT-PROXY'd) already bound to its own REPOSITORY and SHA.
 Fetch and parse TREE's raw Git tree bytes (via GIT-CAT-FILE and
 DESERIALIZE-TREE), read its \".meta\" entry to learn the originally
 serialized CLOS CLASS-NAME and VERSION, reconstruct an initarg list
-from every other entry (each already a hollow GIT-OBJECT proxy, via
-INFLATE-GIT-PROXY, exactly as DESERIALIZE-TREE provides -- so no
-initarg's own value is ever fetched eagerly by this function, only
-later, on demand, transparently, by SLOT-VALUE-USING-CLASS below),
-and return a fresh (MAKE-INSTANCE CLASS-NAME ...) of that class,
-bound to TREE's own REPOSITORY and SHA and marked already loaded.
-Signals an error if TREE's entries do not include \".meta\", or if
-its \".meta\" blob's :TAG is not :CLOS."
+from every other entry other than \".meta\"/\"README.md\" (each
+already a hollow GIT-OBJECT proxy, via INFLATE-GIT-PROXY, exactly as
+DESERIALIZE-TREE provides -- so no initarg's own value is ever
+fetched eagerly by this function, only later, on demand,
+transparently, by SLOT-VALUE-USING-CLASS below), and return a fresh
+(MAKE-INSTANCE CLASS-NAME ...) of that class, bound to TREE's own
+REPOSITORY and SHA and marked already loaded. \"README.md\" (if
+present -- older trees, serialized before SERIALIZE-PERSISTENT-
+OBJECT wrote one, may lack it) is otherwise ignored: it exists only
+for a human Git user browsing the object database, never as an
+initarg. Signals an error if TREE's entries do not include \".meta\",
+or if its \".meta\" blob's :TAG is not :CLOS."
   (let* ((repository (get-repository tree))
          (entries (deserialize-tree repository (git-cat-file repository (sha tree))))
          (meta-entry (assoc ".meta" entries :test #'string=)))
@@ -348,7 +382,7 @@ its \".meta\" blob's :TAG is not :CLOS."
              (version (getf meta :version))
              (initargs
                (loop for entry in entries
-                     unless (string= (car entry) ".meta")
+                     unless (member (car entry) '(".meta" "README.md") :test #'string=)
                        append (list (%persistent-object-filename-initarg (car entry)) (cdr entry))))
              (instance (apply #'make-instance class-name :version version :repository repository initargs)))
         (setf (sha instance) (sha tree))

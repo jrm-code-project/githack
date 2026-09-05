@@ -26,7 +26,11 @@
     :initform nil
     :accessor widget-cache
     :transient t))
-  (:metaclass persistent-standard-class))
+  (:metaclass persistent-standard-class)
+  (:documentation
+   "A fixture class used to test PERSISTENT-STANDARD-CLASS/
+SERIALIZE-PERSISTENT-OBJECT, including that this very documentation
+string ends up in a persisted instance's own \"README.md\" entry."))
 
 (defclass persistent-owner (persistent-object)
   ((label
@@ -84,7 +88,38 @@ GIT-TREE slot, marked :TRANSIENT T by PERSISTENT-OBJECT itself)."
   (let ((widget (make-instance 'persistent-widget :repository :dummy-repo :name "Bob" :tag :x :cache 42)))
     (with-fake-git-hash-object ()
       (serialize-persistent-object widget))
-    (is (equal (list ".meta" "name" "tag") (mapcar #'car (get-entries widget))))))
+    (is (equal (list ".meta" "README.md" "name" "tag") (mapcar #'car (get-entries widget))))))
+
+(test serialize-persistent-object-writes-readme-from-class-documentation
+  "SERIALIZE-PERSISTENT-OBJECT's \"README.md\" entry holds
+INSTANCE's own class's DOCUMENTATION string, verbatim, UTF-8
+encoded."
+  (let* ((widget (make-instance 'persistent-widget :repository :dummy-repo :name "Bob" :tag :x))
+         (calls '()))
+    (with-recording-git-hash-object (calls)
+      (serialize-persistent-object widget))
+    (let* ((readme-entry (cdr (assoc "README.md" (get-entries widget) :test #'string=)))
+           (readme-octets (third (find (sha readme-entry) calls
+                                        :key (lambda (call) (%fake-sha-for (second call) (third call)))
+                                        :test #'string=))))
+      (is (string= (documentation (find-class 'persistent-widget) t)
+                   (sb-ext:octets-to-string readme-octets :external-format :utf-8))))))
+
+(test serialize-persistent-object-writes-placeholder-readme-for-undocumented-class
+  "SERIALIZE-PERSISTENT-OBJECT falls back to +PERSISTENT-OBJECT-NO-
+DOCUMENTATION-README+ for a class with no DOCUMENTATION string of
+its own."
+  (let* ((owner (make-instance 'persistent-owner :repository :dummy-repo :label "Alice"))
+         (calls '()))
+    (is (null (documentation (find-class 'persistent-owner) t)))
+    (with-recording-git-hash-object (calls)
+      (serialize-persistent-object owner))
+    (let* ((readme-entry (cdr (assoc "README.md" (get-entries owner) :test #'string=)))
+           (readme-octets (third (find (sha readme-entry) calls
+                                        :key (lambda (call) (%fake-sha-for (second call) (third call)))
+                                        :test #'string=))))
+      (is (string= githack::+persistent-object-no-documentation-readme+
+                   (sb-ext:octets-to-string readme-octets :external-format :utf-8))))))
 
 (test serialize-persistent-object-writes-standard-meta
   "SERIALIZE-PERSISTENT-OBJECT's \".meta\" blob holds (:TAG :CLOS

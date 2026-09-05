@@ -73,5 +73,5 @@ the resulting Git tree exactly as any other transient slot."
                                 :id 1 :name "Bob" :cache :some-cache :serial-number 1)))
     (with-fake-git-hash-object ()
       (serialize-persistent-object widget))
-    (is (equal (list ".meta" "id" "name" "serial-number")
+    (is (equal (list ".meta" "README.md" "id" "name" "serial-number")
                (mapcar #'car (get-entries widget))))))
