@@ -29,6 +29,16 @@ still unloaded)."))
    "A mutable reference onto a GIT-COMMIT, mirroring a Git branch ref
 under `refs/heads/`. See RESOLVE-BRANCH and UPDATE-BRANCH."))
 
+(setf (documentation 'get-name 'function)
+      "Return OBJECT's name: for a GIT-BRANCH, its branch name (e.g.
+\"main\" or \"master\"); for a BRANCH-NOT-FOUND-ERROR or
+CONCURRENT-MODIFICATION-ERROR, the branch name that was searched for
+or being updated.")
+(setf (documentation 'get-target 'function)
+      "Return BRANCH's (a GIT-BRANCH) GIT-COMMIT proxy target --
+the commit it currently points to (possibly still unloaded), or NIL
+if BRANCH names a not-yet-existing branch.")
+
 (defun %branch-ref-name (name)
   "Return the full Git ref path (\"refs/heads/<NAME>\") for the
 branch named NAME."
@@ -75,6 +85,18 @@ advanced (or created) the ref in the meantime. This is GitHack's
 :CONFLICT-RESOLUTION :RETRY mode should catch this condition and
 re-attempt its transaction from scratch against the ref's new
 state; :ERROR mode (the default) instead lets it propagate."))
+
+(setf (documentation 'get-expected-sha 'function)
+      "Return the SHA CONDITION (a CONCURRENT-MODIFICATION-ERROR)
+expected a branch to be at, or NIL if it expected the branch not to
+exist yet.")
+(setf (documentation 'get-new-sha 'function)
+      "Return the SHA CONDITION (a CONCURRENT-MODIFICATION-ERROR)
+attempted, and failed, to advance a branch to.")
+(setf (documentation 'get-detail 'function)
+      "Return CONDITION's (a CONCURRENT-MODIFICATION-ERROR) extra
+free-text detail describing the conflict, or NIL if none was
+supplied.")
 
 (defun git-update-ref (repository name sha &key (expected-sha :unconditional))
   "Shell out to `git update-ref refs/heads/<NAME> <SHA> [<EXPECTED-SHA>]`

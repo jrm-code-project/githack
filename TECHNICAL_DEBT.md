@@ -138,29 +138,39 @@ default) that is not a non-empty string, in addition to its pre-existing
 
 ## P2 — Consistency and maintainability
 
-### 7. Generated `define-persistent-struct` APIs are undocumented (Medium)
+### 7. Generated `define-persistent-struct` APIs are undocumented (Resolved)
 
-`define-persistent-struct` (`persistent-struct.lisp:53-99` roughly) macro-
-expands into a `defclass` plus a generated `make-<name>` constructor and
-`<name>-p` predicate, but none of the generated forms attach a docstring.
-Every exported hand-written function in this codebase has an unusually
-thorough docstring; the generated public API is the one conspicuous gap.
-`package.lisp:78-88` exports several of these generated symbols (e.g.
-`persistent-hash-table-p`, `phash-make`), so this is a real, user-facing
-documentation hole, not just an internal one.
+**Resolved:** `define-persistent-struct` (`persistent-struct.lisp`) now
+templates a docstring for every generated form: the `defclass` itself,
+the `make-<name>` constructor, the `<name>-p` predicate, and every
+generated slot accessor (the latter three via `(setf (documentation ...))`,
+since `defclass`'s per-slot `:documentation` option does not propagate to
+the implicitly-created accessor's own function documentation). This
+directly documents `persistent-hash-table`/`persistent-hash-table-p`/
+`-test`/`-count`/`-buckets` and every other `define-persistent-struct`
+consumer for free.
 
-**Suggested fix:** have the `define-persistent-struct` expansion emit a
-docstring for the generated constructor and predicate (can be templated
-from the struct name and slot list).
+### 8. No mechanical check that exported symbols are documented (Resolved)
 
-### 8. No mechanical check that exported symbols are documented (Low)
-
-`package.lisp:6-111` exports a large public API, but nothing in the test
-suite asserts `(documentation 'symbol 'function)` (or `'type`/`'variable`)
-is non-nil for every exported symbol. This is how the gap in item #7 went
-unnoticed. A cheap FiveAM test iterating `do-external-symbols` on the
-`GITHACK` package and checking for documentation would catch regressions
-like this automatically going forward.
+**Resolved:** `documentation-tests.lisp` adds a FiveAM test
+(`every-exported-symbol-has-documentation-for-each-of-its-roles`) that
+iterates `do-external-symbols` on the `GITHACK` package, infers each
+symbol's role(s) (type/class via `find-class`, function/macro/generic-
+function via `fboundp`, special variable via `sb-int:info`), and asserts
+`documentation` is non-nil for each applicable role. Running this test
+against the pre-existing codebase surfaced ~37 real gaps beyond item #7's
+narrower scope — mostly ordinary `get-*` CLOS reader functions (e.g.
+`get-repository`, `get-tree`, `get-status`) whose slot's own
+`:documentation` option (already present almost everywhere) does not
+transfer to the accessor's function documentation. Every gap was fixed via
+`(setf (documentation 'name 'function) "...")` forms placed once per
+symbol (immediately after the owning `defclass`), including for symbols
+legitimately reused, per this codebase's `get-<slot>` naming convention,
+across several unrelated classes (e.g. `get-repository` is used by
+`git-object`, `git-branch`, and `branch-not-found-error` alike — one
+comprehensive docstring covers all three). This test is a permanent
+regression guard: any future exported symbol without documentation now
+fails the suite.
 
 ### 9. Leftover ETYPECASE-era naming on now-generic functions (Low)
 
@@ -265,15 +275,15 @@ cheaply set up others. Numbers refer back to the item numbers above.
    direct test coverage of the original one-shot-process behavior (#5) to
    diff against.
 6. **#7 (docstrings on generated `define-persistent-struct` APIs)** and
-   **#8 (mechanical exported-symbol documentation check)** — do these
-   together: write the #8 test first (it will immediately fail and enumerate
-   every gap, including #7's), then fix #7 until #8 passes. Cheap, low-risk,
-   no dependency on anything above. **This is the next item to pick up.**
+   **#8 (mechanical exported-symbol documentation check)** *(done)* — done
+   together as planned: the #8 test was written first, immediately
+   surfacing every gap (including #7's, plus ~30 more ordinary `get-*`
+   reader functions), then all gaps were fixed until the test passed.
 7. **#9 (rename leftover `-etypecase` function names)** and **#10/#11/#12**
    (concurrency-policy docs, `git` PATH sanity check, pathname-portability
    tests) — lowest priority; pick these up opportunistically whenever
    another change already has you touching the same file, rather than as
-   dedicated work.
+   dedicated work. **This is the next item to pick up.**
 
 ---
 

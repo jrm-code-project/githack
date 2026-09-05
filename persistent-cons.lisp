@@ -82,6 +82,26 @@ tree with exactly four entries: \".meta\", \"README.md\", \"car\",
 and \"cdr\". See SERIALIZE-PERSISTENT-CONS and
 DESERIALIZE-PERSISTENT-CONS for the on-disk representation."))
 
+(setf (documentation 'persistent-car 'function)
+      "Return CONS's (a PERSISTENT-CONS) GIT-OBJECT proxy held in
+its CAR -- a GIT-BLOB for a scalar/atom, or a GIT-TREE/
+PERSISTENT-CONS for a compound value -- or NIL if not yet set
+(before serializing) or not yet loaded (after deserializing).")
+(setf (documentation 'persistent-cdr 'function)
+      "Return the value held in CONS's (a PERSISTENT-CONS) CDR: NIL
+if CONS is the last cons of a proper list, a nested PERSISTENT-CONS
+if the CDR is itself a cons, any other GIT-OBJECT proxy (typically a
+GIT-BLOB) for a dotted pair's final atom, or NIL if not yet loaded.")
+(setf (documentation 'persistent-cons-length 'function)
+      "Return CONS's (a PERSISTENT-CONS) list length, counting
+itself and every cons in its CDR chain (1 for a dotted pair or a
+singleton list), or NIL if not yet computed/loaded.")
+(setf (documentation 'persistent-cons-proper 'function)
+      "Return true if CONS (a PERSISTENT-CONS) and its entire CDR
+chain terminates in NIL (a proper list); NIL if it instead
+terminates in some other atom (a dotted pair), or if not yet
+computed/loaded.")
+
 (defun %serialize-persistent-cons-meta (length proper)
   "Encode the small property list (:TAG :CONS :LENGTH LENGTH :PROPER
 PROPER) as a UTF-8 octet vector, via %SERIALIZE-PLIST: the exact raw

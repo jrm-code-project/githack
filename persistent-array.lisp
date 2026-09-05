@@ -74,6 +74,15 @@ SERIALIZE-PERSISTENT-ARRAY and DESERIALIZE-PERSISTENT-ARRAY for the
 on-disk representation, and PERSISTENT-ARRAY-REF for lazily fetching
 individual elements by their N-dimensional subscripts."))
 
+(setf (documentation 'persistent-array-dimensions 'function)
+      "Return ARRAY's (a PERSISTENT-ARRAY) dimension sizes, as a
+list of non-negative integers (D1 D2 ... DN), or NIL if not yet set
+(before serializing) or not yet loaded (after deserializing).")
+(setf (documentation 'persistent-array-element-type 'function)
+      "Return ARRAY's (a PERSISTENT-ARRAY) declared element type,
+typically T for a generic persistent array. Recorded purely as
+metadata; GitHack does not itself enforce it.")
+
 (defun %serialize-persistent-array-meta (dimensions element-type)
   "Encode the small property list (:TAG :ARRAY :DIMENSIONS
 DIMENSIONS :ELEMENT-TYPE ELEMENT-TYPE) as a UTF-8 octet vector, via

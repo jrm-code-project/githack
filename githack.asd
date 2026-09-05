@@ -45,6 +45,7 @@
                (:file "test-helpers" :depends-on ("test-package"))
                (:file "git-object-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-io-tests" :depends-on ("test-package" "test-helpers"))
+               (:file "documentation-tests" :depends-on ("test-package"))
                (:file "atom-serialization-tests" :depends-on ("test-package"))
                (:file "git-tree-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-commit-tests" :depends-on ("test-package" "test-helpers"))

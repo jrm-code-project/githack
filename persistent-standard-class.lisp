@@ -58,6 +58,13 @@ SERIALIZE-PERSISTENT-OBJECT's tree entries. Defaults to NIL."))
 PERSISTENT-EFFECTIVE-SLOT-DEFINITION, holding the :TRANSIENT slot
 option both must support."))
 
+(setf (documentation 'persistent-slot-definition-transient 'function)
+      "Return true if SLOT-DEFINITION's (a
+PERSISTENT-DIRECT-SLOT-DEFINITION or
+PERSISTENT-EFFECTIVE-SLOT-DEFINITION) data must never be persisted
+to Git: its associated initarg (if any) is entirely filtered out of
+SERIALIZE-PERSISTENT-OBJECT's tree entries. Defaults to NIL.")
+
 (defclass persistent-direct-slot-definition
     (%persistent-slot-definition-mixin sb-mop:standard-direct-slot-definition)
   ()
@@ -135,6 +142,18 @@ its own (also transient) VERSION slot, and the internal
 %INITIALIZER-PAYLOAD slot SHARED-INITIALIZE populates. See
 SERIALIZE-PERSISTENT-OBJECT and DESERIALIZE-PERSISTENT-OBJECT for
 the on-disk representation."))
+
+(setf (documentation 'persistent-object-version 'function)
+      "Return INSTANCE's (a PERSISTENT-OBJECT) \".meta\"
+schema/migration version, recorded directly in \".meta\" (never as
+its own tree entry). Defaults to 0.")
+(setf (documentation '%persistent-object-initializer-payload 'function)
+      "Return the full list of INITARGS (a plist of alternating
+initarg/value pairs) most recently passed to INSTANCE's (a
+PERSISTENT-OBJECT) (SETF SB-MOP:SLOT-VALUE-USING-CLASS)'s underlying
+SHARED-INITIALIZE. See %PERSISTENT-OBJECT-FILTERED-PAYLOAD, which
+filters this down to exactly the entries SERIALIZE-PERSISTENT-OBJECT
+writes to Git.")
 
 (defmethod shared-initialize :after
     ((instance persistent-object) slot-names &rest initargs &key &allow-other-keys)

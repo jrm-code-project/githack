@@ -114,6 +114,20 @@ overwritten.")
 layer. See CALL-WITH-GIT-TRANSACTION, COMMIT-GIT-TRANSACTION, and
 ABORT-GIT-TRANSACTION."))
 
+(setf (documentation 'get-git-repository 'function)
+      "Return TRANSACTION's (a GIT-TRANSACTION) GIT-REPOSITORY --
+the repository it was opened against.")
+(setf (documentation 'get-target-branch 'function)
+      "Return TRANSACTION's (a GIT-TRANSACTION) GIT-BRANCH -- the
+branch it will advance on a successful :READ-WRITE commit.")
+(setf (documentation 'get-status 'function)
+      "Return TRANSACTION's (a GIT-TRANSACTION) current status: one
+of :ACTIVE, :COMMITTED, or :ABORTED.")
+(setf (documentation 'get-result 'function)
+      "Return the GIT-COMMIT TRANSACTION (a GIT-TRANSACTION) created
+upon a successful :READ-WRITE commit, or NIL if it has not (yet)
+committed.")
+
 (defun %unix-time-now ()
   "Return the current time as an integer Unix epoch timestamp."
   (- (get-universal-time) (encode-universal-time 0 0 0 1 1 1970 0)))

@@ -81,6 +81,16 @@ index. See SERIALIZE-PERSISTENT-VECTOR and
 DESERIALIZE-PERSISTENT-VECTOR for the on-disk representation, and
 PERSISTENT-VECTOR-REF for lazily fetching individual elements."))
 
+(setf (documentation 'persistent-vector-length 'function)
+      "Return VECTOR's (a PERSISTENT-VECTOR) exact number of
+elements, or NIL if not yet computed/loaded. Known immediately from
+a hollow (just-deserialized) proxy's \".meta\" blob, in O(1), without
+fetching any element.")
+(setf (documentation 'persistent-vector-element-type 'function)
+      "Return VECTOR's (a PERSISTENT-VECTOR) declared array element
+type, typically T for a generic persistent vector. Recorded purely
+as metadata; GitHack does not itself enforce it.")
+
 (defun %serialize-persistent-vector-meta (length element-type)
   "Encode the small property list (:TAG :VECTOR :LENGTH LENGTH
 :ELEMENT-TYPE ELEMENT-TYPE) as a UTF-8 octet vector, via

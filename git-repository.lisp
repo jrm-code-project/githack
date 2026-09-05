@@ -74,6 +74,22 @@ CALL-WITH-GIT-TRANSACTION."))
 together with the cascading defaults new GIT-TRANSACTIONs inherit.
 See CALL-WITH-GIT-REPOSITORY."))
 
+(setf (documentation 'get-pathname 'function)
+      "Return OBJECT's Git directory pathname: for a GIT-REPOSITORY,
+its --git-dir, passed through to the low-level GIT-OBJECT/GIT-BRANCH
+proxies as their opaque REPOSITORY handle; for a
+TRANSACTION-LOCK-TIMEOUT-ERROR, the lock file it timed out waiting
+for.")
+(setf (documentation 'get-branch 'function)
+      "Return REPOSITORY's (a GIT-REPOSITORY) default branch name
+(e.g. \"main\") new GIT-TRANSACTIONs operate against unless they
+supply their own.")
+(setf (documentation 'get-mode 'function)
+      "Return OBJECT's mode, either :READ-ONLY or :READ-WRITE: for a
+GIT-REPOSITORY, its own default mode; for a GIT-TRANSACTION, the
+mode it was actually opened in. A :READ-WRITE GIT-TRANSACTION against
+a :READ-ONLY GIT-REPOSITORY is rejected by CALL-WITH-GIT-TRANSACTION.")
+
 (defun call-with-repository (repository-specifier &rest defaults
                               &key receiver branch author committer message (mode :read-only))
   "Instantiate a GIT-REPOSITORY naming the Git directory
