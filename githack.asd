@@ -15,7 +15,7 @@
                (:file "git-branch" :depends-on ("git-object" "conditions" "package"))
                (:file "git-repository" :depends-on ("git-io" "conditions" "package"))
                (:file "persistent-cons"
-                :depends-on ("git-object" "git-blob" "git-tree" "git-io" "conditions" "package"))
+                :depends-on ("git-object" "git-blob" "git-tree" "git-io" "atomic-wrapper" "conditions" "package"))
                (:file "atomic-wrapper"
                 :depends-on ("git-object" "git-blob" "git-tree" "git-commit" "git-io" "conditions" "package"))
                (:file "persistent-vector"

@@ -164,28 +164,6 @@ exclusively, not the cache). VECTOR itself is never modified."
     (setf (%persistent-vector-cache new-vector) new-cache)
     new-vector))
 
-(defun %ensure-persistent-cons-loaded (cons)
-  "Ensure CONS's PERSISTENT-CAR/PERSISTENT-CDR (and LENGTH/PROPER)
-slots are populated: first, if CONS is merely a plain, not-yet-more-
-specifically-typed GIT-TREE (as returned by PERSISTENT-VECTOR-REF or
-PERSISTENT-CAR for a bucket/pair node freshly fetched from Git, since
-neither DESERIALIZE-TREE nor INFLATE-GIT-PROXY ever distinguish a
-nested PERSISTENT-CONS from an ordinary GIT-TREE), retype it in place
-into a PERSISTENT-CONS via CHANGE-CLASS; then, if CONS is not yet
-loaded, fetch its raw tree bytes and its own \".meta\" blob via
-GIT-CAT-FILE, and populate it via DESERIALIZE-PERSISTENT-CONS.
-Returns CONS."
-  (unless (typep cons 'persistent-cons)
-    (change-class cons 'persistent-cons))
-  (unless (get-loaded? cons)
-    (let* ((repository (get-repository cons))
-           (tree-octets (git-cat-file repository (sha cons)))
-           (entries (deserialize-tree repository tree-octets))
-           (meta-entry (assoc ".meta" entries :test #'string=))
-           (meta-octets (git-cat-file repository (sha (cdr meta-entry)))))
-      (deserialize-persistent-cons cons tree-octets meta-octets)))
-  cons)
-
 (defun %phash-bucket-node-p (node)
   "Return true if NODE is a real, non-terminal bucket-chain node (a
 PERSISTENT-CONS, or a plain GIT-TREE proxy for one not yet retyped by

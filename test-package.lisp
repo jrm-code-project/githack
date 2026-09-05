@@ -67,6 +67,8 @@
                 "*GIT-IO-SESSIONS*"
                 "%GIT-IO-SESSION-KEY"
                 "%ENSURE-BLOB-LOADED"
+                "%ENSURE-PERSISTENT-CONS-LOADED"
+                "SCAN-PERSISTENT-LIST"
                 "WRAP-ATOMIC-COMMIT-ROOT"
                 "RESOLVE-COMMIT-ROOT"
                 "+ATOMIC-WRAPPER-README+"

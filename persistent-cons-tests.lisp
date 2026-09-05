@@ -158,3 +158,56 @@ tree is missing any of the four required entries."
          (hollow (make-instance 'persistent-cons :repository :dummy-repo)))
     (with-fake-git-type ((list (cons blob-sha "blob")))
       (signals error (deserialize-persistent-cons hollow tree-octets #())))))
+
+(test scan-persistent-list-of-nil-is-empty
+  "SCAN-PERSISTENT-LIST of NIL (the empty list) produces an empty
+series."
+  (is (null (series:collect (scan-persistent-list nil)))))
+
+(test scan-persistent-list-collects-decoded-car-elements
+  "SCAN-PERSISTENT-LIST of an in-memory, already-loaded chain of
+PERSISTENT-CONS cells produces a series of their PERSISTENT-CAR
+values, each decoded via %PERSISTENT-CONS-DECODE (a GIT-BLOB's own
+PAYLOAD, here plain integers)."
+  (let* ((c3 (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
+                             :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload 3 :loaded? t)
+                             :persistent-cdr nil))
+         (c2 (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
+                             :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload 2 :loaded? t)
+                             :persistent-cdr c3))
+         (c1 (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
+                             :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload 1 :loaded? t)
+                             :persistent-cdr c2)))
+    (is (equal '(1 2 3) (series:collect (scan-persistent-list c1))))))
+
+(test scan-persistent-list-stops-before-a-dotted-pairs-final-atom
+  "SCAN-PERSISTENT-LIST of a dotted pair (whose final PERSISTENT-CDR
+is a non-NIL GIT-BLOB, not a further PERSISTENT-CONS) stops before
+that terminating atom, yielding only the real cons cells' decoded
+CAR values."
+  (let* ((final-atom (make-instance 'git-blob :repository :dummy-repo :payload :tail :loaded? t))
+         (c2 (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
+                             :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload 2 :loaded? t)
+                             :persistent-cdr final-atom))
+         (c1 (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
+                             :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload 1 :loaded? t)
+                             :persistent-cdr c2)))
+    (is (equal '(1 2) (series:collect (scan-persistent-list c1))))))
+
+(test scan-persistent-list-round-trips-through-a-fake-git-repository
+  "SCAN-PERSISTENT-LIST correctly walks a chain of PERSISTENT-CONS
+cells that must be lazily fetched and inflated from Git: after
+serializing an in-memory list and obtaining only a hollow proxy for
+its head SHA (via INFLATE-GIT-PROXY, exactly as a fresh repository
+read would), scanning the hollow proxy yields the same decoded CAR
+values as the original in-memory list."
+  (with-fake-git-repository ()
+    (let* ((c2 (make-instance 'persistent-cons :repository :dummy-repo
+                               :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload 2)
+                               :persistent-cdr nil))
+           (c1 (make-instance 'persistent-cons :repository :dummy-repo
+                               :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload 1)
+                               :persistent-cdr c2))
+           (head-sha (serialize-persistent-cons c1))
+           (hollow (inflate-git-proxy :dummy-repo head-sha)))
+      (is (equal '(1 2) (series:collect (scan-persistent-list hollow)))))))

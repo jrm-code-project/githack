@@ -250,3 +250,80 @@ error if TREE-OCTETS' entries do not include \".meta\", \"README.md\",
       (setf (persistent-cons-proper cons) proper)
       (setf (get-loaded? cons) t)
       cons)))
+
+(defun %ensure-persistent-cons-loaded (cons)
+  "Ensure CONS's PERSISTENT-CAR/PERSISTENT-CDR (and LENGTH/PROPER)
+slots are populated: first, if CONS is merely a plain, not-yet-more-
+specifically-typed GIT-TREE (as returned by PERSISTENT-VECTOR-REF or
+PERSISTENT-CAR for a bucket/pair node freshly fetched from Git, since
+neither DESERIALIZE-TREE nor INFLATE-GIT-PROXY ever distinguish a
+nested PERSISTENT-CONS from an ordinary GIT-TREE), retype it in place
+into a PERSISTENT-CONS via CHANGE-CLASS; then, if CONS is not yet
+loaded, fetch its raw tree bytes and its own \".meta\" blob via
+GIT-CAT-FILE, and populate it via DESERIALIZE-PERSISTENT-CONS.
+Returns CONS."
+  (unless (typep cons 'persistent-cons)
+    (change-class cons 'persistent-cons))
+  (unless (get-loaded? cons)
+    (let* ((repository (get-repository cons))
+           (tree-octets (git-cat-file repository (sha cons)))
+           (entries (deserialize-tree repository tree-octets))
+           (meta-entry (assoc ".meta" entries :test #'string=))
+           (meta-octets (git-cat-file repository (sha (cdr meta-entry)))))
+      (deserialize-persistent-cons cons tree-octets meta-octets)))
+  cons)
+
+(defun %persistent-cons-decode (git-object)
+  "Return the real Lisp value GIT-OBJECT represents: its decoded
+PAYLOAD, if GIT-OBJECT is a GIT-BLOB (fetching it from the
+repository first via %ENSURE-BLOB-LOADED, if not yet loaded); or
+GIT-OBJECT itself, unchanged, for any other (compound) GIT-OBJECT
+proxy."
+  (if (typep git-object 'git-blob)
+      (get-payload (%ensure-blob-loaded git-object))
+      git-object))
+
+(defun %persistent-cons-tail-p (tail)
+  "Return true if TAIL (a raw PERSISTENT-CDR value, possibly not yet
+retyped by %ENSURE-PERSISTENT-CONS-LOADED) represents a further cons
+cell continuing the list, as opposed to NIL (a proper list's own
+terminator) or a GIT-BLOB (the sentinel SERIALIZE-PERSISTENT-CONS
+always uses to encode either a proper list's terminal NIL or a
+dotted pair's own final atom) -- either of which ends the chain.
+Mirrors PERSISTENT-HASH-TABLE.LISP's own %PHASH-BUCKET-NODE-P, which
+applies this identical convention to its own PERSISTENT-CONS
+bucket chains."
+  (and tail (not (typep tail 'git-blob))))
+
+(defun scan-persistent-list (list)
+  "Return a series of the successive PERSISTENT-CAR elements of LIST
+(a PERSISTENT-CONS, a not-yet-retyped GIT-TREE proxy for one, or NIL
+for the empty list), each decoded via %PERSISTENT-CONS-DECODE (a
+GIT-BLOB element's own PAYLOAD, or any other, compound GIT-OBJECT
+proxy left unchanged), fetching each successive cons cell via
+%ENSURE-PERSISTENT-CONS-LOADED one at a time as the underlying
+SCAN-FN/MAP-FN series is advanced. Terminates -- producing a finite
+series -- at the first tail for which %PERSISTENT-CONS-TAIL-P is
+false: NIL (a proper list's own terminator) or a GIT-BLOB (a dotted
+pair's own final atom); LIST itself may already be either of these,
+in which case the series is empty. An OPTIMIZABLE-SERIES-FUNCTION,
+built entirely from the primitive SCAN-FN/MAP-FN series functions,
+so it can be spliced and fused into a surrounding series expression
+by the SERIES compiler exactly like the standard SCAN/SCAN-SUBLISTS
+-- when consumed from within such an optimized series expression
+(e.g. one ending in UNTIL-IF or a bounded COLLECT), only the prefix
+of LIST actually demanded is ever fetched from Git. A bare,
+unoptimized call (as when invoked directly, outside any surrounding
+SERIES-optimized DEFUN) instead produces its result eagerly in the
+ordinary Lisp-list representation SERIES falls back to, and so
+forces every cons cell of LIST up front regardless of how much of
+the resulting series is later consumed."
+  (declare (optimizable-series-function))
+  (let ((tails (scan-fn t
+                        (lambda () list)
+                        (lambda (tail) (persistent-cdr (%ensure-persistent-cons-loaded tail)))
+                        (lambda (tail) (not (%persistent-cons-tail-p tail))))))
+    (map-fn t
+            (lambda (tail)
+              (%persistent-cons-decode (persistent-car (%ensure-persistent-cons-loaded tail))))
+            tails)))
