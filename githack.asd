@@ -24,6 +24,8 @@
                (:file "persistent-standard-class"
                 :depends-on ("git-object" "git-blob" "git-tree" "git-io" "atomic-wrapper"
                               "persistent-cons" "persistent-vector" "persistent-array" "package"))
+               (:file "persistent-struct"
+                :depends-on ("git-object" "git-blob" "git-tree" "persistent-standard-class" "package"))
                (:file "git-transaction"
                 :depends-on ("git-object" "git-tree" "git-commit" "git-branch" "git-repository"
                               "git-io" "persistent-cons" "persistent-vector" "persistent-array"
@@ -47,6 +49,7 @@
                (:file "persistent-vector-tests" :depends-on ("test-package" "test-helpers"))
                (:file "persistent-array-tests" :depends-on ("test-package" "test-helpers"))
                (:file "persistent-standard-class-tests" :depends-on ("test-package" "test-helpers"))
+               (:file "persistent-struct-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-transaction-tests" :depends-on ("test-package" "test-helpers"))
                (:file "transaction-tests" :depends-on ("test-package" "test-helpers")))
   :perform (test-op (op c)
