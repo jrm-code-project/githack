@@ -93,3 +93,22 @@ RECEIVER returns."
                                     :mode mode)))
     (let ((*repository* repository))
       (funcall receiver repository))))
+
+(defmacro with-repository ((repository-var) (repository-specifier &key branch author committer message (mode :read-only)) &body body)
+  "Macro wrapper around CALL-WITH-REPOSITORY: expands into a call to
+CALL-WITH-REPOSITORY on REPOSITORY-SPECIFIER (evaluated once),
+passing BRANCH/AUTHOR/COMMITTER/MESSAGE/MODE through unchanged (MODE
+defaulting to :READ-ONLY exactly as CALL-WITH-REPOSITORY's own does),
+with :RECEIVER bound to a closure over BODY. Within BODY,
+REPOSITORY-VAR is bound to the GIT-REPOSITORY CALL-WITH-REPOSITORY
+constructs -- exactly as it would be passed to an explicit RECEIVER
+function, and exactly the same instance *REPOSITORY* is dynamically
+bound to for the duration of the call. Returns whatever BODY
+returns."
+  `(call-with-repository ,repository-specifier
+                          :branch ,branch
+                          :author ,author
+                          :committer ,committer
+                          :message ,message
+                          :mode ,mode
+                          :receiver (lambda (,repository-var) ,@body)))

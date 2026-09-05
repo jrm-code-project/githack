@@ -69,3 +69,28 @@ call, and *REPOSITORY* reverts to unbound once the call returns."
                          :author "The Boss <boss@githack.local>"
                          :receiver (lambda (repository) (is (eq repository *repository*))))
   (is (not (boundp '*repository*))))
+
+(test with-repository-expands-into-call-with-repository
+  "WITH-REPOSITORY binds REPOSITORY-VAR to the same GIT-REPOSITORY
+CALL-WITH-REPOSITORY's RECEIVER would receive, passing
+BRANCH/AUTHOR/COMMITTER/MESSAGE/MODE through unchanged, and returns
+whatever BODY returns."
+  (is (eq :the-bodys-value
+          (with-repository (repository)
+              (+repo-path+ :branch "main" :author "The Boss <boss@githack.local>"
+                            :message "default message" :mode :read-write)
+            (is (typep repository 'git-repository))
+            (is (equal +repo-path+ (get-pathname repository)))
+            (is (string= "main" (get-branch repository)))
+            (is (string= "The Boss <boss@githack.local>" (get-author repository)))
+            (is (string= "The Boss <boss@githack.local>" (get-committer repository)))
+            (is (string= "default message" (get-message repository)))
+            (is (eq :read-write (get-mode repository)))
+            (is (eq repository *repository*))
+            :the-bodys-value))))
+
+(test with-repository-defaults-mode-to-read-only
+  "WITH-REPOSITORY defaults MODE to :READ-ONLY when not explicitly
+supplied, exactly as CALL-WITH-REPOSITORY's own default does."
+  (with-repository (repository) (+repo-path+ :author "The Boss <boss@githack.local>")
+    (is (eq :read-only (get-mode repository)))))

@@ -40,6 +40,7 @@
                 "GET-BRANCH"
                 "GET-MODE"
                 "CALL-WITH-REPOSITORY"
+                "WITH-REPOSITORY"
                 "GIT-TRANSACTION"
                 "GET-GIT-REPOSITORY"
                 "GET-TARGET-BRANCH"
