@@ -84,6 +84,7 @@
                 "PERSISTENT-VECTOR-REF"
                 "%ENSURE-PERSISTENT-VECTOR-LOADED"
                 "SCAN-PERSISTENT-VECTOR"
+                "COLLECT-PERSISTENT-VECTOR"
                 "+PERSISTENT-VECTOR-README+"
                 "PERSISTENT-ARRAY"
                 "PERSISTENT-ARRAY-DIMENSIONS"

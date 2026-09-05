@@ -314,3 +314,45 @@ function's own per-index cache array is synchronized."
                                 object)))
                 (setf (svref cache index) value)
                 value)))))))
+
+(defun %persistent-vector-encode (repository value)
+  "Inverse of PERSISTENT-VECTOR-REF's own per-element decoding: return
+VALUE itself, unchanged, if it is already a GIT-OBJECT (a compound
+proxy -- a GIT-TREE, PERSISTENT-CONS, PERSISTENT-VECTOR, or GIT-BLOB
+-- to be stored directly as-is); otherwise wrap VALUE as the PAYLOAD
+of a freshly constructed, already GET-LOADED?, not-yet-persisted
+GIT-BLOB in REPOSITORY. Mirrors PERSISTENT-CONS.LISP's own
+%PERSISTENT-CONS-ENCODE, kept separate (rather than shared) for the
+same reason %PERSIST-VECTOR-COMPONENT is kept separate from
+PERSISTENT-CONS's own %PERSIST-CONS-COMPONENT."
+  (if (typep value 'git-object)
+      value
+      (make-instance 'git-blob :repository repository :payload value :loaded? t)))
+
+(defun collect-persistent-vector (repository items)
+  "Return a new, in-memory PERSISTENT-VECTOR built from the
+successive elements of ITEMS (an ordinary Lisp list -- e.g. the
+result of applying SERIES's own COLLECT to a series, exactly as
+COLLECT itself always terminates a series back into a concrete Lisp
+list before any further ordinary-Lisp processing), in the same order
+ITEMS itself holds them. Each element becomes one index entry's own
+GIT-OBJECT, via %PERSISTENT-VECTOR-ENCODE -- an already-compound
+GIT-OBJECT proxy (a GIT-TREE, PERSISTENT-CONS, PERSISTENT-VECTOR, or
+GIT-BLOB) is stored as-is, while any other, raw Lisp value is
+wrapped in a fresh GIT-BLOB. Exactly inverts SCAN-PERSISTENT-VECTOR
+composed with COLLECT: (COLLECT-PERSISTENT-VECTOR REPOSITORY
+(COLLECT (SCAN-PERSISTENT-VECTOR VECTOR))) reconstructs a vector
+equivalent to VECTOR, and (COLLECT (SCAN-PERSISTENT-VECTOR
+(COLLECT-PERSISTENT-VECTOR REPOSITORY ITEMS))) reproduces ITEMS' own
+elements. The result's LENGTH is set immediately from (LENGTH ITEMS),
+its ELEMENT-TYPE defaults to T, and it is marked already
+GET-LOADED? -- but it still has no SHA, so callers must still call
+SERIALIZE-PERSISTENT-VECTOR on it to actually persist it to Git."
+  (let ((index -1))
+    (make-instance 'persistent-vector :repository repository
+                                       :length (length items)
+                                       :loaded? t
+                                       :entries (mapcar (lambda (value)
+                                                          (cons (princ-to-string (incf index))
+                                                                (%persistent-vector-encode repository value)))
+                                                        items))))

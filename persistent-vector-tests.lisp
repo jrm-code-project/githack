@@ -255,3 +255,61 @@ in-memory vector, in index order."
                                     (cons (sha e1) "blob")
                                     (cons (sha e2) "blob")))
           (is (equal '(10 20 30) (series:collect (scan-persistent-vector hollow)))))))))
+
+(test collect-persistent-vector-of-nil-is-empty
+  "COLLECT-PERSISTENT-VECTOR of an empty list (NIL) is an
+already-loaded, zero-length vector."
+  (let ((vector (collect-persistent-vector :dummy-repo nil)))
+    (is (typep vector 'persistent-vector))
+    (is (= 0 (persistent-vector-length vector)))
+    (is (get-loaded? vector))
+    (is (null (sha vector)))))
+
+(test collect-persistent-vector-builds-a-vector-of-blob-wrapped-atoms
+  "COLLECT-PERSISTENT-VECTOR wraps every raw, non-GIT-OBJECT element
+of ITEMS in a fresh, already GET-LOADED? GIT-BLOB, computes LENGTH
+from ITEMS' own count, names each index entry with its zero-based
+decimal index in ITEMS' own order, marks the vector GET-LOADED?, and
+leaves its own SHA unset (not yet persisted)."
+  (let ((vector (collect-persistent-vector :dummy-repo (list 10 20 30))))
+    (is (typep vector 'persistent-vector))
+    (is (null (sha vector)))
+    (is (get-loaded? vector))
+    (is (= 3 (persistent-vector-length vector)))
+    (is (eq t (persistent-vector-element-type vector)))
+    (is (equal (list "0" "1" "2") (mapcar #'car (get-entries vector))))
+    (is (= 10 (persistent-vector-ref vector 0)))
+    (is (= 20 (persistent-vector-ref vector 1)))
+    (is (= 30 (persistent-vector-ref vector 2)))))
+
+(test collect-persistent-vector-passes-through-compound-elements-unchanged
+  "COLLECT-PERSISTENT-VECTOR stores an already-compound GIT-OBJECT
+element (a nested PERSISTENT-CONS, here) directly as that index's
+own entry, unwrapped, rather than re-wrapping it in a further
+GIT-BLOB."
+  (let* ((nested (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
+                                 :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload :inner :loaded? t)
+                                 :persistent-cdr nil))
+         (vector (collect-persistent-vector :dummy-repo (list nested))))
+    (is (eq nested (persistent-vector-ref vector 0)))))
+
+(test collect-persistent-vector-is-the-inverse-of-scan-persistent-vector
+  "Round-tripping a plain list of atoms through
+COLLECT-PERSISTENT-VECTOR then SCAN-PERSISTENT-VECTOR (materialized
+via SERIES:COLLECT) reproduces the original list's elements, in
+order."
+  (let ((items (list :a :b :c)))
+    (is (equal items (series:collect (scan-persistent-vector
+                                       (collect-persistent-vector :dummy-repo items)))))))
+
+(test collect-persistent-vector-result-serializes-with-serialize-persistent-vector
+  "The in-memory vector built by COLLECT-PERSISTENT-VECTOR can be
+persisted directly via SERIALIZE-PERSISTENT-VECTOR, exactly like any
+other hand-built PERSISTENT-VECTOR."
+  (let ((vector (collect-persistent-vector :dummy-repo (list 1 2 3))))
+    (with-fake-git-hash-object ()
+      (let ((sha (serialize-persistent-vector vector)))
+        (is (stringp sha))
+        (is (string= sha (sha vector)))))
+    (is (= 3 (persistent-vector-length vector)))
+    (is (equal (list ".meta" "README.md" "0" "1" "2") (mapcar #'car (get-entries vector))))))
