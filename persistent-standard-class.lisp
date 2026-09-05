@@ -208,7 +208,7 @@ SERIALIZE-PERSISTENT-OBJECT writes to Git."
                    (%persistent-object-initarg-transient-p instance initarg))
           collect (cons initarg value)))
 
-(defgeneric %persist-object-component-etypecase (value)
+(defgeneric %persist-object-component-by-type (value)
   (:documentation
    "Persist VALUE (a GIT-OBJECT known to already satisfy (TYPEP VALUE
 'GIT-OBJECT)) to Git's object database according to its concrete
@@ -216,24 +216,24 @@ type. Broken out of %PERSIST-OBJECT-COMPONENT so this dispatch is its
 own generic function, with one DEFMETHOD per concrete type in place
 of an ETYPECASE clause."))
 
-(defmethod %persist-object-component-etypecase ((value persistent-object))
+(defmethod %persist-object-component-by-type ((value persistent-object))
   (serialize-persistent-object value))
 
-(defmethod %persist-object-component-etypecase ((value persistent-cons))
+(defmethod %persist-object-component-by-type ((value persistent-cons))
   (serialize-persistent-cons value))
 
-(defmethod %persist-object-component-etypecase ((value persistent-vector))
+(defmethod %persist-object-component-by-type ((value persistent-vector))
   (serialize-persistent-vector value))
 
-(defmethod %persist-object-component-etypecase ((value persistent-array))
+(defmethod %persist-object-component-by-type ((value persistent-array))
   (serialize-persistent-array value))
 
-(defmethod %persist-object-component-etypecase ((value git-tree))
+(defmethod %persist-object-component-by-type ((value git-tree))
   (unless (sha value)
     (setf (sha value)
           (git-hash-object (get-repository value) "tree" (serialize-tree value)))))
 
-(defmethod %persist-object-component-etypecase ((value git-blob))
+(defmethod %persist-object-component-by-type ((value git-blob))
   (unless (sha value)
     (setf (sha value)
           (git-hash-object (get-repository value) "blob"
@@ -252,7 +252,7 @@ GIT-TRANSACTION's shared %PERSIST-GIT-OBJECT so as not to introduce
 a load-order cycle."
   (if (typep value 'git-object)
       (progn
-        (%persist-object-component-etypecase value)
+        (%persist-object-component-by-type value)
         value)
       (make-instance 'git-blob :repository repository
                                 :sha (git-hash-object repository "blob" (serialize-atom value))

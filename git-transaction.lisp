@@ -148,7 +148,7 @@ own SHA."
         (setf (sha tree)
               (git-hash-object (get-repository tree) "tree" (serialize-tree tree))))))
 
-(defgeneric %persist-git-object-etypecase (git-object)
+(defgeneric %persist-git-object-by-type (git-object)
   (:documentation
    "Persist GIT-OBJECT (which is known not to have a SHA yet) to
 Git's object database according to its concrete type, and return the
@@ -156,22 +156,22 @@ resulting SHA. Broken out of %PERSIST-GIT-OBJECT so this dispatch is
 its own generic function, with one DEFMETHOD per concrete type in
 place of an ETYPECASE clause."))
 
-(defmethod %persist-git-object-etypecase ((git-object persistent-object))
+(defmethod %persist-git-object-by-type ((git-object persistent-object))
   (serialize-persistent-object git-object))
 
-(defmethod %persist-git-object-etypecase ((git-object persistent-cons))
+(defmethod %persist-git-object-by-type ((git-object persistent-cons))
   (serialize-persistent-cons git-object))
 
-(defmethod %persist-git-object-etypecase ((git-object persistent-vector))
+(defmethod %persist-git-object-by-type ((git-object persistent-vector))
   (serialize-persistent-vector git-object))
 
-(defmethod %persist-git-object-etypecase ((git-object persistent-array))
+(defmethod %persist-git-object-by-type ((git-object persistent-array))
   (serialize-persistent-array git-object))
 
-(defmethod %persist-git-object-etypecase ((git-object git-tree))
+(defmethod %persist-git-object-by-type ((git-object git-tree))
   (%persist-git-tree-object git-object))
 
-(defmethod %persist-git-object-etypecase ((git-object git-blob))
+(defmethod %persist-git-object-by-type ((git-object git-blob))
   (setf (sha git-object)
         (git-hash-object (get-repository git-object) "blob"
                           (serialize-atom (get-payload git-object)))))
@@ -185,7 +185,7 @@ children) to Git's object database if it does not already. Returns
 GIT-OBJECT's SHA. Objects that already have a SHA are assumed
 already present in Git's object database and are left untouched."
   (or (sha git-object)
-      (%persist-git-object-etypecase git-object)))
+      (%persist-git-object-by-type git-object)))
 
 (defun %persist-git-commit-object (commit)
   "Ensure COMMIT (a GIT-COMMIT) has a SHA, writing its serialized

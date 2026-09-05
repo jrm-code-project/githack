@@ -120,7 +120,7 @@ Signals an error if OCTETS is not a plist whose :TAG is :CONS."
              :format-arguments (list plist)))
     (values (getf plist :length) (getf plist :proper))))
 
-(defgeneric %persist-cons-component-etypecase (git-object)
+(defgeneric %persist-cons-component-by-type (git-object)
   (:documentation
    "Persist GIT-OBJECT (which is known not to have a SHA yet) to
 Git's object database according to its concrete type, and return the
@@ -128,14 +128,14 @@ resulting SHA. Broken out of %PERSIST-CONS-COMPONENT so this
 dispatch is its own generic function, with one DEFMETHOD per
 concrete type in place of an ETYPECASE clause."))
 
-(defmethod %persist-cons-component-etypecase ((git-object persistent-cons))
+(defmethod %persist-cons-component-by-type ((git-object persistent-cons))
   (serialize-persistent-cons git-object))
 
-(defmethod %persist-cons-component-etypecase ((git-object git-tree))
+(defmethod %persist-cons-component-by-type ((git-object git-tree))
   (setf (sha git-object)
         (git-hash-object (get-repository git-object) "tree" (serialize-tree git-object))))
 
-(defmethod %persist-cons-component-etypecase ((git-object git-blob))
+(defmethod %persist-cons-component-by-type ((git-object git-blob))
   (setf (sha git-object)
         (git-hash-object (get-repository git-object) "blob"
                           (serialize-atom (get-payload git-object)))))
@@ -149,7 +149,7 @@ other GIT-TREE is assumed to already have every one of its ENTRIES
 persisted, exactly as SERIALIZE-TREE itself requires. Returns
 GIT-OBJECT's SHA."
   (or (sha git-object)
-      (%persist-cons-component-etypecase git-object)))
+      (%persist-cons-component-by-type git-object)))
 
 (defun %persistent-cons-metadata (cons)
   "Return two values, the :LENGTH and :PROPER CONS's \".meta\" must

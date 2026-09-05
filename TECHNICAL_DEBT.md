@@ -172,20 +172,19 @@ comprehensive docstring covers all three). This test is a permanent
 regression guard: any future exported symbol without documentation now
 fails the suite.
 
-### 9. Leftover ETYPECASE-era naming on now-generic functions (Low)
+### 9. Leftover ETYPECASE-era naming on now-generic functions (Resolved)
 
-`git-transaction.lisp:116-140`, `persistent-vector.lisp:109-132`, and
-`persistent-cons.lisp:101-120` still name their generic functions
-`%persist-git-object-etypecase`, `%persist-vector-component-etypecase`, and
-`%persist-cons-component-etypecase`, respectively — a naming leftover from
-before these were converted from `etypecase` forms into `defgeneric`/
-`defmethod` dispatch. The names are accurate about *why* the split exists
-but no longer describe *what* the function is (a CLOS generic dispatch).
-
-**Suggested fix:** rename to something like `%persist-git-object-by-type`,
-`%persist-vector-component-by-type`, `%persist-cons-component-by-type` (or
-similar) the next time any of these files are touched for another reason —
-not worth a dedicated commit on its own.
+**Resolved:** renamed all four `%persist-*-etypecase` generic functions to
+`%persist-*-by-type` (`git-transaction.lisp`'s `%persist-git-object-by-type`,
+`persistent-cons.lisp`'s `%persist-cons-component-by-type`,
+`persistent-vector.lisp`'s `%persist-vector-component-by-type`, and
+`persistent-standard-class.lisp`'s `%persist-object-component-by-type` — the
+last of these was an additional instance of the same pattern found while
+fixing this item, beyond the three files originally called out). Each
+`defgeneric`'s docstring is otherwise unchanged, since it still accurately
+explains the ETYPECASE-to-DEFGENERIC/DEFMETHOD history; only the naming of
+the symbol itself changed to describe what the function is (a by-type
+dispatch) rather than what it replaced.
 
 ---
 
@@ -279,11 +278,14 @@ cheaply set up others. Numbers refer back to the item numbers above.
    together as planned: the #8 test was written first, immediately
    surfacing every gap (including #7's, plus ~30 more ordinary `get-*`
    reader functions), then all gaps were fixed until the test passed.
-7. **#9 (rename leftover `-etypecase` function names)** and **#10/#11/#12**
-   (concurrency-policy docs, `git` PATH sanity check, pathname-portability
-   tests) — lowest priority; pick these up opportunistically whenever
-   another change already has you touching the same file, rather than as
-   dedicated work. **This is the next item to pick up.**
+7. **#9 (rename leftover `-etypecase` function names)** *(done)* — renamed
+   all four `%persist-*-etypecase` generic functions (one more than
+   originally called out) to `%persist-*-by-type`.
+8. **#10/#11/#12** (concurrency-policy docs, `git` PATH sanity check,
+   pathname-portability tests) — lowest priority; pick these up
+   opportunistically whenever another change already has you touching the
+   same file, rather than as dedicated work. **This is the next item to
+   pick up.**
 
 ---
 

@@ -118,7 +118,7 @@ order GET-ENTRIES currently holds them."
   (remove-if (lambda (entry) (member (car entry) '(".meta" "README.md") :test #'string=))
              (get-entries vector)))
 
-(defgeneric %persist-vector-component-etypecase (git-object)
+(defgeneric %persist-vector-component-by-type (git-object)
   (:documentation
    "Persist GIT-OBJECT (which is known not to have a SHA yet) to
 Git's object database according to its concrete type, and return the
@@ -126,17 +126,17 @@ resulting SHA. Broken out of %PERSIST-VECTOR-COMPONENT so this
 dispatch is its own generic function, with one DEFMETHOD per
 concrete type in place of an ETYPECASE clause."))
 
-(defmethod %persist-vector-component-etypecase ((git-object persistent-vector))
+(defmethod %persist-vector-component-by-type ((git-object persistent-vector))
   (serialize-persistent-vector git-object))
 
-(defmethod %persist-vector-component-etypecase ((git-object persistent-cons))
+(defmethod %persist-vector-component-by-type ((git-object persistent-cons))
   (serialize-persistent-cons git-object))
 
-(defmethod %persist-vector-component-etypecase ((git-object git-tree))
+(defmethod %persist-vector-component-by-type ((git-object git-tree))
   (setf (sha git-object)
         (git-hash-object (get-repository git-object) "tree" (serialize-tree git-object))))
 
-(defmethod %persist-vector-component-etypecase ((git-object git-blob))
+(defmethod %persist-vector-component-by-type ((git-object git-blob))
   (setf (sha git-object)
         (git-hash-object (get-repository git-object) "blob"
                           (serialize-atom (get-payload git-object)))))
@@ -156,7 +156,7 @@ need depend on GIT-TRANSACTION's own %PERSIST-GIT-OBJECT, breaking
 what would otherwise be a load-order cycle. Returns GIT-OBJECT's
 SHA."
   (or (sha git-object)
-      (%persist-vector-component-etypecase git-object)))
+      (%persist-vector-component-by-type git-object)))
 
 (defun serialize-persistent-vector (vector)
   "Compute VECTOR's LENGTH from its own index entries (every entry
