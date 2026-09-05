@@ -120,3 +120,28 @@ auto-commit semantics for BODY's return value."
             (is (= 99 (get-payload
                        (cdr (assoc "value" (get-entries (get-tree (get-result transaction)))
                                    :test #'string=)))))))))))
+
+(test star-transaction-is-unbound-outside-call-with-transaction
+  "*TRANSACTION* is unbound at the top level, outside the dynamic
+extent of any CALL-WITH-TRANSACTION call."
+  (is (not (boundp '*transaction*))))
+
+(test call-with-transaction-binds-star-transaction-to-the-same-instance
+  "CALL-WITH-TRANSACTION dynamically binds *TRANSACTION* to the
+exact GIT-TRANSACTION CALL-WITH-GIT-TRANSACTION constructs, for the
+duration of RECEIVER's call, and *TRANSACTION* reverts to unbound
+once the call returns."
+  (let ((repository (%make-test-repository :read-write))
+        (update-calls '())
+        captured-transaction)
+    (with-fake-git-show-ref-sha ('())
+      (with-fake-git-object-store ()
+        (with-recording-git-update-ref (update-calls)
+          (let ((transaction
+                  (call-with-transaction repository :read-write
+                                          :receiver (lambda (value)
+                                                      (declare (ignore value))
+                                                      (setf captured-transaction *transaction*)
+                                                      42))))
+            (is (eq transaction captured-transaction))))))
+    (is (not (boundp '*transaction*)))))

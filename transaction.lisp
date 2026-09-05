@@ -60,13 +60,36 @@ that new GIT-BLOB against."
       value
       (make-instance 'git-blob :repository repository :payload value)))
 
+;;; *TRANSACTION* is the GIT-TRANSACTION currently in dynamic scope,
+;;; bound by CALL-WITH-TRANSACTION around its call to RECEIVER. It is
+;;; unbound at the top level -- referencing it outside the dynamic
+;;; extent of a CALL-WITH-TRANSACTION call signals UNBOUND-VARIABLE.
+(defvar *transaction*)
+
+;; DEFVAR's own DOCUMENTATION argument cannot be supplied without
+;; also supplying an INITIAL-VALUE (which would leave *TRANSACTION*
+;; bound instead of unbound by default), so its docstring is attached
+;; separately here via (SETF DOCUMENTATION).
+(setf (documentation '*transaction* 'variable)
+      "The GIT-TRANSACTION currently in dynamic scope, dynamically
+bound by CALL-WITH-TRANSACTION to the GIT-TRANSACTION
+CALL-WITH-GIT-TRANSACTION constructs, for the duration of its call to
+RECEIVER. Unbound at the top level -- referencing it outside the
+dynamic extent of a CALL-WITH-TRANSACTION call signals
+UNBOUND-VARIABLE. Note this is distinct from *GIT-TRANSACTION*, which
+CALL-WITH-GIT-TRANSACTION itself already binds to the same instance;
+*TRANSACTION* exists so CALL-WITH-TRANSACTION's own RECEIVER (whose
+FUNCALL signature omits the raw GIT-TRANSACTION argument) can still
+reach it without touching SHAs, GIT-BLOBs, GIT-TREEs, or GIT-COMMITs.")
+
 (defun call-with-transaction (repository mode &key branch author committer message parents receiver)
   "The user-facing counterpart to CALL-WITH-GIT-TRANSACTION: opens a
 transaction against REPOSITORY (a GIT-REPOSITORY) exactly as
 CALL-WITH-GIT-TRANSACTION does, cascading BRANCH/AUTHOR/COMMITTER/
 MESSAGE/PARENTS the same way, but invokes (FUNCALL RECEIVER VALUE)
 with a single plain Lisp value in place of a raw GIT-COMMIT -- see
-%TRANSACTION-READ-VALUE -- and expects RECEIVER to return a single
+%TRANSACTION-READ-VALUE -- with *TRANSACTION* dynamically bound to
+the GIT-TRANSACTION for the duration of that call, and expects RECEIVER to return a single
 plain Lisp value in turn, representing the new desired root state,
 which is automatically coerced back into a GIT-OBJECT and persisted
 -- see %TRANSACTION-WRITE-VALUE. RECEIVER must never touch SHAs,
@@ -89,10 +112,10 @@ does."
    :message message
    :parents parents
    :receiver (lambda (transaction head-commit)
-               (declare (ignore transaction))
-               (%transaction-write-value
-                (get-pathname repository)
-                (funcall receiver (%transaction-read-value head-commit))))))
+               (let ((*transaction* transaction))
+                 (%transaction-write-value
+                  (get-pathname repository)
+                  (funcall receiver (%transaction-read-value head-commit)))))))
 
 (defmacro with-transaction ((value-var) (repository mode &key branch author committer message parents) &body body)
   "Macro wrapper around CALL-WITH-TRANSACTION: expands into a call to
