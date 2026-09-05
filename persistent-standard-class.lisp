@@ -12,8 +12,9 @@
 ;;;   .meta        a blob holding the plist (:TAG :CLOS :CLASS
 ;;;                "CLASS-NAME" :VERSION n) -- structural metadata
 ;;;                only, never any application data
-;;;   README.md    a blob holding INSTANCE's own class's
-;;;                DOCUMENTATION string (its DEFCLASS's own
+;;;   README.md    a blob holding a Markdown "# " title line naming
+;;;                INSTANCE's own class, followed by that class's
+;;;                own DOCUMENTATION string (its DEFCLASS's own
 ;;;                :DOCUMENTATION option), for a human Git user
 ;;;                browsing the object database -- see
 ;;;                %PERSISTENT-OBJECT-README-CONTENT
@@ -290,33 +291,38 @@ a load-order cycle."
 
 (defparameter +persistent-object-no-documentation-readme+
   "(No documentation string was provided for this class.)"
-  "The fixed README.md content SERIALIZE-PERSISTENT-OBJECT writes
-for an instance of a class with no DOCUMENTATION string of its own
-(i.e. (DOCUMENTATION (CLASS-OF INSTANCE) T) returns NIL).")
+  "The fixed README.md body content SERIALIZE-PERSISTENT-OBJECT
+writes for an instance of a class with no DOCUMENTATION string of
+its own (i.e. (DOCUMENTATION (CLASS-OF INSTANCE) T) returns NIL).")
 
 (defun %persistent-object-readme-content (instance)
   "Return the UTF-8-encoded octet vector SERIALIZE-PERSISTENT-OBJECT
-writes as INSTANCE's own \"README.md\" entry: INSTANCE's own class's
-DOCUMENTATION string -- i.e. its DEFCLASS's own :DOCUMENTATION
-option -- or, if that class has none, +PERSISTENT-OBJECT-NO-
-DOCUMENTATION-README+."
-  (sb-ext:string-to-octets
-   (or (documentation (class-of instance) t)
-       +persistent-object-no-documentation-readme+)
-   :external-format :utf-8))
+writes as INSTANCE's own \"README.md\" entry: a Markdown \"# \"
+title line naming INSTANCE's own class (via CLASS-NAME), followed by
+a blank line and that class's own DOCUMENTATION string -- i.e. its
+DEFCLASS's own :DOCUMENTATION option -- or, if that class has none,
++PERSISTENT-OBJECT-NO-DOCUMENTATION-README+."
+  (let ((class-symbol (class-name (class-of instance))))
+    (sb-ext:string-to-octets
+     (format nil "# ~A~%~%~A~%"
+             class-symbol
+             (or (documentation (class-of instance) t)
+                 +persistent-object-no-documentation-readme+))
+     :external-format :utf-8)))
 
 (defun serialize-persistent-object (instance)
   "Compile INSTANCE (a PERSISTENT-OBJECT) into a Git tree: a
 \".meta\" entry holding (:TAG :CLOS :CLASS \"CLASS-NAME\" :PACKAGE
-\"PACKAGE-NAME\" :VERSION n), a \"README.md\" entry holding
-INSTANCE's own class's DOCUMENTATION string (via
-%PERSISTENT-OBJECT-README-CONTENT), and one further entry per
-non-transient initarg recorded in INSTANCE's %INITIALIZER-PAYLOAD
-(via %PERSISTENT-OBJECT-FILTERED-PAYLOAD) -- filename the initarg's
-own downcased name, each a proxy pointer to that initarg's own
-(recursively persisted, via %PERSIST-OBJECT-COMPONENT) GIT-OBJECT
-value. INSTANCE's own transient slots (VERSION, and any other slot
-marked :TRANSIENT T) are entirely excluded, appearing nowhere in the
+\"PACKAGE-NAME\" :VERSION n), a \"README.md\" entry holding a
+Markdown title naming INSTANCE's own class followed by that class's
+own DOCUMENTATION string (via %PERSISTENT-OBJECT-README-CONTENT),
+and one further entry per non-transient initarg recorded in
+INSTANCE's %INITIALIZER-PAYLOAD (via %PERSISTENT-OBJECT-FILTERED-
+PAYLOAD) -- filename the initarg's own downcased name, each a proxy
+pointer to that initarg's own (recursively persisted, via
+%PERSIST-OBJECT-COMPONENT) GIT-OBJECT value. INSTANCE's own
+transient slots (VERSION, and any other slot marked :TRANSIENT T)
+are entirely excluded, appearing nowhere in the
 Git tree. Returns INSTANCE's own SHA, doing nothing further if
 INSTANCE already has one."
   (or (sha instance)
