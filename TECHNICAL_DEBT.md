@@ -12,31 +12,23 @@ Severity legend: **High** (correctness/data-safety/major confusion risk),
 
 ## P0 — Correctness and data-safety risks
 
-### 1. No optimistic-concurrency check on branch updates (High)
+### 1. No optimistic-concurrency check on branch updates (Resolved)
 
-`call-with-git-transaction` reads a branch's current head commit once, at
-the start of the transaction, and only writes the branch ref back at the
-very end — it never re-checks that the branch still points at the same
-head it originally observed:
-
-- `git-transaction.lisp:214-220` (branch resolved to `head-commit` up front)
-- `git-transaction.lisp:289-303` (`update-branch` called unconditionally at
-  commit time)
-
-Two concurrent `:read-write` transactions against the same branch can both
-read the same parent commit, do independent work, and then race to call
-`update-branch`; whichever finishes last silently clobbers the other's
-commit with no error, no merge, and no warning. This is a classic
-lost-update bug for anything but strictly single-writer use. Since this is
-a persistent *database*, this is the single highest-impact piece of debt
-in the repository.
-
-**Suggested fix:** have `update-branch` (or a wrapper used by
-`call-with-git-transaction`) verify the ref still names the same SHA it
-started from immediately before writing (e.g. via `git update-ref
-refs/heads/<name> <new-sha> <expected-old-sha>`, which `git update-ref`
-supports natively for exactly this purpose), and signal a retryable
-condition on mismatch instead of overwriting silently.
+**Resolved:** `call-with-git-transaction` (and `call-with-transaction`) now
+accept a `:conflict-resolution` keyword argument (`:error`, the default;
+`:retry`; or `:lock`). `git-update-ref`/`update-branch` perform a real
+compare-and-swap via `git update-ref refs/heads/<name> <new> <old>`,
+signaling `concurrent-modification-error` if some other writer already
+advanced the branch. `:error` propagates that condition immediately;
+`:retry` catches it and re-attempts the whole transaction (re-resolving the
+branch and re-invoking the receiver) until it succeeds — which required
+auditing the entire proxy/serialization pipeline for purity, since a
+retried receiver may run more than once (see `git-transaction.lisp`'s
+`call-with-git-transaction` docstring for the audit's conclusion and the
+purity requirement this places on `:retry` callers); `:lock` instead
+acquires an exclusive, repository-wide lock file
+(`transaction-lock.lisp`) before even reading the branch's head, so
+concurrent `:lock`-mode transactions serialize instead of racing.
 
 ### 2. Documentation describes an architecture that no longer exists (High)
 

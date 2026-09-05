@@ -162,10 +162,11 @@ is advanced to point at it."
               (is (= 1 (length (get-parents commit))))
               (is (string= +head-sha+ (sha (first (get-parents commit)))))
               (is (= 1 (length update-calls)))
-              (destructuring-bind (called-repository name sha) (first update-calls)
+              (destructuring-bind (called-repository name sha old-sha) (first update-calls)
                 (is (equal +repo-path+ called-repository))
                 (is (string= "main" name))
-                (is (string= (sha commit) sha))))))))))
+                (is (string= (sha commit) sha))
+                (is (string= +head-sha+ old-sha))))))))))
 
 (test call-with-git-transaction-wraps-an-atomic-root-in-an-atomic-wrapper-tree
   "A :READ-WRITE transaction whose RECEIVER returns a bare atomic
@@ -273,3 +274,83 @@ returns."
                                               (is (eq tx *git-transaction*))
                                               (abort-git-transaction tx)))))
   (is (not (boundp '*git-transaction*))))
+
+(test call-with-git-transaction-defaults-conflict-resolution-to-error
+  "CALL-WITH-GIT-TRANSACTION's TRANSACTION defaults
+CONFLICT-RESOLUTION to :ERROR when not explicitly supplied."
+  (let ((repository (%make-test-repository :read-write))
+        (update-calls '()))
+    (with-fake-head-resolution ()
+      (with-fake-git-hash-object ()
+        (with-recording-git-update-ref (update-calls)
+          (let ((transaction
+                  (call-with-git-transaction repository :read-write
+                                              :receiver (lambda (tx head)
+                                                          (declare (ignore tx head))
+                                                          (make-instance 'git-tree :repository +repo-path+ :entries '())))))
+            (is (eq :error (get-conflict-resolution transaction)))))))))
+
+(test call-with-git-transaction-error-mode-propagates-concurrent-modification-error
+  "With the default :CONFLICT-RESOLUTION :ERROR, a compare-and-swap
+failure on the branch update (some other writer already having
+advanced it) propagates a CONCURRENT-MODIFICATION-ERROR straight out
+of CALL-WITH-GIT-TRANSACTION, without any retry."
+  (let ((repository (%make-test-repository :read-write))
+        (attempts 0))
+    (with-fake-head-resolution ()
+      (with-fake-git-hash-object ()
+        (with-cas-failing-git-update-ref ()
+          (signals concurrent-modification-error
+            (call-with-git-transaction repository :read-write
+                                        :receiver (lambda (tx head)
+                                                    (declare (ignore tx head))
+                                                    (incf attempts)
+                                                    (make-instance 'git-tree :repository +repo-path+ :entries '()))))
+          (is (= 1 attempts)))))))
+
+(test call-with-git-transaction-retry-mode-retries-until-successful
+  "With :CONFLICT-RESOLUTION :RETRY, a compare-and-swap failure is
+caught and the entire transaction re-attempted from scratch --
+re-invoking RECEIVER -- until GIT-UPDATE-REF's own compare-and-swap
+check finally succeeds."
+  (let ((repository (%make-test-repository :read-write))
+        (attempts 0))
+    (with-fake-head-resolution ()
+      (with-fake-git-hash-object ()
+        (with-cas-failing-git-update-ref (:fail-count 2)
+          (let ((transaction
+                  (call-with-git-transaction repository :read-write
+                                              :conflict-resolution :retry
+                                              :receiver (lambda (tx head)
+                                                          (declare (ignore tx head))
+                                                          (incf attempts)
+                                                          (make-instance 'git-tree :repository +repo-path+ :entries '())))))
+            (is (eq :committed (get-status transaction)))
+            (is (eq :retry (get-conflict-resolution transaction)))
+            (is (= 3 attempts))))))))
+
+(test call-with-git-transaction-lock-mode-holds-the-repository-lock-across-receiver
+  "With :CONFLICT-RESOLUTION :LOCK, CALL-WITH-GIT-TRANSACTION holds
+the repository's own transaction lock file for the entire dynamic
+extent of RECEIVER's call, and releases it again once the
+transaction has committed."
+  (with-temporary-git-repository (git-dir)
+    (let ((repository (make-instance 'git-repository
+                                      :pathname git-dir
+                                      :branch "main"
+                                      :author "The Boss <boss@githack.local>"
+                                      :committer "The Boss <boss@githack.local>"
+                                      :message "default message"
+                                      :mode :read-write))
+          lock-held-during-receiver)
+      (let ((transaction
+              (call-with-git-transaction repository :read-write
+                                          :conflict-resolution :lock
+                                          :receiver (lambda (tx head)
+                                                      (declare (ignore tx head))
+                                                      (setf lock-held-during-receiver
+                                                            (and (probe-file (%transaction-lock-pathname git-dir)) t))
+                                                      (make-instance 'git-tree :repository git-dir :entries '())))))
+        (is (eq :committed (get-status transaction)))
+        (is (eq t lock-held-during-receiver))
+        (is (not (probe-file (%transaction-lock-pathname git-dir))))))))

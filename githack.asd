@@ -29,10 +29,11 @@
                (:file "persistent-hash-table"
                 :depends-on ("git-object" "git-blob" "git-tree" "git-io" "atomic-wrapper"
                               "persistent-cons" "persistent-vector" "persistent-struct" "package"))
+               (:file "transaction-lock" :depends-on ("package"))
                (:file "git-transaction"
                 :depends-on ("git-object" "git-tree" "git-commit" "git-branch" "git-repository"
                               "git-io" "persistent-cons" "persistent-vector" "persistent-array"
-                              "persistent-standard-class" "atomic-wrapper" "package"))
+                              "persistent-standard-class" "atomic-wrapper" "transaction-lock" "package"))
                (:file "transaction"
                 :depends-on ("git-object" "git-blob" "git-io" "atomic-wrapper" "git-transaction" "git-repository" "package"))))
 
@@ -46,6 +47,7 @@
                (:file "git-tree-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-commit-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-branch-tests" :depends-on ("test-package" "test-helpers"))
+               (:file "transaction-lock-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-repository-tests" :depends-on ("test-package" "test-helpers"))
                (:file "persistent-cons-tests" :depends-on ("test-package" "test-helpers"))
                (:file "atomic-wrapper-tests" :depends-on ("test-package" "test-helpers"))

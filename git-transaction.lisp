@@ -75,6 +75,27 @@ CALL-WITH-GIT-TRANSACTION call signals UNBOUND-VARIABLE.")
     :initarg :parents
     :reader get-parents
     :documentation "The list of GIT-COMMIT proxies the new commit will record as its parents.")
+   (conflict-resolution
+    :initarg :conflict-resolution
+    :reader get-conflict-resolution
+    :initform :error
+    :type (member :error :retry :lock)
+    :documentation
+    "One of :ERROR, :RETRY, or :LOCK, as passed to
+CALL-WITH-GIT-TRANSACTION, controlling how a 'Lost Update' conflict
+-- some other writer having already advanced TARGET-BRANCH between
+this transaction's own read and its commit -- is resolved.")
+   (expected-branch-sha
+    :initarg :expected-branch-sha
+    :reader get-expected-branch-sha
+    :documentation
+    "The SHA TARGET-BRANCH was observed to point at when this
+transaction was opened, or NIL if the branch did not exist yet.
+Passed through to UPDATE-BRANCH's own EXPECTED-SHA compare-and-swap
+argument at commit time, so that a concurrent writer which already
+advanced (or created) the branch out from under this transaction is
+detected -- via CONCURRENT-MODIFICATION-ERROR -- instead of silently
+overwritten.")
    (status
     :initarg :status
     :initform :active
@@ -189,7 +210,8 @@ Records the new commit in TRANSACTION's RESULT slot and returns it."
                                  :loaded? t)))
     (%persist-git-commit-object commit)
     (setf (get-target (get-target-branch transaction)) commit)
-    (update-branch (get-target-branch transaction))
+    (update-branch (get-target-branch transaction)
+                    :expected-sha (get-expected-branch-sha transaction))
     (setf (get-result transaction) commit)
     commit))
 
@@ -218,7 +240,42 @@ code after this call within RECEIVER never runs."
   (setf (get-status transaction) :aborted)
   (throw 'git-transaction-exit transaction))
 
-(defun call-with-git-transaction (repository mode &key branch author committer message parents receiver)
+(defun %call-with-git-transaction-attempt
+    (repository mode branch-name final-author final-committer final-message parents
+     receiver conflict-resolution)
+  "Perform exactly one attempt at opening and (for :READ-WRITE)
+committing a GIT-TRANSACTION against REPOSITORY: resolve BRANCH-NAME
+fresh (via RESOLVE-BRANCH) to its current head GIT-COMMIT, construct
+a transient GIT-TRANSACTION recording that head's SHA as its own
+EXPECTED-BRANCH-SHA, invoke RECEIVER, and, for a normal return from a
+:READ-WRITE transaction, commit it. May signal
+CONCURRENT-MODIFICATION-ERROR (propagated up from UPDATE-BRANCH's
+own compare-and-swap check inside %COMMIT-GIT-TRANSACTION-NOW) if
+some other writer already advanced BRANCH-NAME between this
+attempt's read and its commit. Returns the resulting GIT-TRANSACTION."
+  (let* ((target-branch (resolve-branch (get-pathname repository) branch-name :if-does-not-exist nil))
+         (head-commit (get-target target-branch))
+         (final-parents (or parents (and head-commit (list head-commit))))
+         (transaction (make-instance 'git-transaction
+                                      :git-repository repository
+                                      :mode mode
+                                      :target-branch target-branch
+                                      :author final-author
+                                      :committer final-committer
+                                      :message final-message
+                                      :parents final-parents
+                                      :conflict-resolution conflict-resolution
+                                      :expected-branch-sha (and head-commit (sha head-commit)))))
+    (let ((*git-transaction* transaction))
+      (let ((root (catch 'git-transaction-exit
+                    (funcall receiver transaction head-commit))))
+        (when (eq (get-status transaction) :active)
+          (when (eq mode :read-write)
+            (%commit-git-transaction-now transaction root))
+          (setf (get-status transaction) :committed))))
+    transaction))
+
+(defun call-with-git-transaction (repository mode &key branch author committer message parents receiver (conflict-resolution :error))
   "Open a GIT-TRANSACTION against REPOSITORY (a GIT-REPOSITORY),
 cascading BRANCH/AUTHOR/COMMITTER/MESSAGE from REPOSITORY's own
 defaults for any not explicitly supplied here. Resolves BRANCH to
@@ -249,41 +306,63 @@ also creates BRANCH's ref for the first time, if it did not already
 exist). If RECEIVER instead calls COMMIT-GIT-TRANSACTION or
 ABORT-GIT-TRANSACTION itself, or signals an error, that explicit or
 abnormal exit is honored instead and nothing further is written.
+
+CONFLICT-RESOLUTION controls what happens if some other writer
+already advanced (or created) BRANCH between this transaction's own
+read of its head commit and its own commit -- Git's 'Lost Update'
+problem -- detected via GIT-UPDATE-REF's own compare-and-swap check:
+* :ERROR (the default) lets CONCURRENT-MODIFICATION-ERROR propagate
+  out of this call immediately; nothing is written.
+* :RETRY catches CONCURRENT-MODIFICATION-ERROR and re-attempts the
+  entire transaction from scratch -- re-resolving BRANCH to its
+  latest head and re-invoking RECEIVER against that fresh state --
+  looping until it succeeds. Because RECEIVER may thus run more than
+  once, it MUST be free of any side effect other than reading and
+  returning GIT-OBJECTs/persistent proxies: no network calls, no
+  file I/O outside of Git itself, and no mutation of any global or
+  shared Lisp state, since GitHack cannot undo such a side effect if
+  RECEIVER is silently re-run. (GitHack's own proxy/serialization
+  pipeline already satisfies this: the only mutation it ever performs
+  is a proxy's own lazy-load SHA/cache slot on the specific instance
+  being read or written, which is safe, transparent memoization, not
+  externally observable side-effecting state.)
+* :LOCK instead acquires an exclusive, repository-wide OS-level lock
+  (see WITH-REPOSITORY-TRANSACTION-LOCK) before even reading BRANCH's
+  head commit, and holds it until the commit (or abort) is finalized,
+  so no other :LOCK-mode transaction against the same repository can
+  run concurrently, and this attempt should therefore never actually
+  observe a real compare-and-swap conflict.
+
 Returns TRANSACTION."
+  (check-type conflict-resolution (member :error :retry :lock))
   (when (and (eq mode :read-write) (eq (get-mode repository) :read-only))
     (error "Cannot open a :READ-WRITE transaction against a repository opened :READ-ONLY."))
   (let* ((branch-name (or branch (get-branch repository)))
          (final-author (or author (get-author repository)))
          (final-committer (or committer (get-committer repository) final-author))
-         (final-message (or message (get-message repository)))
-         (target-branch (resolve-branch (get-pathname repository) branch-name :if-does-not-exist nil))
-         (head-commit (get-target target-branch))
-         (final-parents (or parents (and head-commit (list head-commit))))
-         (transaction (make-instance 'git-transaction
-                                      :git-repository repository
-                                      :mode mode
-                                      :target-branch target-branch
-                                      :author final-author
-                                      :committer final-committer
-                                      :message final-message
-                                      :parents final-parents)))
-    (let ((*git-transaction* transaction))
-      (let ((root (catch 'git-transaction-exit
-                    (funcall receiver transaction head-commit))))
-        (when (eq (get-status transaction) :active)
-          (when (eq mode :read-write)
-            (%commit-git-transaction-now transaction root))
-          (setf (get-status transaction) :committed))))
-    transaction))
+         (final-message (or message (get-message repository))))
+    (flet ((attempt ()
+             (%call-with-git-transaction-attempt
+              repository mode branch-name final-author final-committer final-message
+              parents receiver conflict-resolution)))
+      (ecase conflict-resolution
+        (:error (attempt))
+        (:retry (loop
+                  (handler-case
+                      (return (attempt))
+                    (concurrent-modification-error () nil))))
+        (:lock (with-repository-transaction-lock ((get-pathname repository))
+                 (attempt)))))))
 
-(defmacro with-git-transaction ((transaction-var head-commit-var) (repository mode &key branch author committer message parents) &body body)
+(defmacro with-git-transaction ((transaction-var head-commit-var) (repository mode &key branch author committer message parents (conflict-resolution :error)) &body body)
   "Macro wrapper around CALL-WITH-GIT-TRANSACTION: expands into a
 call to CALL-WITH-GIT-TRANSACTION on REPOSITORY and MODE (evaluated
-once each), passing BRANCH/AUTHOR/COMMITTER/MESSAGE/PARENTS through
-unchanged, with :RECEIVER bound to a closure over BODY. Within BODY,
-TRANSACTION-VAR is bound to the transient GIT-TRANSACTION and
-HEAD-COMMIT-VAR to the resolved head GIT-COMMIT, exactly as they
-would be passed to an explicit RECEIVER function.
+once each), passing BRANCH/AUTHOR/COMMITTER/MESSAGE/PARENTS/
+CONFLICT-RESOLUTION through unchanged, with :RECEIVER bound to a
+closure over BODY. Within BODY, TRANSACTION-VAR is bound to the
+transient GIT-TRANSACTION and HEAD-COMMIT-VAR to the resolved head
+GIT-COMMIT, exactly as they would be passed to an explicit RECEIVER
+function.
 
 BODY's normal return value is subject to the same auto-commit
 semantics as CALL-WITH-GIT-TRANSACTION's RECEIVER: for a :READ-WRITE
@@ -291,13 +370,16 @@ transaction, BODY must return a GIT-OBJECT (a GIT-TREE, or a bare
 atomic GIT-BLOB to be auto-wrapped) representing the desired new
 root, which is then automatically committed and the branch advanced,
 unless BODY has already called COMMIT-GIT-TRANSACTION or
-ABORT-GIT-TRANSACTION itself. Returns the GIT-TRANSACTION, exactly
-as CALL-WITH-GIT-TRANSACTION does."
+ABORT-GIT-TRANSACTION itself. See CALL-WITH-GIT-TRANSACTION's own
+docstring for CONFLICT-RESOLUTION's three modes and, crucially, the
+purity requirement :RETRY places on BODY. Returns the GIT-TRANSACTION,
+exactly as CALL-WITH-GIT-TRANSACTION does."
   `(call-with-git-transaction ,repository ,mode
                                :branch ,branch
                                :author ,author
                                :committer ,committer
                                :message ,message
                                :parents ,parents
+                               :conflict-resolution ,conflict-resolution
                                :receiver (lambda (,transaction-var ,head-commit-var)
                                            ,@body)))

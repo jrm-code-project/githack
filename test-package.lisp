@@ -46,6 +46,8 @@
                 "GIT-TRANSACTION"
                 "GET-GIT-REPOSITORY"
                 "GET-TARGET-BRANCH"
+                "GET-CONFLICT-RESOLUTION"
+                "GET-EXPECTED-BRANCH-SHA"
                 "GET-STATUS"
                 "GET-RESULT"
                 "GIT-HASH-OBJECT"
@@ -103,7 +105,15 @@
                 "PHASH-MAKE"
                 "PHASH-GET"
                 "PHASH-PUT"
-                "PHASH-REMOVE")
+                "PHASH-REMOVE"
+                "CONCURRENT-MODIFICATION-ERROR"
+                "GET-EXPECTED-SHA"
+                "GET-NEW-SHA"
+                "GET-DETAIL"
+                "TRANSACTION-LOCK-TIMEOUT-ERROR"
+                "WITH-REPOSITORY-TRANSACTION-LOCK"
+                "%TRANSACTION-LOCK-PATHNAME"
+                "%CALL-WITH-GIT-TRANSACTION-ATTEMPT")
   (:export "GITHACK-SUITE"
            "RUN-GITHACK-TESTS"))
 

@@ -29,18 +29,56 @@ afterward."
 
 (defmacro with-recording-git-update-ref ((calls-var) &body body)
   "Within BODY, GIT-UPDATE-REF does not shell out to Git; instead
-each call pushes a (REPOSITORY NAME SHA) list onto the setf-able
-place CALLS-VAR and returns SHA, exactly mimicking GIT-UPDATE-REF's
-real return value. The real definition (or lack of one) of
-GIT-UPDATE-REF is restored afterward."
+each call pushes a (REPOSITORY NAME SHA) list -- or, if called with
+an EXPECTED-SHA other than :UNCONDITIONAL, a (REPOSITORY NAME SHA
+EXPECTED-SHA) list -- onto the setf-able place CALLS-VAR and returns
+SHA, exactly mimicking GIT-UPDATE-REF's real return value. Never
+simulates a compare-and-swap failure; see
+WITH-CAS-FAILING-GIT-UPDATE-REF for that. The real definition (or
+lack of one) of GIT-UPDATE-REF is restored afterward."
   (let ((was-bound (gensym "WAS-BOUND"))
         (original (gensym "ORIGINAL")))
     `(let* ((,was-bound (fboundp 'git-update-ref))
             (,original (and ,was-bound (fdefinition 'git-update-ref))))
        (setf (fdefinition 'git-update-ref)
-             (lambda (repository name sha)
-               (push (list repository name sha) ,calls-var)
+             (lambda (repository name sha &key (expected-sha :unconditional))
+               (push (if (eq expected-sha :unconditional)
+                         (list repository name sha)
+                         (list repository name sha expected-sha))
+                     ,calls-var)
                sha))
+       (unwind-protect (progn ,@body)
+         (if ,was-bound
+             (setf (fdefinition 'git-update-ref) ,original)
+             (fmakunbound 'git-update-ref))))))
+
+(defmacro with-cas-failing-git-update-ref ((&key (fail-count 1)) &body body)
+  "Within BODY, GIT-UPDATE-REF does not shell out to Git; instead,
+whenever it is called with an EXPECTED-SHA other than :UNCONDITIONAL
+(i.e. a genuine compare-and-swap attempt), the first FAIL-COUNT such
+calls signal CONCURRENT-MODIFICATION-ERROR (simulating some other
+writer having already advanced the ref), and every call thereafter
+(and any unconditional call, at any time) succeeds and returns SHA,
+exactly mimicking GIT-UPDATE-REF's real return value. Suitable for
+testing CALL-WITH-GIT-TRANSACTION's :CONFLICT-RESOLUTION :RETRY
+mode's re-attempt loop. The real definition (or lack of one) of
+GIT-UPDATE-REF is restored afterward."
+  (let ((was-bound (gensym "WAS-BOUND"))
+        (original (gensym "ORIGINAL"))
+        (remaining (gensym "REMAINING")))
+    `(let* ((,was-bound (fboundp 'git-update-ref))
+            (,original (and ,was-bound (fdefinition 'git-update-ref)))
+            (,remaining ,fail-count))
+       (setf (fdefinition 'git-update-ref)
+             (lambda (repository name sha &key (expected-sha :unconditional))
+               (if (and (not (eq expected-sha :unconditional)) (plusp ,remaining))
+                   (progn
+                     (decf ,remaining)
+                     (error 'concurrent-modification-error
+                            :repository repository :name name
+                            :expected-sha expected-sha :new-sha sha
+                            :detail "simulated concurrent writer"))
+                   sha)))
        (unwind-protect (progn ,@body)
          (if ,was-bound
              (setf (fdefinition 'git-update-ref) ,original)
