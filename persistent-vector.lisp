@@ -106,6 +106,20 @@ order GET-ENTRIES currently holds them."
   (remove-if (lambda (entry) (member (car entry) '(".meta" "README.md") :test #'string=))
              (get-entries vector)))
 
+(defun %persist-vector-component-etypecase (git-object)
+  "Persist GIT-OBJECT (which is known not to have a SHA yet) to
+Git's object database according to its concrete type, and return the
+resulting SHA. Broken out of %PERSIST-VECTOR-COMPONENT so this
+ETYPECASE dispatch is its own function's outermost form."
+  (etypecase git-object
+    (persistent-vector (serialize-persistent-vector git-object))
+    (persistent-cons (serialize-persistent-cons git-object))
+    (git-tree (setf (sha git-object)
+                     (git-hash-object (get-repository git-object) "tree" (serialize-tree git-object))))
+    (git-blob (setf (sha git-object)
+                     (git-hash-object (get-repository git-object) "blob"
+                                      (serialize-atom (get-payload git-object)))))))
+
 (defun %persist-vector-component (git-object)
   "Ensure GIT-OBJECT (a GIT-BLOB, a plain GIT-TREE, a PERSISTENT-CONS,
 or a nested PERSISTENT-VECTOR) has a SHA, persisting it if it does
@@ -121,14 +135,7 @@ need depend on GIT-TRANSACTION's own %PERSIST-GIT-OBJECT, breaking
 what would otherwise be a load-order cycle. Returns GIT-OBJECT's
 SHA."
   (or (sha git-object)
-      (etypecase git-object
-        (persistent-vector (serialize-persistent-vector git-object))
-        (persistent-cons (serialize-persistent-cons git-object))
-        (git-tree (setf (sha git-object)
-                         (git-hash-object (get-repository git-object) "tree" (serialize-tree git-object))))
-        (git-blob (setf (sha git-object)
-                         (git-hash-object (get-repository git-object) "blob"
-                                          (serialize-atom (get-payload git-object))))))))
+      (%persist-vector-component-etypecase git-object)))
 
 (defun serialize-persistent-vector (vector)
   "Compute VECTOR's LENGTH from its own index entries (every entry

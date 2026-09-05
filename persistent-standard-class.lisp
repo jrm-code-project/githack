@@ -189,6 +189,24 @@ SERIALIZE-PERSISTENT-OBJECT writes to Git."
                    (%persistent-object-initarg-transient-p instance initarg))
           collect (cons initarg value)))
 
+(defun %persist-object-component-etypecase (value)
+  "Persist VALUE (a GIT-OBJECT known to already satisfy (TYPEP VALUE
+'GIT-OBJECT)) to Git's object database according to its concrete
+type. Broken out of %PERSIST-OBJECT-COMPONENT so this ETYPECASE
+dispatch is its own function's outermost form."
+  (etypecase value
+    (persistent-object (serialize-persistent-object value))
+    (persistent-cons (serialize-persistent-cons value))
+    (persistent-vector (serialize-persistent-vector value))
+    (persistent-array (serialize-persistent-array value))
+    (git-tree (unless (sha value)
+                (setf (sha value)
+                      (git-hash-object (get-repository value) "tree" (serialize-tree value)))))
+    (git-blob (unless (sha value)
+                (setf (sha value)
+                      (git-hash-object (get-repository value) "blob"
+                                        (serialize-atom (get-payload value))))))))
+
 (defun %persist-object-component (value repository)
   "Return the persisted GIT-OBJECT proxy for VALUE: if VALUE is
 already a GIT-OBJECT (a GIT-BLOB, plain GIT-TREE, PERSISTENT-CONS,
@@ -202,18 +220,7 @@ GIT-TRANSACTION's shared %PERSIST-GIT-OBJECT so as not to introduce
 a load-order cycle."
   (if (typep value 'git-object)
       (progn
-        (etypecase value
-          (persistent-object (serialize-persistent-object value))
-          (persistent-cons (serialize-persistent-cons value))
-          (persistent-vector (serialize-persistent-vector value))
-          (persistent-array (serialize-persistent-array value))
-          (git-tree (unless (sha value)
-                      (setf (sha value)
-                            (git-hash-object (get-repository value) "tree" (serialize-tree value)))))
-          (git-blob (unless (sha value)
-                      (setf (sha value)
-                            (git-hash-object (get-repository value) "blob"
-                                              (serialize-atom (get-payload value)))))))
+        (%persist-object-component-etypecase value)
         value)
       (make-instance 'git-blob :repository repository
                                 :sha (git-hash-object repository "blob" (serialize-atom value))

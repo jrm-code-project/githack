@@ -113,6 +113,22 @@ own SHA."
         (setf (sha tree)
               (git-hash-object (get-repository tree) "tree" (serialize-tree tree))))))
 
+(defun %persist-git-object-etypecase (git-object)
+  "Persist GIT-OBJECT (which is known not to have a SHA yet) to
+Git's object database according to its concrete type, and return the
+resulting SHA. Broken out of %PERSIST-GIT-OBJECT so this ETYPECASE
+dispatch is its own function's outermost form."
+  (etypecase git-object
+    (persistent-object (serialize-persistent-object git-object))
+    (persistent-cons (serialize-persistent-cons git-object))
+    (persistent-vector (serialize-persistent-vector git-object))
+    (persistent-array (serialize-persistent-array git-object))
+    (git-tree (%persist-git-tree-object git-object))
+    (git-blob
+     (setf (sha git-object)
+           (git-hash-object (get-repository git-object) "blob"
+                             (serialize-atom (get-payload git-object)))))))
+
 (defun %persist-git-object (git-object)
   "Ensure GIT-OBJECT (a GIT-BLOB, GIT-TREE, PERSISTENT-CONS,
 PERSISTENT-VECTOR, PERSISTENT-ARRAY, or PERSISTENT-OBJECT) has a
@@ -122,16 +138,7 @@ children) to Git's object database if it does not already. Returns
 GIT-OBJECT's SHA. Objects that already have a SHA are assumed
 already present in Git's object database and are left untouched."
   (or (sha git-object)
-      (etypecase git-object
-        (persistent-object (serialize-persistent-object git-object))
-        (persistent-cons (serialize-persistent-cons git-object))
-        (persistent-vector (serialize-persistent-vector git-object))
-        (persistent-array (serialize-persistent-array git-object))
-        (git-tree (%persist-git-tree-object git-object))
-        (git-blob
-         (setf (sha git-object)
-               (git-hash-object (get-repository git-object) "blob"
-                                 (serialize-atom (get-payload git-object))))))))
+      (%persist-git-object-etypecase git-object)))
 
 (defun %persist-git-commit-object (commit)
   "Ensure COMMIT (a GIT-COMMIT) has a SHA, writing its serialized
