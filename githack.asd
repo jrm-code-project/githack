@@ -42,10 +42,11 @@
                 :depends-on ("git-object" "git-blob" "git-io" "atomic-wrapper" "git-transaction" "git-repository" "package"))))
 
 (defsystem "githack/example"
-  :description "Self-hosting persistent library example."
+  :description "Self-hosting persistent library and bank examples."
   :depends-on ("githack")
   :components ((:module "examples"
-                :components ((:file "library")))))
+                :components ((:file "library")
+                             (:file "bank")))))
 
 (defsystem "githack/test"
   :description "FiveAM test suite for GitHack."

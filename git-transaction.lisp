@@ -592,19 +592,20 @@ this writes to Git's object database is harmless: it becomes part of
 a real commit if some enclosing transaction eventually commits for
 real, or is simply orphaned Git garbage otherwise."
   (and root
-       (let ((tree (if (typep root 'git-tree)
-                        root
-                        (progn (%persist-git-object root)
-                               (wrap-atomic-commit-root repository root)))))
-         (make-instance 'git-commit
-                         :repository repository
-                         :tree tree
-                         :parents '()
-                         :author ""
-                         :committer ""
-                         :timestamp 0
-                         :message ""
-                         :loaded? t))))
+       (progn
+         (%persist-git-object root)
+         (let ((tree (if (typep root 'git-tree)
+                          root
+                          (wrap-atomic-commit-root repository root))))
+           (make-instance 'git-commit
+                          :repository repository
+                          :tree tree
+                          :parents '()
+                          :author ""
+                          :committer ""
+                          :timestamp 0
+                          :message ""
+                          :loaded? t)))))
 
 (defun %call-with-nested-git-transaction (parent mode receiver)
   "Perform a NESTED GIT-TRANSACTION, opened while PARENT (a
