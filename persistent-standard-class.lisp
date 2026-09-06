@@ -524,3 +524,36 @@ never a proxy."
           (setf (sb-mop:slot-value-using-class class instance slot) resolved)
           resolved)
         value)))
+
+(defmethod (setf sb-mop:slot-value-using-class)
+    (new-value (class persistent-standard-class) instance (slot persistent-effective-slot-definition))
+  "Write-side counterpart of the SLOT-VALUE-USING-CLASS method
+above: perform the ordinary slot write via CALL-NEXT-METHOD, then,
+if a distributed *CURRENT-TRANSACTION* (see distributed-
+transaction-context.lisp) is currently bound, note INSTANCE's
+backing repository pathname (if it has one yet -- freshly
+constructed instances may not, until their own :REPOSITORY initarg
+is itself processed) in that transaction's own TOUCHED-PATHNAMES
+list, for introspection/debugging only.
+
+This fires on EVERY slot write GitHack's own persistent-instance
+machinery performs -- both genuine, INSTANCE's own SHARED-INITIALIZE-
+driven construction/mutation, and the read-side method above's own
+incidental lazy-load caching of a just-resolved GIT-OBJECT value
+back into the very slot it was read from -- so TOUCHED-PATHNAMES may
+also list repositories INSTANCE was merely read from, not just ones
+actually mutated. This is deliberately NOT the mechanism 2PC
+participation itself is decided by: see PENDING-WRITES
+\(distributed-transaction-context.lisp) and GIT-TRANSACTION.LISP's
+%ENLIST-TRANSACTION-WRITE!, which enlist a repository only once its
+own GIT-TRANSACTION genuinely commits, and which alone carry enough
+information (branch, author, committer, message) to actually
+2PC-commit with -- a bare repository pathname does not."
+  (prog1 (call-next-method)
+    (when (and *current-transaction* (typep instance 'persistent-object))
+      (let ((repository (and (slot-exists-p instance 'repository)
+                              (slot-boundp instance 'repository)
+                              (ignore-errors (get-repository instance)))))
+        (when repository
+          (pushnew repository (%githack-transaction-touched-pathnames *current-transaction*)
+                    :test #'equal))))))

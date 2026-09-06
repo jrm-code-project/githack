@@ -7,6 +7,7 @@
   :depends-on ("alexandria" "fold" "function" "named-let" "series")
   :components ((:file "package")
                (:file "conditions" :depends-on ("package"))
+               (:file "distributed-transaction-context" :depends-on ("conditions" "package"))
                (:file "git-object" :depends-on ("conditions" "package"))
                (:file "git-io" :depends-on ("git-object" "conditions" "package"))
                (:file "git-blob" :depends-on ("git-object" "conditions" "package"))
@@ -27,7 +28,8 @@
                               "persistent-cons" "persistent-vector" "conditions" "package"))
                (:file "persistent-standard-class"
                 :depends-on ("git-object" "git-blob" "git-tree" "git-io" "atomic-wrapper"
-                              "persistent-cons" "persistent-vector" "persistent-array" "persistent-wttree" "conditions" "package"))
+                              "persistent-cons" "persistent-vector" "persistent-array" "persistent-wttree"
+                              "distributed-transaction-context" "conditions" "package"))
                (:file "persistent-struct"
                 :depends-on ("git-object" "git-blob" "git-tree" "persistent-standard-class" "package"))
                (:file "persistent-hash-table"
@@ -37,9 +39,14 @@
                (:file "git-transaction"
                 :depends-on ("git-object" "git-tree" "git-commit" "git-branch" "git-repository"
                               "git-io" "persistent-cons" "persistent-vector" "persistent-array"
-                              "persistent-standard-class" "atomic-wrapper" "transaction-lock" "conditions" "package"))
+                              "persistent-standard-class" "atomic-wrapper" "transaction-lock"
+                              "distributed-transaction-context" "conditions" "package"))
                (:file "transaction"
-                :depends-on ("git-object" "git-blob" "git-io" "atomic-wrapper" "git-transaction" "git-repository" "package"))))
+                :depends-on ("git-object" "git-blob" "git-io" "atomic-wrapper" "git-transaction" "git-repository" "package"))
+               (:file "distributed-transaction"
+                :depends-on ("git-object" "git-blob" "git-tree" "git-commit" "git-branch" "git-repository"
+                              "git-io" "git-transaction" "transaction" "distributed-transaction-context"
+                              "conditions" "package"))))
 
 (defsystem "githack/example"
   :description "Self-hosting persistent library and bank examples."
@@ -75,7 +82,9 @@
                (:file "transaction-tests" :depends-on ("test-package" "test-helpers"))
                (:file "end-to-end-tests"
                 :depends-on ("test-package" "test-helpers" "persistent-standard-class-tests"
-                             "persistent-struct-tests")))
+                             "persistent-struct-tests"))
+               (:file "distributed-transaction-tests"
+                :depends-on ("test-package" "test-helpers" "git-transaction-tests" "transaction-tests")))
   :perform (test-op (op c)
              (declare (ignore op c))
              (unless (uiop:symbol-call "GITHACK-TEST" "RUN-GITHACK-TESTS")

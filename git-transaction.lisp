@@ -332,6 +332,48 @@ otherwise)."
             (git-hash-object (get-repository commit) "commit"
                               (sb-ext:string-to-octets (serialize-commit commit) :external-format :utf-8)))))
 
+(defun %enlist-transaction-write! (transaction commit)
+  "Record COMMIT (a freshly persisted, but not yet ref-visible,
+GIT-COMMIT %COMMIT-GIT-TRANSACTION-NOW just built for TRANSACTION, an
+outermost :READ-WRITE GIT-TRANSACTION) as a pending write against the
+distributed *CURRENT-TRANSACTION*, instead of immediately advancing
+TRANSACTION's branch via UPDATE-BRANCH -- called only when
+*CURRENT-TRANSACTION* is bound (non-NIL). See WITH-GITHACK-
+TRANSACTION and PENDING-WRITE (distributed-transaction-context.lisp)
+for the rest of GitHack's distributed Two-Phase-Commit machinery,
+which %FINISH-GITHACK-TRANSACTION! (distributed-transaction.lisp)
+drives once the distributed transaction's own body completes.
+
+If this (repository . branch) pair was already written to earlier
+within the same distributed transaction, only its NEW-COMMIT-SHA is
+updated in place (its original OLD-SHA is preserved) -- so a
+distributed transaction is effectively scoped to *one* committed
+GIT-TRANSACTION per participating repository/branch for correctness:
+a second, independent GIT-TRANSACTION against the same repository
+still resolves its own parent commit from that branch's real,
+unmoved ref (since the first write's commit was never actually made
+ref-visible), so it cannot see the first write's effect at all.
+Callers needing several writes against one repository within a
+single distributed transaction should compose them the ordinary way
+instead -- as nested GIT-TRANSACTIONs inside one single outer
+WITH-TRANSACTION/CALL-WITH-TRANSACTION call for that repository, per
+GitHack's existing nested-transaction support -- and reserve
+separate, top-level WITH-TRANSACTION calls under one
+WITH-GITHACK-TRANSACTION for genuinely distinct repositories."
+  (let* ((git-repository (get-git-repository transaction))
+         (branch-name (get-name (get-target-branch transaction)))
+         (existing (find-if (lambda (pw)
+                               (and (equal (get-pathname (pending-write-git-repository pw))
+                                           (get-pathname git-repository))
+                                    (string= (pending-write-branch-name pw) branch-name)))
+                             (%githack-transaction-pending-writes *current-transaction*))))
+    (if existing
+        (setf (pending-write-new-commit-sha existing) (sha commit))
+        (push (%make-pending-write git-repository branch-name
+                                    (get-expected-branch-sha transaction) (sha commit))
+              (%githack-transaction-pending-writes *current-transaction*))))
+  commit)
+
 (defun %commit-git-transaction-now (transaction root)
   "Perform the actual work of committing TRANSACTION with root
 GIT-OBJECT ROOT: persist ROOT (and its modified children), wrapping
@@ -339,7 +381,12 @@ it first in an ATOMIC-WRAPPER-TREE via WRAP-ATOMIC-COMMIT-ROOT if it
 is not itself a GIT-TREE (a bare GIT-BLOB has no directory structure
 of its own for a Git commit to point at), create and persist a new
 GIT-COMMIT from TRANSACTION's cascaded AUTHOR/COMMITTER/MESSAGE and
-PARENTS, and advance TRANSACTION's TARGET-BRANCH to point at it.
+PARENTS, and advance TRANSACTION's TARGET-BRANCH to point at it --
+or, if a distributed *CURRENT-TRANSACTION* is bound, defer that
+final ref update by enlisting it instead (see
+%ENLIST-TRANSACTION-WRITE!), leaving it to
+%FINISH-GITHACK-TRANSACTION! to decide the branch's real fate once
+every participating repository's own commit has been prepared.
 Records the new commit in TRANSACTION's RESULT slot and returns it."
   (check-type root git-object)
   (%persist-git-object root)
@@ -358,8 +405,10 @@ Records the new commit in TRANSACTION's RESULT slot and returns it."
                                  :loaded? t)))
     (%persist-git-commit-object commit)
     (setf (get-target (get-target-branch transaction)) commit)
-    (update-branch (get-target-branch transaction)
-                    :expected-sha (get-expected-branch-sha transaction))
+    (if *current-transaction*
+        (%enlist-transaction-write! transaction commit)
+        (update-branch (get-target-branch transaction)
+                        :expected-sha (get-expected-branch-sha transaction)))
     (setf (get-result transaction) commit)
     (setf (get-current-root transaction) root)
     commit))

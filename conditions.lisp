@@ -70,6 +70,22 @@ problem with previously-persisted Git data (see
 MALFORMED-GIT-OBJECT-ERROR) or an object's own persistence state
 (see UNPERSISTED-OBJECT-ERROR)."))
 
+(define-condition distributed-transaction-error (githack-error)
+  ()
+  (:documentation
+   "Signaled by WITH-GITHACK-TRANSACTION/CALL-WITH-GITHACK-
+TRANSACTION's own Two-Phase-Commit machinery (distributed-
+transaction.lisp) when a distributed, multi-repository transaction's
+own Phase 1 (\"Prepare\") fails against some participating
+repository (e.g. `git mktag` rejects a malformed tag, or a
+`refs/githack/prepare/<tx-id>/<branch-name>` ref already
+unexpectedly exists) -- as opposed to CONCURRENT-MODIFICATION-ERROR,
+which means a single repository's own ordinary branch
+compare-and-swap failed. Also signaled by RUN-GITHACK-EXORCIST if a
+stranded PREPARE ref's own annotated tag cannot be parsed back into
+a Transaction Manifest, or names a Ledger repository that cannot
+itself be reached."))
+
 (define-condition branch-not-found-error (githack-error)
   ((repository :initarg :repository :reader get-repository)
    (name :initarg :name :reader get-name))
