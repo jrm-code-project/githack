@@ -77,6 +77,25 @@ non-ASCII characters, round-trip exactly."
   (is (%round-trips-p "quotes \" and \\ backslashes"))
   (is (%round-trips-p "unicode: \\u03bb")))
 
+(test multiline-string-round-trips-with-literal-line-breaks
+  "A string containing #\\Newline characters round-trips exactly,
+AND -- this is the property GIT-TRANSACTION's :REBASE strategy
+depends on for `git merge-tree` to auto-merge two concurrent edits
+to different lines of the same string atom -- SERIALIZE-ATOM's own
+wire-format octets contain the same real, literal line-feed (0x0A)
+bytes as the original string, rather than an escaped two-character
+\"\\\\n\" sequence: the whole envelope is never collapsed onto a
+single physical line."
+  (let* ((original (format nil "alpha~%beta~%gamma"))
+         (octets (serialize-atom original))
+         (wire-text (sb-ext:octets-to-string octets :external-format :utf-8)))
+    (is (%round-trips-p original))
+    ;; The raw wire bytes must contain three literal lines (two
+    ;; newlines), not one.
+    (is (= 2 (count #\Newline wire-text)))
+    ;; No backslash-escaped "\n" two-character sequence anywhere.
+    (is (not (search "\\n" wire-text)))))
+
 (test bit-vector-round-trips
   "Bit-vectors round-trip exactly, preserving their specialized
 element type."

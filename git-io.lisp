@@ -364,6 +364,38 @@ misbehaves."
                (%git-hash-object-one-shot repository type path))))
       (ignore-errors (delete-file path)))))
 
+(defun %git-merge-tree (repository commit-a commit-b)
+  "Shell out to `git merge-tree --write-tree COMMIT-A COMMIT-B`
+against REPOSITORY (a pathname naming a Git directory): a real,
+working-tree-free three-way content merge of the two commits via
+Git's own native merge machinery, which locates their common
+ancestor automatically from the commit graph (no explicit merge-base
+tree need be supplied) and requires no checkout/working tree/index
+of any kind -- safe to run directly against a bare repository.
+
+On a clean merge (Git's own exit code 0), returns the resulting
+merged tree's 40-character hexadecimal SHA-1 as its first value
+(Git prints it as the first line of output), and NIL as its second.
+
+On any conflict (a non-zero exit code), returns NIL as its first
+value and Git's own textual conflict report (combined stdout and
+stderr) as its second, for a caller to fold into a MERGE-CONFLICT-
+ERROR's own DETAIL.
+
+Used by GIT-TRANSACTION.LISP's :REBASE CONFLICT-RESOLUTION strategy
+to replay a transaction's own candidate commit onto a concurrently-
+advanced branch HEAD instead of discarding it outright."
+  (multiple-value-bind (output error-output exit-code)
+      (uiop:run-program (list "git"
+                               (format nil "--git-dir=~A" (uiop:native-namestring repository))
+                               "merge-tree" "--write-tree" commit-a commit-b)
+                         :output :string :error-output :string :ignore-error-status t)
+    (if (zerop exit-code)
+        (values (string-trim '(#\Space #\Newline #\Return)
+                              (subseq output 0 (or (position #\Newline output) (length output))))
+                nil)
+        (values nil (concatenate 'string output error-output)))))
+
 (defun %close-all-git-io-sessions-at-exit ()
   "SB-EXT:*EXIT-HOOKS* entry: terminate every persistent Git
 subprocess session still cached in *GIT-IO-SESSIONS*. A defensive

@@ -82,17 +82,18 @@ CALL-WITH-GIT-TRANSACTION itself already binds to the same instance;
 FUNCALL signature omits the raw GIT-TRANSACTION argument) can still
 reach it without touching SHAs, GIT-BLOBs, GIT-TREEs, or GIT-COMMITs.")
 
-(defun call-with-transaction (repository mode &key branch author committer message parents receiver (conflict-resolution :error))
+(defun call-with-transaction (repository mode &key branch author committer message parents receiver
+                                                    (conflict-resolution :error) (rebase-fallback :error))
   "The user-facing counterpart to CALL-WITH-GIT-TRANSACTION: opens a
 transaction against REPOSITORY (a GIT-REPOSITORY) exactly as
 CALL-WITH-GIT-TRANSACTION does, cascading BRANCH/AUTHOR/COMMITTER/
-MESSAGE/PARENTS/CONFLICT-RESOLUTION the same way, but invokes (FUNCALL
-RECEIVER VALUE) with a single plain Lisp value in place of a raw
-GIT-COMMIT -- see %TRANSACTION-READ-VALUE -- with *TRANSACTION*
-dynamically bound to the GIT-TRANSACTION for the duration of that
-call, and expects RECEIVER to return a single plain Lisp value in
-turn, representing the new desired root state, which is automatically
-coerced back into a GIT-OBJECT and persisted -- see
+MESSAGE/PARENTS/CONFLICT-RESOLUTION/REBASE-FALLBACK the same way,
+but invokes (FUNCALL RECEIVER VALUE) with a single plain Lisp value
+in place of a raw GIT-COMMIT -- see %TRANSACTION-READ-VALUE -- with
+*TRANSACTION* dynamically bound to the GIT-TRANSACTION for the
+duration of that call, and expects RECEIVER to return a single plain
+Lisp value in turn, representing the new desired root state, which
+is automatically coerced back into a GIT-OBJECT and persisted -- see
 %TRANSACTION-WRITE-VALUE. RECEIVER must never touch SHAs, GIT-BLOBs,
 GIT-TREEs, or GIT-COMMITs directly.
 
@@ -103,25 +104,27 @@ CALL-WITH-GIT-TRANSACTION directly. Callers needing COMMIT-GIT-
 TRANSACTION/ABORT-GIT-TRANSACTION's finer explicit control should
 use CALL-WITH-GIT-TRANSACTION directly instead of this wrapper.
 
-CONFLICT-RESOLUTION is passed through unchanged to
-CALL-WITH-GIT-TRANSACTION; see its own docstring for the full
-semantics of :ERROR (the default), :RETRY, and :LOCK.
+CONFLICT-RESOLUTION and REBASE-FALLBACK are passed through unchanged
+to CALL-WITH-GIT-TRANSACTION; see its own docstring for the full
+semantics of :ERROR (the default), :RETRY, :LOCK, and :REBASE, and of
+REBASE-FALLBACK's own :ERROR/:RETRY choice.
 
-*** WARNING ***: if CONFLICT-RESOLUTION is :RETRY, RECEIVER may be
-invoked more than once -- from scratch, against a freshly re-read
-VALUE -- every time some other writer is found to have already
-advanced BRANCH between this transaction's own read and its commit.
-RECEIVER must therefore be a pure function of VALUE: it must have no
-side effect whatsoever other than computing and returning its own new
-desired root value -- no network calls, no file I/O outside of Git
-itself, and no mutation of any global or shared Lisp state -- since
-GitHack has no way to undo any such side effect if RECEIVER is
-silently re-run. (This is not a new restriction GitHack's own
-machinery would violate: GitHack's proxy/serialization pipeline
-already performs no side effect beyond a proxy's own lazy-load
-SHA/cache slot on the specific instance being read or written, which
-is safe, transparent memoization rather than externally observable
-state.)
+*** WARNING ***: if CONFLICT-RESOLUTION is :RETRY -- or :REBASE with
+a genuine, unresolvable content conflict and REBASE-FALLBACK :RETRY
+-- RECEIVER may be invoked more than once -- from scratch, against a
+freshly re-read VALUE -- every time some other writer is found to
+have already advanced BRANCH between this transaction's own read and
+its commit. RECEIVER must therefore be a pure function of VALUE: it
+must have no side effect whatsoever other than computing and
+returning its own new desired root value -- no network calls, no
+file I/O outside of Git itself, and no mutation of any global or
+shared Lisp state -- since GitHack has no way to undo any such side
+effect if RECEIVER is silently re-run. (This is not a new restriction
+GitHack's own machinery would violate: GitHack's proxy/serialization
+pipeline already performs no side effect beyond a proxy's own
+lazy-load SHA/cache slot on the specific instance being read or
+written, which is safe, transparent memoization rather than
+externally observable state.)
 
 Returns the GIT-TRANSACTION, exactly as CALL-WITH-GIT-TRANSACTION
 does."
@@ -133,24 +136,28 @@ does."
    :message message
    :parents parents
    :conflict-resolution conflict-resolution
+   :rebase-fallback rebase-fallback
    :receiver (lambda (transaction head-commit)
                (let ((*transaction* transaction))
                  (%transaction-write-value
                   (get-pathname repository)
                   (funcall receiver (%transaction-read-value head-commit)))))))
 
-(defmacro with-transaction ((value-var) (repository mode &key branch author committer message parents (conflict-resolution :error)) &body body)
+(defmacro with-transaction ((value-var) (repository mode &key branch author committer message parents
+                                                     (conflict-resolution :error) (rebase-fallback :error))
+                            &body body)
   "Macro wrapper around CALL-WITH-TRANSACTION: expands into a call to
 CALL-WITH-TRANSACTION on REPOSITORY and MODE (evaluated once each),
-passing BRANCH/AUTHOR/COMMITTER/MESSAGE/PARENTS/CONFLICT-RESOLUTION
-through unchanged, with :RECEIVER bound to a closure over BODY.
-Within BODY, VALUE-VAR is bound to the plain Lisp value
+passing BRANCH/AUTHOR/COMMITTER/MESSAGE/PARENTS/CONFLICT-RESOLUTION/
+REBASE-FALLBACK through unchanged, with :RECEIVER bound to a closure
+over BODY. Within BODY, VALUE-VAR is bound to the plain Lisp value
 CALL-WITH-TRANSACTION's RECEIVER would receive (NIL for an empty
 branch awaiting its initial commit). BODY must return a single plain
 Lisp value representing the new desired root state; see
 CALL-WITH-TRANSACTION -- including, if CONFLICT-RESOLUTION is
-:RETRY, its warning that BODY must then be entirely free of external
-side effects, since it may be re-executed from scratch."
+:RETRY (or :REBASE falls back to :RETRY), its warning that BODY must
+then be entirely free of external side effects, since it may be
+re-executed from scratch."
   `(call-with-transaction ,repository ,mode
                            :branch ,branch
                            :author ,author
@@ -158,4 +165,5 @@ side effects, since it may be re-executed from scratch."
                            :message ,message
                            :parents ,parents
                            :conflict-resolution ,conflict-resolution
+                           :rebase-fallback ,rebase-fallback
                            :receiver (lambda (,value-var) ,@body)))

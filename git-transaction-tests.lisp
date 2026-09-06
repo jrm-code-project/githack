@@ -365,6 +365,29 @@ check finally succeeds."
             (is (eq :retry (get-conflict-resolution transaction)))
             (is (= 3 attempts))))))))
 
+(test call-with-git-transaction-rebase-mode-commits-normally-with-no-conflict
+  "With :CONFLICT-RESOLUTION :REBASE, and no concurrent writer at all
+(the common case), CALL-WITH-GIT-TRANSACTION commits exactly as
+:ERROR would -- the rebase machinery is never even invoked -- and
+GET-REBASE-FALLBACK defaults to :ERROR when not supplied."
+  (let ((repository (%make-test-repository :read-write))
+        (attempts 0)
+        (update-calls '()))
+    (with-fake-head-resolution ()
+      (with-fake-git-hash-object ()
+        (with-recording-git-update-ref (update-calls)
+          (let ((transaction
+                  (call-with-git-transaction repository :read-write
+                                              :conflict-resolution :rebase
+                                              :receiver (lambda (tx head)
+                                                          (declare (ignore tx head))
+                                                          (incf attempts)
+                                                          (make-instance 'git-tree :repository +repo-path+ :entries '())))))
+            (is (eq :committed (get-status transaction)))
+            (is (eq :rebase (get-conflict-resolution transaction)))
+            (is (eq :error (get-rebase-fallback transaction)))
+            (is (= 1 attempts))))))))
+
 (test call-with-git-transaction-lock-mode-holds-the-repository-lock-across-receiver
   "With :CONFLICT-RESOLUTION :LOCK, CALL-WITH-GIT-TRANSACTION holds
 the repository's own transaction lock file for the entire dynamic
@@ -424,3 +447,148 @@ branch."
           (is (not (null commit-sha)))
           (is (not (search "parent " raw-commit-text))))))))
 
+(test call-with-git-transaction-nested-merges-its-root-into-the-parent-without-its-own-commit
+  "A nested CALL-WITH-GIT-TRANSACTION -- opened from within an
+already-active enclosing transaction's RECEIVER, against the same
+REPOSITORY -- records the enclosing transaction as its own
+GET-PARENT-TRANSACTION, never creates its own GIT-COMMIT (its own
+GET-RESULT stays NIL) or advances any branch, and on a normal exit
+copies its own final root up into the enclosing transaction's
+GET-CURRENT-ROOT, which alone is committed -- exactly once -- when
+the outermost transaction itself exits."
+  (let ((repository (%make-test-repository :read-write))
+        (update-calls '())
+        captured-outer-transaction
+        captured-nested-transaction)
+    (with-fake-git-show-ref-sha ('())
+      (with-fake-git-object-store ()
+        (with-recording-git-update-ref (update-calls)
+          (let* ((nested-tree (make-instance 'git-tree :repository +repo-path+ :entries '()))
+                 (outer-transaction
+                   (call-with-git-transaction
+                    repository :read-write
+                    :receiver (lambda (outer-tx outer-head)
+                                (declare (ignore outer-head))
+                                (setf captured-outer-transaction outer-tx)
+                                (setf captured-nested-transaction
+                                      (call-with-git-transaction
+                                       repository :read-write
+                                       :receiver (lambda (inner-tx inner-head)
+                                                   (declare (ignore inner-head))
+                                                   (is (eq outer-tx (get-parent-transaction inner-tx)))
+                                                   nested-tree)))
+                                (get-current-root outer-tx)))))
+            (is (eq :committed (get-status outer-transaction)))
+            (is (eq :committed (get-status captured-nested-transaction)))
+            (is (null (get-parent-transaction captured-outer-transaction)))
+            (is (eq captured-outer-transaction (get-parent-transaction captured-nested-transaction)))
+            (is (null (get-result captured-nested-transaction)))
+            (is (eq nested-tree (get-current-root captured-nested-transaction)))
+            (is (eq nested-tree (get-tree (get-result outer-transaction))))
+            (is (= 1 (length update-calls)))))))))
+
+(test call-with-git-transaction-nested-abort-leaves-the-parents-current-root-untouched
+  "If a nested transaction is explicitly aborted (or exits via an
+error), the enclosing transaction's GET-CURRENT-ROOT is left
+completely untouched -- none of the nested transaction's own writes
+percolate up -- and the enclosing transaction's own eventual commit
+reflects only its pre-nesting state."
+  (let ((repository (%make-test-repository :read-write))
+        (update-calls '()))
+    (with-fake-git-show-ref-sha ('())
+      (with-fake-git-object-store ()
+        (with-recording-git-update-ref (update-calls)
+          (let* ((outer-tree (make-instance 'git-tree :repository +repo-path+ :entries '()))
+                 (discarded-tree (make-instance 'git-tree :repository +repo-path+
+                                                           :entries (list (cons "discard-me.txt"
+                                                                                 (make-instance 'git-blob
+                                                                                                 :repository +repo-path+
+                                                                                                 :payload "gone")))))
+                 (outer-transaction
+                   (call-with-git-transaction
+                    repository :read-write
+                    :receiver (lambda (outer-tx outer-head)
+                                (declare (ignore outer-head))
+                                (call-with-git-transaction
+                                 repository :read-write
+                                 :receiver (lambda (inner-tx inner-head)
+                                             (declare (ignore inner-head))
+                                             (abort-git-transaction inner-tx)
+                                             discarded-tree))
+                                (is (null (get-current-root outer-tx)))
+                                outer-tree))))
+            (is (eq :committed (get-status outer-transaction)))
+            (is (eq outer-tree (get-tree (get-result outer-transaction))))
+            (is (= 1 (length update-calls)))))))))
+
+(test call-with-git-transaction-signals-error-for-nested-read-write-inside-read-only-parent
+  "A nested :READ-WRITE transaction cannot be opened from within an
+enclosing :READ-ONLY transaction's RECEIVER."
+  (let ((repository (%make-test-repository :read-write))
+        (update-calls '()))
+    (with-fake-git-show-ref-sha ('())
+      (with-fake-git-object-store ()
+        (with-recording-git-update-ref (update-calls)
+          (call-with-git-transaction
+           repository :read-only
+           :receiver (lambda (outer-tx outer-head)
+                       (declare (ignore outer-head))
+                       (signals transaction-state-error
+                         (call-with-git-transaction
+                          repository :read-write
+                          :receiver (lambda (inner-tx inner-head)
+                                      (declare (ignore inner-tx inner-head))
+                                      (error "RECEIVER should never run."))))
+                       (abort-git-transaction outer-tx))))))))
+
+(test call-with-git-transaction-signals-error-for-nested-transaction-against-a-different-repository
+  "A nested transaction's REPOSITORY must match its enclosing
+transaction's own; otherwise CALL-WITH-GIT-TRANSACTION signals
+INVALID-ARGUMENT-ERROR before ever invoking RECEIVER."
+  (let ((repository (%make-test-repository :read-write))
+        (other-repository (call-with-repository "/fake/other-repo/"
+                                                  :branch "main"
+                                                  :author "The Boss <boss@githack.local>"
+                                                  :message "default message"
+                                                  :mode :read-write
+                                                  :receiver #'identity))
+        (update-calls '()))
+    (with-fake-git-show-ref-sha ('())
+      (with-fake-git-object-store ()
+        (with-recording-git-update-ref (update-calls)
+          (call-with-git-transaction
+           repository :read-write
+           :receiver (lambda (outer-tx outer-head)
+                       (declare (ignore outer-head))
+                       (signals invalid-argument-error
+                         (call-with-git-transaction
+                          other-repository :read-write
+                          :receiver (lambda (inner-tx inner-head)
+                                      (declare (ignore inner-tx inner-head))
+                                      (error "RECEIVER should never run."))))
+                       (abort-git-transaction outer-tx))))))))
+
+(test call-with-git-transaction-binds-star-git-transaction-to-the-nested-instance
+  "While a nested transaction's RECEIVER is running, *GIT-TRANSACTION*
+is bound to the nested GIT-TRANSACTION, not the enclosing one; once
+the nested call returns, *GIT-TRANSACTION* reverts to the enclosing
+transaction for the remainder of its own RECEIVER."
+  (let ((repository (%make-test-repository :read-write))
+        (update-calls '()))
+    (with-fake-git-show-ref-sha ('())
+      (with-fake-git-object-store ()
+        (with-recording-git-update-ref (update-calls)
+          (call-with-git-transaction
+           repository :read-write
+           :receiver (lambda (outer-tx outer-head)
+                       (declare (ignore outer-head))
+                       (is (eq outer-tx *git-transaction*))
+                       (call-with-git-transaction
+                        repository :read-write
+                        :receiver (lambda (inner-tx inner-head)
+                                    (declare (ignore inner-head))
+                                    (is (eq inner-tx *git-transaction*))
+                                    (is (not (eq outer-tx inner-tx)))
+                                    (make-instance 'git-tree :repository +repo-path+ :entries '())))
+                       (is (eq outer-tx *git-transaction*))
+                       (abort-git-transaction outer-tx)))))))) 

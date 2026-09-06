@@ -81,6 +81,51 @@ MALFORMED-GIT-OBJECT-ERROR) or an object's own persistence state
    "Signaled by RESOLVE-BRANCH when no branch named NAME exists in
 REPOSITORY and :IF-DOES-NOT-EXIST is :ERROR (the default)."))
 
+(define-condition merge-conflict-error (githack-error)
+  ((repository :initarg :repository :reader get-repository)
+   (name :initarg :name :reader get-name)
+   (base-sha :initarg :base-sha :reader get-base-sha)
+   (candidate-sha :initarg :candidate-sha :reader get-candidate-sha)
+   (current-head-sha :initarg :current-head-sha :reader get-current-head-sha)
+   (detail :initarg :detail :initform nil :reader get-detail))
+  (:report
+   (lambda (condition stream)
+     (format stream "Rebase merge conflict on branch ~S in ~A: could not cleanly replay commit ~A (started from ~A) onto the concurrently-advanced HEAD ~A.~@[~%~A~]"
+             (get-name condition)
+             (get-repository condition)
+             (get-candidate-sha condition)
+             (get-base-sha condition)
+             (get-current-head-sha condition)
+             (get-detail condition))))
+  (:documentation
+   "Signaled by CALL-WITH-GIT-TRANSACTION's (and, transitively,
+CALL-WITH-TRANSACTION's) :REBASE CONFLICT-RESOLUTION strategy when
+GIT-MERGE-TREE finds a genuine, unresolvable content conflict while
+attempting to replay a transaction's own already-computed candidate
+commit onto a branch HEAD some other writer has concurrently
+advanced, and :REBASE-FALLBACK is :ERROR (rather than :RETRY, which
+instead signals CONCURRENT-MODIFICATION-ERROR to trigger a full
+re-run of the transaction from scratch). Distinct from CONCURRENT-
+MODIFICATION-ERROR: that condition means a race was merely detected
+(Git's own ref compare-and-swap failed); this one means a race was
+detected AND an attempt to resolve it via a real three-way content
+merge itself failed, because the two writers touched the exact same
+content."))
+
+(setf (documentation 'get-base-sha 'function)
+      "Return the SHA CONDITION (a MERGE-CONFLICT-ERROR) recorded as
+the branch HEAD its transaction originally started from, before any
+concurrent writer advanced it.")
+(setf (documentation 'get-candidate-sha 'function)
+      "Return the SHA of the already-persisted candidate GIT-COMMIT
+CONDITION's (a MERGE-CONFLICT-ERROR) transaction computed and tried,
+unsuccessfully, to replay onto a concurrently-advanced branch HEAD.")
+(setf (documentation 'get-current-head-sha 'function)
+      "Return the SHA of the branch HEAD CONDITION's (a
+MERGE-CONFLICT-ERROR) transaction was attempting to replay its own
+candidate commit onto when GIT-MERGE-TREE reported a genuine,
+unresolvable content conflict.")
+
 (define-condition git-not-found-error (githack-error)
   ()
   (:documentation
