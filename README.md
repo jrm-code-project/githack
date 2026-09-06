@@ -140,9 +140,159 @@ detected via `git update-ref`'s own compare-and-swap check:
   `transaction-lock.lisp`) before even reading the branch's head commit,
   serializing concurrent `:lock`-mode transactions against the same
   repository instead of racing.
+- `:rebase` also detects the race via Git's own compare-and-swap check, but
+  does not discard the receiver's already-computed work: it replays the
+  transaction's own candidate commit onto the branch's new head via `git
+  merge-tree` (a real, working-tree-free three-way content merge), retrying
+  the replay against an ever-fresher head for as long as other writers keep
+  winning the race, and only falls back to `:retry` (re-running the receiver
+  from scratch) or `:error` (signaling `merge-conflict-error`) — governed by
+  a separate `:rebase-fallback` keyword — if `git merge-tree` ever reports a
+  genuine, unresolvable content conflict (both writers touched the exact
+  same content) rather than a merely-detected-but-mergeable race.
 
 See `TECHNICAL_DEBT.md` for a prioritized list of known gaps and their
 suggested remediation order.
+
+## Advanced features
+
+### Nested transactions
+
+`with-transaction`/`with-git-transaction` nest automatically: opening a new
+transaction against the *same* repository from inside an already-running
+transaction's own body (rather than from top-level code) is detected via
+the dynamically-bound `*transaction*`/`*git-transaction*`, and produces a
+nested transaction instead of a second, independent one. A nested
+transaction never creates its own `git-commit` or advances the branch
+itself — on a normal return, its own computed root simply *percolates
+upward*, becoming its immediately enclosing transaction's own current root;
+only the outermost transaction's own eventual normal return actually
+creates a commit and advances the branch. Nesting can go arbitrarily deep,
+and each level's contribution percolates all the way up to the outermost
+transaction:
+
+```lisp
+(with-transaction (balance) (bank :read-write)
+  ;; Nested transaction: computes a new balance, then percolates it
+  ;; upward into the outer transaction's own current root -- no commit
+  ;; of its own is ever created.
+  (with-transaction (b) (bank :read-write)
+    (+ b 100))
+  ;; The outer transaction's own return value is what actually gets
+  ;; committed once it returns.
+  (get-payload (get-current-root *transaction*)))
+```
+
+Calling `abort-git-transaction` from inside a nested transaction discards
+only that nested transaction's own contribution — its immediately
+enclosing transaction's current root is left completely untouched — but a
+*genuine error* signaled from inside a nested transaction instead unwinds
+every enclosing transaction in turn, all the way out, exactly as it would
+for a single, non-nested transaction: nothing at any level is written. See
+`end-to-end-nested-transactions-commit-abort-and-retry`
+(`end-to-end-tests.lisp`) for a comprehensive, real (non-mocked) walk
+through multi-level nesting, explicit abort, and `:retry` together.
+
+### Line-oriented string serialization
+
+When a Lisp string is serialized into an atom's blob (`git-blob.lisp`), any
+embedded `#\Newline` characters are written to the blob as literal line
+feeds — via plain `prin1-to-string`, which already prints a Lisp string
+argument with its own newlines intact rather than escaping them — never as
+a single-line, escaped token. This is deliberate: it lets Git's own
+line-oriented diff/merge machinery (in particular the three-way content
+merge `:rebase`'s own conflict resolution relies on, via `git merge-tree`)
+treat two concurrent edits to *different lines* of the same long string as
+a clean, automatic merge, rather than an unavoidable conflict merely
+because both edits happened to touch "the same token" on a single physical
+line. See `end-to-end-rebase-mode-auto-merges-concurrent-edits-to-
+different-lines-of-the-same-string` (`end-to-end-tests.lisp`).
+
+### Distributed (multi-repository) transactions: Two-Phase Commit
+
+`with-githack-transaction`/`call-with-githack-transaction`
+(`distributed-transaction.lisp`) let a single logical transaction span any
+number of distinct repositories (or distinct orphan branches within one
+repository), committing all of them together, atomically, or none at all —
+built entirely on standard Git plumbing (`hash-object`, `cat-file`,
+`update-ref`, `update-ref --stdin`, `mktag`, `rev-parse`, `for-each-ref`),
+with no external coordination service of any kind:
+
+```lisp
+(with-githack-transaction ()
+  (with-repository (checking) (checking-repo-path :branch "main" :mode :read-write)
+    (with-transaction (v) (checking :read-write) (- v 100)))
+  (with-repository (savings) (savings-repo-path :branch "main" :mode :read-write)
+    (with-transaction (v) (savings :read-write) (+ v 100))))
+```
+
+Ordinary `with-transaction`/`with-git-transaction` calls made inside a
+`with-githack-transaction` body work completely unmodified — including
+their own nested-transaction support, described above — except that their
+final branch update is transparently *deferred* rather than applied
+immediately, becoming a pending write against the enclosing distributed
+transaction. Once the body returns normally, that transaction's pending
+writes decide what happens next:
+
+- **Zero participants** (the body opened no ordinary transaction against
+  any repository at all): a no-op.
+- **One participant** (the "Fast Path"): its branch is advanced directly,
+  via a single atomic `git update-ref --stdin` call — no coordination
+  overhead at all.
+- **More than one participant**: a full Two-Phase-Commit protocol runs:
+  1. **Prepare**: the first participant encountered is elected the
+     *Ledger*. For every participant, an annotated tag (`git mktag`) is
+     created targeting its own already-persisted-but-not-yet-committed
+     commit, carrying a Transaction Manifest (the transaction's ID, the
+     Ledger's own location, and every participant's own branch/original
+     head) as its message, and a tracking ref —
+     `refs/githack/prepare/<tx-id>/<branch-name>` — is pointed at it. If
+     any participant's own Prepare step fails, every prepare ref already
+     created for this transaction is rolled back and
+     `distributed-transaction-error` is signaled; nothing is committed
+     anywhere.
+  2. **Point of No Return**: once every participant has been prepared, a
+     single `refs/githack/ledger/<tx-id>` ref is written in the Ledger
+     repository. The instant that ref exists, the transaction is
+     permanently committed, no matter what happens next — even a process
+     crash.
+  3. **Roll Forward**: every participant's real branch is advanced to its
+     own prepared commit and its own prepare ref is deleted, both via one
+     single atomic `git update-ref --stdin` batch per participant.
+
+If the body signals an error instead of returning normally, nothing is
+committed anywhere: every participant's own already-persisted commit is
+simply left as harmless, unreferenced Git garbage for `git gc` to
+eventually collect — exactly the same free rollback guarantee an ordinary,
+single-repository transaction already provides, now extended transparently
+across every participant at once.
+
+**Crash recovery.** If the Lisp process dies between Prepare and Roll
+Forward, some participants are left with a stranded
+`refs/githack/prepare/<tx-id>/<branch-name>` ref. `run-githack-exorcist`,
+run against any single repository (e.g. on process boot, or lazily on
+first access), finds every such stranded ref, reads its own annotated tag's
+Manifest to find the Ledger, and asks it directly whether
+`refs/githack/ledger/<tx-id>` exists: if so, the transaction had already
+passed its Point of No Return, so the stranded participant is rolled
+forward exactly as step 3 above would; if not, the crash happened during
+Prepare, so the stranded ref is simply deleted, leaving the branch
+untouched.
+
+**Scope limitation:** `:rebase` conflict-resolution is not supported for a
+transaction participating in a `with-githack-transaction` (its own
+auto-merge/retry semantics don't compose with cross-repository 2PC);
+participants must use `:error`, `:retry`, or `:lock`.
+
+See `distributed-transaction-tests.lisp` (no-op/Fast-Path/2PC dispatch,
+Phase 1 failure rollback, and both Exorcist recovery outcomes) and
+`distributed-nested-transaction-tests.lisp` (distributed transactions
+composed with ordinary nested-transaction support, including two
+`with-githack-transaction`s nested inside one another) for comprehensive,
+real (non-mocked) end-to-end coverage. `examples/bank.lisp` and
+`examples/concurrency-demo.lisp` demonstrate nested transactions and every
+`:conflict-resolution` strategy interactively.
+
 
 ## Conventions
 
