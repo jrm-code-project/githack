@@ -1,7 +1,7 @@
 # GitHack
 
 GitHack is a Common Lisp (SBCL) persistent object database built directly on
-Git's content-addressable storage. It binds `libgit2` via CFFI and uses
+Git's content-addressable storage. It uses
 immutable Git blobs/trees/commits to implement persistent data structures,
 a CLOS metaobject-protocol integration, and a transaction layer with
 configurable concurrency-conflict handling — so that ordinary CLOS slot
