@@ -84,7 +84,9 @@
                 :depends-on ("test-package" "test-helpers" "persistent-standard-class-tests"
                              "persistent-struct-tests"))
                (:file "distributed-transaction-tests"
-                :depends-on ("test-package" "test-helpers" "git-transaction-tests" "transaction-tests")))
+                :depends-on ("test-package" "test-helpers" "git-transaction-tests" "transaction-tests"))
+               (:file "distributed-nested-transaction-tests"
+                :depends-on ("test-package" "test-helpers" "distributed-transaction-tests" "end-to-end-tests")))
   :perform (test-op (op c)
              (declare (ignore op c))
              (unless (uiop:symbol-call "GITHACK-TEST" "RUN-GITHACK-TESTS")
