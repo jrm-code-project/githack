@@ -18,7 +18,7 @@ its value, and removes its own lock file afterward."
                (setf ran t)
                42)))
       (is (eq t ran))
-      (is (not (probe-file (%transaction-lock-pathname repository)))))))
+      (is (not (probe-file (transaction-lock-pathname repository)))))))
 
 (test with-repository-transaction-lock-cleans-up-on-abnormal-exit
   "WITH-REPOSITORY-TRANSACTION-LOCK removes its own lock file even if
@@ -27,7 +27,7 @@ BODY signals an error."
     (signals error
       (with-repository-transaction-lock (repository)
         (error "boom")))
-    (is (not (probe-file (%transaction-lock-pathname repository))))))
+    (is (not (probe-file (transaction-lock-pathname repository))))))
 
 (test with-repository-transaction-lock-excludes-a-second-concurrent-attempt
   "While one WITH-REPOSITORY-TRANSACTION-LOCK holds a repository's
@@ -38,6 +38,6 @@ acquire it while the file still exists, i.e. GIT-DIR's lock file
 really is held exclusively."
   (with-temporary-git-repository (repository)
     (with-repository-transaction-lock (repository)
-      (is (probe-file (%transaction-lock-pathname repository)))
-      (is (null (open (%transaction-lock-pathname repository)
+      (is (probe-file (transaction-lock-pathname repository)))
+      (is (null (open (transaction-lock-pathname repository)
                        :direction :output :if-exists nil :if-does-not-exist :create))))))

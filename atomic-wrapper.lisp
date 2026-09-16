@@ -39,7 +39,7 @@ no SHA (is not yet persisted)."
   (let* ((meta-blob (make-instance 'git-blob :repository repository
                                               :sha (git-hash-object
                                                     repository "blob"
-                                                    (%serialize-plist (list :tag :atomic-wrapper)))))
+                                                    (serialize-plist (list :tag :atomic-wrapper)))))
          (readme-blob (make-instance 'git-blob :repository repository
                                                 :sha (git-hash-object
                                                       repository "blob"
@@ -59,13 +59,17 @@ no SHA (is not yet persisted)."
 Git tree bytes via GIT-CAT-FILE and DESERIALIZE-TREE if TREE is not
 already loaded. Returns TREE.
 
-Not thread-safe: see git-transaction.lisp's CONCURRENCY POLICY
-comment. Two threads racing to load the same TREE instance can only
-redo idempotent work, never corrupt data, but neither GET-ENTRIES nor
-GET-LOADED? is synchronized."
+Thread-safe: no lock is taken (Git object content is immutable, so
+DESERIALIZE-TREE is a pure function of TREE's own SHA). Two threads
+racing to load the same TREE instance may each harmlessly redo this
+identical fetch/decode work; whichever SETF of ENTRIES happens last
+simply wins, and %PUBLISH-LOADED!'s own SB-EXT:COMPARE-AND-SWAP
+provides the memory barrier guaranteeing any other thread that
+subsequently observes GET-LOADED? true for TREE also sees that
+winning ENTRIES value, never a half-populated TREE."
   (unless (get-loaded? tree)
     (setf (get-entries tree) (deserialize-tree repository (git-cat-file repository (sha tree))))
-    (setf (get-loaded? tree) t))
+    (%publish-loaded! tree))
   tree)
 
 (defun %ensure-blob-loaded (blob)
@@ -73,23 +77,23 @@ GET-LOADED? is synchronized."
 raw Git blob bytes via GIT-CAT-FILE and DESERIALIZE-ATOM if BLOB is
 not already loaded. Returns BLOB.
 
-Not thread-safe: see git-transaction.lisp's CONCURRENCY POLICY
-comment."
+Thread-safe: see %ENSURE-TREE-ENTRIES-LOADED's own commentary --
+identical reasoning applies here, substituting PAYLOAD for ENTRIES."
   (unless (get-loaded? blob)
     (setf (get-payload blob)
           (deserialize-atom (git-cat-file (get-repository blob) (sha blob))))
-    (setf (get-loaded? blob) t))
+    (%publish-loaded! blob))
   blob)
 
-(defun %atomic-wrapper-tree-p (repository tree)
+(defun atomic-wrapper-tree-p (repository tree)
   "Return true if TREE (with ENTRIES already loaded) is an
 ATOMIC-WRAPPER-TREE: one whose \".meta\" entry, fetched via
-GIT-CAT-FILE and parsed as a plist via %DESERIALIZE-PLIST, has a
+GIT-CAT-FILE and parsed as a plist via DESERIALIZE-PLIST, has a
 :TAG of :ATOMIC-WRAPPER. Returns NIL (rather than signaling) for any
 ordinary tree with no \".meta\" entry at all."
   (let ((meta-entry (assoc ".meta" (get-entries tree) :test #'string=)))
     (and meta-entry
-         (eq (getf (%deserialize-plist (git-cat-file repository (sha (cdr meta-entry)))) :tag)
+         (eq (getf (deserialize-plist (git-cat-file repository (sha (cdr meta-entry)))) :tag)
              :atomic-wrapper))))
 
 (defun %ensure-commit-loaded (commit)
@@ -99,8 +103,10 @@ via GIT-CAT-FILE and DESERIALIZE-COMMIT if COMMIT is not already
 loaded (as is the case for a freshly INFLATE-GIT-PROXY'd commit,
 e.g. a GIT-BRANCH's TARGET). Returns COMMIT.
 
-Not thread-safe: see git-transaction.lisp's CONCURRENCY POLICY
-comment."
+Thread-safe: see %ENSURE-TREE-ENTRIES-LOADED's own commentary --
+identical reasoning applies here, substituting DESERIALIZE-COMMIT's
+own several slots for ENTRIES; DESERIALIZE-COMMIT itself calls
+%PUBLISH-LOADED! as its own very last step."
   (unless (get-loaded? commit)
     (deserialize-commit commit
                          (sb-ext:octets-to-string
@@ -121,6 +127,6 @@ this works equally well on a freshly INFLATE-GIT-PROXY'd commit."
   (%ensure-commit-loaded commit)
   (let* ((repository (get-repository commit))
          (tree (%ensure-tree-entries-loaded repository (get-tree commit))))
-    (if (%atomic-wrapper-tree-p repository tree)
+    (if (atomic-wrapper-tree-p repository tree)
         (cdr (assoc "value" (get-entries tree) :test #'string=))
         tree)))

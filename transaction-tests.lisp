@@ -14,7 +14,7 @@ exist yet (an empty repository awaiting its initial commit), and
 automatically wraps RECEIVER's returned atom in an ATOMIC-WRAPPER-
 TREE for the repository's very first commit, whose PARENTS list is
 empty."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (update-calls '()))
     (with-fake-git-show-ref-sha ('())
       (with-fake-git-object-store ()
@@ -40,7 +40,7 @@ root back into the plain decoded Lisp atom RECEIVER expects
 own payload), and automatically re-wraps RECEIVER's new atom into a
 fresh ATOMIC-WRAPPER-TREE for the next commit, with the old head
 recorded as its sole parent."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (update-calls '()))
     (with-fake-git-object-store ()
       (let* ((blob (make-instance 'git-blob :repository +repo-path+ :payload 10)))
@@ -84,7 +84,7 @@ recorded as its sole parent."
 GIT-TREE it built or mutated and returned directly), CALL-WITH-
 TRANSACTION commits it as the root directly, without wrapping it in
 any ATOMIC-WRAPPER-TREE."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (update-calls '()))
     (with-fake-git-show-ref-sha ('())
       (with-fake-git-object-store ()
@@ -107,7 +107,7 @@ any ATOMIC-WRAPPER-TREE."
   "WITH-TRANSACTION binds VALUE-VAR to the same plain Lisp value
 CALL-WITH-TRANSACTION's RECEIVER would receive, and honors the same
 auto-commit semantics for BODY's return value."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (update-calls '()))
     (with-fake-git-show-ref-sha ('())
       (with-fake-git-object-store ()
@@ -131,7 +131,7 @@ extent of any CALL-WITH-TRANSACTION call."
 exact GIT-TRANSACTION CALL-WITH-GIT-TRANSACTION constructs, for the
 duration of RECEIVER's call, and *TRANSACTION* reverts to unbound
 once the call returns."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (update-calls '())
         captured-transaction)
     (with-fake-git-show-ref-sha ('())

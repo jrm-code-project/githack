@@ -36,27 +36,41 @@
 ;;; governs how a branch's compare-and-swap ("Lost Update") race is
 ;;; detected and handled.
 ;;;
-;;; What is NOT safe is sharing a single in-memory GIT-OBJECT/
-;;; PERSISTENT-OBJECT proxy instance (or anything reachable from
-;;; one, e.g. via a GIT-BRANCH's TARGET) across multiple threads.
-;;; Every lazy-load path in this codebase -- %ENSURE-TREE-ENTRIES-
-;;; LOADED, %ENSURE-BLOB-LOADED, and %ENSURE-COMMIT-LOADED in
-;;; atomic-wrapper.lisp; PERSISTENT-VECTOR-REF's and PERSISTENT-
-;;; ARRAY-REF's element caches in persistent-vector.lisp/persistent-
-;;; array.lisp -- mutates a proxy's own slots with no locking
-;;; whatsoever. Two threads racing to lazily load the *same* proxy
-;;; instance can, at best, harmlessly redo idempotent work (re-fetch
-;;; and re-decode the same Git object twice), or, at worst, observe
-;;; or produce a partially-populated object if one thread reads a
-;;; slot the other is mid-way through setting. Nothing in this
-;;; codebase today spawns worker threads internally, so this is a
-;;; theoretical risk rather than an observed bug, but any caller
-;;; introducing concurrency of their own MUST ensure each thread
-;;; either uses entirely separate proxy object graphs (e.g. by
-;;; opening its own GIT-TRANSACTION and letting it re-resolve BRANCH
-;;; from scratch, rather than sharing one already-resolved
-;;; GIT-COMMIT/GIT-TRANSACTION across threads) or otherwise
-;;; externally serializes all access to any proxy object it shares.
+;;; Sharing a single in-memory GIT-OBJECT/PERSISTENT-OBJECT proxy
+;;; instance (or anything reachable from one, e.g. via a GIT-BRANCH's
+;;; TARGET) across multiple threads is also safe, for reading and
+;;; navigating it concurrently: every lazy-load path in this codebase
+;;; -- %ENSURE-TREE-ENTRIES-LOADED, %ENSURE-BLOB-LOADED, and
+;;; %ENSURE-COMMIT-LOADED in atomic-wrapper.lisp; %ENSURE-PERSISTENT-
+;;; CONS-LOADED and %ENSURE-PERSISTENT-WTTREE-NODE-LOADED in
+;;; persistent-cons.lisp/persistent-wttree.lisp; %ENSURE-PERSISTENT-
+;;; VECTOR-LOADED and %ENSURE-PERSISTENT-ARRAY-LOADED, together with
+;;; PERSISTENT-VECTOR-REF's own per-index element cache, in
+;;; persistent-vector.lisp/persistent-array.lisp -- now uses git-
+;;; object.lisp's own small set of lightweight, mostly lock-free
+;;; synchronization primitives (%PUBLISH-LOADED!, %CAS-INSTALL-ONCE,
+;;; and WITH-OBJECT-LOAD-LOCK) rather than plain, unsynchronized
+;;; SETF. Two threads racing to lazily load the *same* proxy instance
+;;; may still harmlessly redo idempotent work (re-fetch and re-decode
+;;; the same immutable Git object twice), but can no longer observe
+;;; or produce a partially-populated object: %PUBLISH-LOADED!'s and
+;;; %CAS-INSTALL-ONCE's own SB-EXT:COMPARE-AND-SWAP calls are full
+;;; memory barriers, so a slot flag becoming visible as "loaded"/
+;;; "installed" on one thread guarantees every other slot value it
+;;; depends on is visible too on any other thread; and the sole two
+;;; lazy loads that also retype an instance in place via CL:CHANGE-
+;;; CLASS (persistent-cons/persistent-wttree node loading, neither of
+;;; which is safe to race directly) are additionally serialized via
+;;; WITH-OBJECT-LOAD-LOCK's own small, fixed pool of stripe mutexes,
+;;; taken only for that rare, one-time retyping event -- the common,
+;;; already-loaded read path for every proxy always remains lock-free.
+;;; See git-object.lisp's own THREAD SAFETY commentary for the full
+;;; design, and concurrency-tests.lisp for concrete multi-thread
+;;; coverage of every lazy-load path listed above.
+;;; Concurrent WRITERS remain safe regardless, and always have been:
+;;; GitHack's persistent data model never mutates an already-
+;;; persisted proxy's application data in place, only ever produces
+;;; brand-new instances.
 
 ;;; *GIT-TRANSACTION* is the GIT-TRANSACTION currently in dynamic
 ;;; scope, bound by CALL-WITH-GIT-TRANSACTION around its call to
@@ -140,7 +154,7 @@ from scratch against the branch's latest HEAD.")
     :documentation
     "The SHA TARGET-BRANCH was observed to point at when this
 transaction was opened, or NIL if the branch did not exist yet.
-Passed through to UPDATE-BRANCH's own EXPECTED-SHA compare-and-swap
+Passed through to UPDATE-BRANCH!'s own EXPECTED-SHA compare-and-swap
 argument at commit time, so that a concurrent writer which already
 advanced (or created) the branch out from under this transaction is
 detected -- via CONCURRENT-MODIFICATION-ERROR -- instead of silently
@@ -262,14 +276,14 @@ GIT-COMMIT, or NIL for an as-yet-empty branch, for an outermost
 transaction. Always NIL for a nested transaction; see
 GET-CURRENT-ROOT.")
 
-(defun %unix-time-now ()
+(defun unix-time-now ()
   "Return the current time as an integer Unix epoch timestamp."
   (- (get-universal-time) (encode-universal-time 0 0 0 1 1 1970 0)))
 
-;;; %UNIQUE-TEMPORARY-PATHNAME and GIT-HASH-OBJECT now live in
+;;; UNIQUE-TEMPORARY-PATHNAME and GIT-HASH-OBJECT now live in
 ;;; git-io.lisp, shared with PERSISTENT-CONS's own persistence logic.
 
-(defun %persist-git-tree-object (tree)
+(defun persist-git-tree-object (tree)
   "Ensure TREE (a GIT-TREE) and every one of its ENTRIES not yet
 persisted -- recursively -- has a SHA, writing each unpersisted
 GIT-BLOB's PAYLOAD and each unpersisted GIT-TREE's serialized
@@ -278,39 +292,39 @@ own SHA."
   (or (sha tree)
       (progn
         (dolist (entry (get-entries tree))
-          (%persist-git-object (cdr entry)))
+          (persist-git-object (cdr entry)))
         (setf (sha tree)
               (git-hash-object (get-repository tree) "tree" (serialize-tree tree))))))
 
-(defgeneric %persist-git-object-by-type (git-object)
+(defgeneric persist-git-object-by-type (git-object)
   (:documentation
    "Persist GIT-OBJECT (which is known not to have a SHA yet) to
 Git's object database according to its concrete type, and return the
-resulting SHA. Broken out of %PERSIST-GIT-OBJECT so this dispatch is
+resulting SHA. Broken out of PERSIST-GIT-OBJECT so this dispatch is
 its own generic function, with one DEFMETHOD per concrete type in
 place of an ETYPECASE clause."))
 
-(defmethod %persist-git-object-by-type ((git-object persistent-object))
+(defmethod persist-git-object-by-type ((git-object persistent-object))
   (serialize-persistent-object git-object))
 
-(defmethod %persist-git-object-by-type ((git-object persistent-cons))
+(defmethod persist-git-object-by-type ((git-object persistent-cons))
   (serialize-persistent-cons git-object))
 
-(defmethod %persist-git-object-by-type ((git-object persistent-vector))
+(defmethod persist-git-object-by-type ((git-object persistent-vector))
   (serialize-persistent-vector git-object))
 
-(defmethod %persist-git-object-by-type ((git-object persistent-array))
+(defmethod persist-git-object-by-type ((git-object persistent-array))
   (serialize-persistent-array git-object))
 
-(defmethod %persist-git-object-by-type ((git-object git-tree))
-  (%persist-git-tree-object git-object))
+(defmethod persist-git-object-by-type ((git-object git-tree))
+  (persist-git-tree-object git-object))
 
-(defmethod %persist-git-object-by-type ((git-object git-blob))
+(defmethod persist-git-object-by-type ((git-object git-blob))
   (setf (sha git-object)
         (git-hash-object (get-repository git-object) "blob"
                           (serialize-atom (get-payload git-object)))))
 
-(defun %persist-git-object (git-object)
+(defun persist-git-object (git-object)
   "Ensure GIT-OBJECT (a GIT-BLOB, GIT-TREE, PERSISTENT-CONS,
 PERSISTENT-VECTOR, PERSISTENT-ARRAY, or PERSISTENT-OBJECT) has a
 SHA, persisting it (and, for a GIT-TREE, PERSISTENT-CONS,
@@ -319,9 +333,9 @@ children) to Git's object database if it does not already. Returns
 GIT-OBJECT's SHA. Objects that already have a SHA are assumed
 already present in Git's object database and are left untouched."
   (or (sha git-object)
-      (%persist-git-object-by-type git-object)))
+      (persist-git-object-by-type git-object)))
 
-(defun %persist-git-commit-object (commit)
+(defun persist-git-commit-object (commit)
   "Ensure COMMIT (a GIT-COMMIT) has a SHA, writing its serialized
 form to Git's object database via GIT-HASH-OBJECT if it does not
 already have one. Returns COMMIT's SHA. Assumes COMMIT's TREE and
@@ -332,12 +346,12 @@ otherwise)."
             (git-hash-object (get-repository commit) "commit"
                               (sb-ext:string-to-octets (serialize-commit commit) :external-format :utf-8)))))
 
-(defun %enlist-transaction-write! (transaction commit)
+(defun enlist-transaction-write! (transaction commit)
   "Record COMMIT (a freshly persisted, but not yet ref-visible,
-GIT-COMMIT %COMMIT-GIT-TRANSACTION-NOW just built for TRANSACTION, an
+GIT-COMMIT COMMIT-GIT-TRANSACTION-NOW! just built for TRANSACTION, an
 outermost :READ-WRITE GIT-TRANSACTION) as a pending write against the
 distributed *CURRENT-TRANSACTION*, instead of immediately advancing
-TRANSACTION's branch via UPDATE-BRANCH -- called only when
+TRANSACTION's branch via UPDATE-BRANCH! -- called only when
 *CURRENT-TRANSACTION* is bound (non-NIL). See WITH-GITHACK-
 TRANSACTION and PENDING-WRITE (distributed-transaction-context.lisp)
 for the rest of GitHack's distributed Two-Phase-Commit machinery,
@@ -374,7 +388,7 @@ WITH-GITHACK-TRANSACTION for genuinely distinct repositories."
               (%githack-transaction-pending-writes *current-transaction*))))
   commit)
 
-(defun %commit-git-transaction-now (transaction root)
+(defun commit-git-transaction-now! (transaction root)
   "Perform the actual work of committing TRANSACTION with root
 GIT-OBJECT ROOT: persist ROOT (and its modified children), wrapping
 it first in an ATOMIC-WRAPPER-TREE via WRAP-ATOMIC-COMMIT-ROOT if it
@@ -384,12 +398,12 @@ GIT-COMMIT from TRANSACTION's cascaded AUTHOR/COMMITTER/MESSAGE and
 PARENTS, and advance TRANSACTION's TARGET-BRANCH to point at it --
 or, if a distributed *CURRENT-TRANSACTION* is bound, defer that
 final ref update by enlisting it instead (see
-%ENLIST-TRANSACTION-WRITE!), leaving it to
+ENLIST-TRANSACTION-WRITE!), leaving it to
 %FINISH-GITHACK-TRANSACTION! to decide the branch's real fate once
 every participating repository's own commit has been prepared.
 Records the new commit in TRANSACTION's RESULT slot and returns it."
   (check-type root git-object)
-  (%persist-git-object root)
+  (persist-git-object root)
   (let* ((repository (get-pathname (get-git-repository transaction)))
          (tree (if (typep root 'git-tree)
                    root
@@ -400,43 +414,43 @@ Records the new commit in TRANSACTION's RESULT slot and returns it."
                                  :parents (get-parents transaction)
                                  :author (get-author transaction)
                                  :committer (get-committer transaction)
-                                 :timestamp (%unix-time-now)
+                                 :timestamp (unix-time-now)
                                  :message (get-message transaction)
                                  :loaded? t)))
-    (%persist-git-commit-object commit)
+    (persist-git-commit-object commit)
     (setf (get-target (get-target-branch transaction)) commit)
     (if *current-transaction*
-        (%enlist-transaction-write! transaction commit)
-        (update-branch (get-target-branch transaction)
+        (enlist-transaction-write! transaction commit)
+        (update-branch! (get-target-branch transaction)
                         :expected-sha (get-expected-branch-sha transaction)))
     (setf (get-result transaction) commit)
     (setf (get-current-root transaction) root)
     commit))
 
-(defun %commit-git-transaction-with-rebase (transaction root)
+(defun commit-git-transaction-with-rebase! (transaction root)
   "Commit TRANSACTION (an outermost, :READ-WRITE GIT-TRANSACTION
 whose CONFLICT-RESOLUTION is :REBASE) with root GIT-OBJECT ROOT.
 
 In the common case where no other writer has advanced TARGET-BRANCH
 since TRANSACTION was opened, this behaves exactly like
-%COMMIT-GIT-TRANSACTION-NOW: persist ROOT (wrapping it in an
+COMMIT-GIT-TRANSACTION-NOW!: persist ROOT (wrapping it in an
 ATOMIC-WRAPPER-TREE first if it is not itself a GIT-TREE), build and
 persist a new GIT-COMMIT from TRANSACTION's cascaded defaults with
 GET-HEAD-COMMIT as its sole parent, and advance the branch to point
 at it.
 
 If some other writer HAS already advanced TARGET-BRANCH (detected
-via GIT-UPDATE-REF's own compare-and-swap check, exactly as it would
+via GIT-UPDATE-REF!'s own compare-and-swap check, exactly as it would
 be for :ERROR/:RETRY/:LOCK), TRANSACTION's own already-computed ROOT
 is not discarded: instead, its persisted candidate commit is replayed
-onto the branch's new, real HEAD via %GIT-MERGE-TREE -- Git's own
+onto the branch's new, real HEAD via GIT-MERGE-TREE -- Git's own
 native, working-tree-free three-way content merge, which locates the
 original HEAD as their common ancestor automatically. If some other
 writer wins the race yet again before this replayed commit itself
 can be written, the whole replay is simply retried against that even
 newer HEAD, for as long as necessary.
 
-If %GIT-MERGE-TREE ever reports a genuine, unresolvable content
+If GIT-MERGE-TREE ever reports a genuine, unresolvable content
 conflict (both this transaction and some concurrent writer touched
 the exact same content) rather than a merely-detected-but-mergeable
 race, TRANSACTION's own REBASE-FALLBACK decides what happens next:
@@ -449,9 +463,9 @@ non-mergeable race would propagate under plain :ERROR mode.
 
 Records the winning commit in TRANSACTION's RESULT slot and its
 underlying (possibly rebased) tree in its CURRENT-ROOT, exactly as
-%COMMIT-GIT-TRANSACTION-NOW does. Returns that commit."
+COMMIT-GIT-TRANSACTION-NOW! does. Returns that commit."
   (check-type root git-object)
-  (%persist-git-object root)
+  (persist-git-object root)
   (let* ((repository (get-pathname (get-git-repository transaction)))
          (tree (if (typep root 'git-tree)
                    root
@@ -464,10 +478,10 @@ underlying (possibly rebased) tree in its CURRENT-ROOT, exactly as
                                            :parents (get-parents transaction)
                                            :author (get-author transaction)
                                            :committer (get-committer transaction)
-                                           :timestamp (%unix-time-now)
+                                           :timestamp (unix-time-now)
                                            :message (get-message transaction)
                                            :loaded? t)))
-    (%persist-git-commit-object candidate-commit)
+    (persist-git-commit-object candidate-commit)
     (flet ((finish (commit)
              (setf (get-target (get-target-branch transaction)) commit)
              (setf (get-result transaction) commit)
@@ -475,7 +489,7 @@ underlying (possibly rebased) tree in its CURRENT-ROOT, exactly as
              commit))
       (handler-case
           (progn
-            (git-update-ref repository branch-name (sha candidate-commit) :expected-sha base-sha)
+            (git-update-ref! repository branch-name (sha candidate-commit) :expected-sha base-sha)
             (finish candidate-commit))
         (concurrent-modification-error ()
           ;; Someone else already won the race: replay our own
@@ -486,7 +500,7 @@ underlying (possibly rebased) tree in its CURRENT-ROOT, exactly as
           (loop
             (let ((current-head-sha (git-show-ref-sha repository branch-name)))
               (multiple-value-bind (merged-tree-sha conflict-detail)
-                  (%git-merge-tree repository (sha candidate-commit) current-head-sha)
+                  (git-merge-tree repository (sha candidate-commit) current-head-sha)
                 (if merged-tree-sha
                     (let* ((rebased-commit
                              (make-instance
@@ -496,13 +510,13 @@ underlying (possibly rebased) tree in its CURRENT-ROOT, exactly as
                               :parents (list (make-instance 'git-commit :repository repository :sha current-head-sha))
                               :author (get-author transaction)
                               :committer (get-committer transaction)
-                              :timestamp (%unix-time-now)
+                              :timestamp (unix-time-now)
                               :message (get-message transaction)
                               :loaded? t))
                            (raced-again nil))
-                      (%persist-git-commit-object rebased-commit)
+                      (persist-git-commit-object rebased-commit)
                       (handler-case
-                          (git-update-ref repository branch-name (sha rebased-commit) :expected-sha current-head-sha)
+                          (git-update-ref! repository branch-name (sha rebased-commit) :expected-sha current-head-sha)
                         (concurrent-modification-error () (setf raced-again t)))
                       (unless raced-again
                         (return (finish rebased-commit))))
@@ -528,15 +542,15 @@ transaction): persist ROOT and its modified children (wrapping it in
 an ATOMIC-WRAPPER-TREE first if ROOT is not itself a GIT-TREE),
 create and persist a new GIT-COMMIT from TRANSACTION's cascaded
 defaults, and advance its branch to point at that commit -- via
-%COMMIT-GIT-TRANSACTION-NOW, or, if TRANSACTION's CONFLICT-RESOLUTION
-is :REBASE, via %COMMIT-GIT-TRANSACTION-WITH-REBASE instead.
+COMMIT-GIT-TRANSACTION-NOW!, or, if TRANSACTION's CONFLICT-RESOLUTION
+is :REBASE, via COMMIT-GIT-TRANSACTION-WITH-REBASE! instead.
 
 If TRANSACTION IS nested (GET-PARENT-TRANSACTION is non-NIL): no
 GIT-COMMIT is created and no branch is touched. Instead, ROOT simply
 becomes TRANSACTION's own GET-CURRENT-ROOT, which is then copied up
 into GET-PARENT-TRANSACTION's own GET-CURRENT-ROOT once RECEIVER's
 enclosing CALL-WITH-GIT-TRANSACTION call unwinds -- see
-%CALL-WITH-NESTED-GIT-TRANSACTION.
+CALL-WITH-NESTED-GIT-TRANSACTION.
 
 Signals an error if TRANSACTION is not :READ-WRITE or is no longer
 :ACTIVE. Immediately unwinds out of the enclosing
@@ -554,8 +568,8 @@ within RECEIVER never runs."
         (check-type root git-object)
         (setf (get-current-root transaction) root))
       (if (eq (get-conflict-resolution transaction) :rebase)
-          (%commit-git-transaction-with-rebase transaction root)
-          (%commit-git-transaction-now transaction root)))
+          (commit-git-transaction-with-rebase! transaction root)
+          (commit-git-transaction-now! transaction root)))
   (setf (get-status transaction) :committed)
   (throw 'git-transaction-exit transaction))
 
@@ -570,7 +584,7 @@ this call within RECEIVER never runs."
   (setf (get-status transaction) :aborted)
   (throw 'git-transaction-exit transaction))
 
-(defun %call-with-git-transaction-attempt
+(defun call-with-git-transaction-attempt
     (repository mode branch-name final-author final-committer final-message parents
      receiver conflict-resolution rebase-fallback)
   "Perform exactly one attempt at opening and (for :READ-WRITE)
@@ -578,11 +592,11 @@ committing a GIT-TRANSACTION against REPOSITORY: resolve BRANCH-NAME
 fresh (via RESOLVE-BRANCH) to its current head GIT-COMMIT, construct
 a transient GIT-TRANSACTION recording that head's SHA as its own
 EXPECTED-BRANCH-SHA, invoke RECEIVER, and, for a normal return from a
-:READ-WRITE transaction, commit it -- via %COMMIT-GIT-TRANSACTION-NOW,
+:READ-WRITE transaction, commit it -- via COMMIT-GIT-TRANSACTION-NOW!,
 or, if CONFLICT-RESOLUTION is :REBASE, via %COMMIT-GIT-TRANSACTION-
 WITH-REBASE instead (REBASE-FALLBACK is only ever consulted by that
 latter path). May signal CONCURRENT-MODIFICATION-ERROR (propagated up
-from UPDATE-BRANCH's/GIT-UPDATE-REF's own compare-and-swap check) if
+from UPDATE-BRANCH!'s/GIT-UPDATE-REF!'s own compare-and-swap check) if
 some other writer already advanced BRANCH-NAME between this attempt's
 read and its commit -- or, for :REBASE with REBASE-FALLBACK :ERROR, a
 genuine, unresolvable content conflict may instead surface as
@@ -596,7 +610,7 @@ MERGE-CONFLICT-ERROR. Returns the resulting GIT-TRANSACTION."
          ;; SERIALIZE-COMMIT (git-commit.lisp) therefore emits no
          ;; "parent" header line at all, producing a genuine orphan root
          ;; commit -- and EXPECTED-BRANCH-SHA below is likewise NIL,
-         ;; which UPDATE-BRANCH/GIT-UPDATE-REF (git-branch.lisp) pass to
+         ;; which UPDATE-BRANCH!/GIT-UPDATE-REF! (git-branch.lisp) pass to
          ;; `git update-ref` as an empty old-value argument, Git's own
          ;; convention (equivalent to the all-zeroes SHA) for "this ref
          ;; must not already exist" -- so a concurrently-created branch
@@ -621,28 +635,28 @@ MERGE-CONFLICT-ERROR. Returns the resulting GIT-TRANSACTION."
         (when (eq (get-status transaction) :active)
           (when (eq mode :read-write)
             (if (eq conflict-resolution :rebase)
-                (%commit-git-transaction-with-rebase transaction root)
-                (%commit-git-transaction-now transaction root)))
+                (commit-git-transaction-with-rebase! transaction root)
+                (commit-git-transaction-now! transaction root)))
           (setf (get-status transaction) :committed))))
     transaction))
 
-(defun %synthesize-head-commit-for-root (repository root)
+(defun synthesize-head-commit-for-root (repository root)
   "Return a transient GIT-COMMIT, never itself persisted, whose
 logical root -- as RESOLVE-COMMIT-ROOT would recover it -- is ROOT,
-or NIL if ROOT is NIL. Used by %CALL-WITH-NESTED-GIT-TRANSACTION to
+or NIL if ROOT is NIL. Used by CALL-WITH-NESTED-GIT-TRANSACTION to
 feed a nested GIT-TRANSACTION's inherited, possibly not-yet-committed
 GET-CURRENT-ROOT to RECEIVER as its HEAD-COMMIT argument, through
 the very same RESOLVE-COMMIT-ROOT path an outermost transaction's
 real head commit would use. ROOT is persisted first (via
-%PERSIST-GIT-OBJECT) and wrapped in an ATOMIC-WRAPPER-TREE (via
+PERSIST-GIT-OBJECT) and wrapped in an ATOMIC-WRAPPER-TREE (via
 WRAP-ATOMIC-COMMIT-ROOT) unless it is already a GIT-TREE, exactly as
-%COMMIT-GIT-TRANSACTION-NOW would for a real commit -- any Blob/Tree
+COMMIT-GIT-TRANSACTION-NOW! would for a real commit -- any Blob/Tree
 this writes to Git's object database is harmless: it becomes part of
 a real commit if some enclosing transaction eventually commits for
 real, or is simply orphaned Git garbage otherwise."
   (and root
        (progn
-         (%persist-git-object root)
+         (persist-git-object root)
          (let ((tree (if (typep root 'git-tree)
                           root
                           (wrap-atomic-commit-root repository root))))
@@ -656,7 +670,7 @@ real, or is simply orphaned Git garbage otherwise."
                           :message ""
                           :loaded? t)))))
 
-(defun %call-with-nested-git-transaction (parent mode receiver)
+(defun call-with-nested-git-transaction (parent mode receiver)
   "Perform a NESTED GIT-TRANSACTION, opened while PARENT (a
 GIT-TRANSACTION) is already active in *GIT-TRANSACTION*: construct a
 new GIT-TRANSACTION recording PARENT as its own GET-PARENT-
@@ -665,7 +679,7 @@ starting point (rather than resolving any branch fresh against Git),
 cascading PARENT's own AUTHOR/COMMITTER/MESSAGE/PARENTS/TARGET-
 BRANCH/CONFLICT-RESOLUTION, invoke RECEIVER with that new
 GIT-TRANSACTION and a synthetic HEAD-COMMIT reflecting its inherited
-root (see %SYNTHESIZE-HEAD-COMMIT-FOR-ROOT), and, if RECEIVER exits
+root (see SYNTHESIZE-HEAD-COMMIT-FOR-ROOT), and, if RECEIVER exits
 normally or via an explicit COMMIT-GIT-TRANSACTION for a :READ-WRITE
 transaction, copy the resulting root back up into PARENT's own
 GET-CURRENT-ROOT -- without ever creating a real GIT-COMMIT or
@@ -694,7 +708,7 @@ GIT-TRANSACTION."
     (let ((*git-transaction* transaction))
       (let ((root (catch 'git-transaction-exit
                     (funcall receiver transaction
-                             (%synthesize-head-commit-for-root repository (get-current-root transaction))))))
+                             (synthesize-head-commit-for-root repository (get-current-root transaction))))))
         (when (eq (get-status transaction) :active)
           (when (eq mode :read-write)
             (setf (get-current-root transaction) root))
@@ -744,7 +758,7 @@ unwinding out of RECEIVER), the enclosing transaction's state is left
 completely untouched, and any Blobs/Trees the nested transaction
 wrote along the way are simply orphaned Git garbage. Signals
 INVALID-ARGUMENT-ERROR if REPOSITORY does not match the enclosing
-transaction's own repository. See %CALL-WITH-NESTED-GIT-TRANSACTION.
+transaction's own repository. See CALL-WITH-NESTED-GIT-TRANSACTION.
 
 If RECEIVER returns normally, it must return a GIT-OBJECT
 representing the desired new root state -- a GIT-TREE (or
@@ -763,7 +777,7 @@ abnormal exit is honored instead and nothing further is written.
 CONFLICT-RESOLUTION controls what happens if some other writer
 already advanced (or created) BRANCH between this transaction's own
 read of its head commit and its own commit -- Git's 'Lost Update'
-problem -- detected via GIT-UPDATE-REF's own compare-and-swap check:
+problem -- detected via GIT-UPDATE-REF!'s own compare-and-swap check:
 * :ERROR (the default) lets CONCURRENT-MODIFICATION-ERROR propagate
   out of this call immediately; nothing is written.
 * :RETRY catches CONCURRENT-MODIFICATION-ERROR and re-attempts the
@@ -786,10 +800,10 @@ problem -- detected via GIT-UPDATE-REF's own compare-and-swap check:
   run concurrently, and this attempt should therefore never actually
   observe a real compare-and-swap conflict.
 * :REBASE, like :ERROR/:RETRY/:LOCK, still detects the race via
-  GIT-UPDATE-REF's own compare-and-swap check, but does not discard
+  GIT-UPDATE-REF!'s own compare-and-swap check, but does not discard
   RECEIVER's own computation: it replays TRANSACTION's already-
   computed candidate commit onto the branch's new HEAD via
-  %GIT-MERGE-TREE (Git's own native, working-tree-free three-way
+  GIT-MERGE-TREE (Git's own native, working-tree-free three-way
   content merge), retrying that replay against an ever-fresher HEAD
   for as long as other writers keep winning the race, and only
   re-invoking RECEIVER from scratch (like :RETRY) or signaling an
@@ -797,7 +811,7 @@ problem -- detected via GIT-UPDATE-REF's own compare-and-swap check:
   ever found -- see REBASE-FALLBACK.
 
 REBASE-FALLBACK is only consulted when CONFLICT-RESOLUTION is
-:REBASE, and only once %GIT-MERGE-TREE reports a genuine,
+:REBASE, and only once GIT-MERGE-TREE reports a genuine,
 unresolvable content conflict (as opposed to a merely-detected-but-
 still-mergeable race): :ERROR (the default) signals MERGE-CONFLICT-
 ERROR directly, so it propagates out of this call exactly as an
@@ -825,7 +839,7 @@ Returns TRANSACTION."
   ;; NESTING: if *GIT-TRANSACTION* is already bound to an active
   ;; enclosing GIT-TRANSACTION, this call opens a NESTED transaction
   ;; instead of a fresh outermost one -- see
-  ;; %CALL-WITH-NESTED-GIT-TRANSACTION's own docstring for the full
+  ;; CALL-WITH-NESTED-GIT-TRANSACTION's own docstring for the full
   ;; nesting semantics. BRANCH/AUTHOR/COMMITTER/MESSAGE/PARENTS/
   ;; CONFLICT-RESOLUTION are all ignored in that case (a nested
   ;; transaction always cascades those from its parent instead, since
@@ -837,7 +851,7 @@ Returns TRANSACTION."
                :format-control "A nested transaction's REPOSITORY (~S) must be the same as its enclosing transaction's (~S)."
                :format-arguments (list repository (get-git-repository parent))))
       (return-from call-with-git-transaction
-        (%call-with-nested-git-transaction parent mode receiver))))
+        (call-with-nested-git-transaction parent mode receiver))))
   (when (and (eq mode :read-write) (eq (get-mode repository) :read-only))
     (error 'transaction-state-error
            :format-control "Cannot open a :READ-WRITE transaction against a repository opened :READ-ONLY."))
@@ -850,7 +864,7 @@ Returns TRANSACTION."
              :format-control "BRANCH must be a non-empty string, not ~S."
              :format-arguments (list branch-name)))
     (flet ((attempt ()
-             (%call-with-git-transaction-attempt
+             (call-with-git-transaction-attempt
               repository mode branch-name final-author final-committer final-message
               parents receiver conflict-resolution rebase-fallback)))
       (ecase conflict-resolution

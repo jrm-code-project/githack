@@ -70,7 +70,7 @@ its source directory, not the source directory itself."
 (defun %resolve-persistent-object (value)
   "Return a live, fully-typed CLOS instance for VALUE -- a raw Lisp
 value as handed to a CALL-WITH-TRANSACTION receiver (see
-%TRANSACTION-READ-VALUE in transaction.lisp) or fetched via PHASH-GET
+TRANSACTION-READ-VALUE in transaction.lisp) or fetched via PHASH-GET
 from a catalog that was itself read this way. VALUE is NIL if no
 such object exists yet (an uninitialized \"database-example\"
 branch, or a bucket search that legitimately came up empty

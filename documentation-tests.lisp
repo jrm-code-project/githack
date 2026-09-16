@@ -19,7 +19,7 @@
 
 (in-suite documentation-suite)
 
-(defun %exported-symbol-roles (symbol)
+(defun exported-symbol-roles (symbol)
   "Return a list of the DOCUMENTATION doc-types (a subset of
 '(TYPE FUNCTION VARIABLE) -- the plain CL symbols DOCUMENTATION
 itself dispatches on, not keywords) applicable to SYMBOL, inferred
@@ -49,7 +49,7 @@ skipped."
   (let ((undocumented nil)
         (roleless nil))
     (do-external-symbols (symbol (find-package "GITHACK"))
-      (let ((roles (%exported-symbol-roles symbol)))
+      (let ((roles (exported-symbol-roles symbol)))
         (if (null roles)
             (push symbol roleless)
             (dolist (role roles)

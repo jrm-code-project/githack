@@ -35,6 +35,9 @@
                (:file "persistent-hash-table"
                 :depends-on ("git-object" "git-blob" "git-tree" "git-io" "atomic-wrapper"
                               "persistent-cons" "persistent-vector" "persistent-struct" "conditions" "package"))
+               (:file "query-engine"
+                :depends-on ("git-object" "git-tree" "persistent-vector" "persistent-wttree"
+                              "persistent-standard-class" "persistent-hash-table" "conditions" "package"))
                (:file "transaction-lock" :depends-on ("conditions" "package"))
                (:file "git-transaction"
                 :depends-on ("git-object" "git-tree" "git-commit" "git-branch" "git-repository"
@@ -46,6 +49,9 @@
                (:file "distributed-transaction"
                 :depends-on ("git-object" "git-blob" "git-tree" "git-commit" "git-branch" "git-repository"
                               "git-io" "git-transaction" "transaction" "distributed-transaction-context"
+                              "conditions" "package"))
+               (:file "githack-gc"
+                :depends-on ("distributed-transaction" "transaction-lock" "git-transaction"
                               "conditions" "package"))))
 
 (defsystem "githack/example"
@@ -54,6 +60,32 @@
   :components ((:module "examples"
                 :components ((:file "library")
                              (:file "bank")))))
+
+(defsystem "githack/kademlia"
+  :description "A Kademlia DHT for remote GitHack node discovery, using
+each node's own local GitHack database (a dedicated orphan branch) to
+persist its routing table."
+  :depends-on ("githack")
+  :components ((:module "kademlia"
+                :components ((:file "package")
+                             (:file "node-id" :depends-on ("package"))
+                             (:file "contact" :depends-on ("package" "node-id"))
+                             (:file "routing-table" :depends-on ("package" "node-id" "contact"))
+                             (:file "protocol" :depends-on ("package" "node-id" "contact"))
+                             (:file "persistence" :depends-on ("package" "contact" "routing-table"))
+                             (:file "node"
+                              :depends-on ("package" "node-id" "contact" "routing-table"
+                                           "protocol" "persistence"))))))
+
+(defsystem "githack/kademlia-test"
+  :description "FiveAM test suite for the GitHack Kademlia DHT."
+  :depends-on ("githack/kademlia" "fiveam")
+  :components ((:module "kademlia"
+                :components ((:file "kademlia-tests"))))
+  :perform (test-op (op c)
+             (declare (ignore op c))
+             (unless (uiop:symbol-call "GITHACK-KADEMLIA-TEST" "RUN-KADEMLIA-TESTS")
+               (error "GITHACK/KADEMLIA-TEST: one or more tests failed."))))
 
 (defsystem "githack/test"
   :description "FiveAM test suite for GitHack."
@@ -78,6 +110,8 @@
                (:file "persistent-standard-class-tests" :depends-on ("test-package" "test-helpers"))
                (:file "persistent-struct-tests" :depends-on ("test-package" "test-helpers"))
                (:file "persistent-hash-table-tests" :depends-on ("test-package" "test-helpers"))
+               (:file "query-engine-tests" :depends-on ("test-package" "test-helpers"))
+               (:file "concurrency-tests" :depends-on ("test-package" "test-helpers"))
                (:file "git-transaction-tests" :depends-on ("test-package" "test-helpers"))
                (:file "transaction-tests" :depends-on ("test-package" "test-helpers"))
                (:file "end-to-end-tests"
@@ -85,6 +119,8 @@
                              "persistent-struct-tests"))
                (:file "distributed-transaction-tests"
                 :depends-on ("test-package" "test-helpers" "git-transaction-tests" "transaction-tests"))
+               (:file "githack-gc-tests"
+                :depends-on ("test-package" "test-helpers" "distributed-transaction-tests"))
                (:file "distributed-nested-transaction-tests"
                 :depends-on ("test-package" "test-helpers" "distributed-transaction-tests" "end-to-end-tests")))
   :perform (test-op (op c)

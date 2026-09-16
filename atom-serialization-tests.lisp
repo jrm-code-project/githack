@@ -8,17 +8,17 @@
 
 (in-suite atom-serialization-suite)
 
-(defun %round-trips-p (atom)
+(defun round-trips-p (atom)
   "Return true iff serializing ATOM and then deserializing the
 result produces a value EQUALP to ATOM."
   (equalp atom (deserialize-atom (serialize-atom atom))))
 
 (test integers-round-trip
   "Small, negative, and bignum integers all round-trip exactly."
-  (is (%round-trips-p 0))
-  (is (%round-trips-p 42))
-  (is (%round-trips-p -7))
-  (is (%round-trips-p (expt 2 100))))
+  (is (round-trips-p 0))
+  (is (round-trips-p 42))
+  (is (round-trips-p -7))
+  (is (round-trips-p (expt 2 100))))
 
 (test keywords-round-trip
   "Keywords round-trip to the identical (EQ) keyword."
@@ -45,37 +45,37 @@ losing its identity."
 (test single-float-round-trips
   "Single-floats round-trip exactly and are distinguishable from
 double-floats in the wire format."
-  (is (%round-trips-p 1.0))
-  (is (%round-trips-p -0.5))
+  (is (round-trips-p 1.0))
+  (is (round-trips-p -0.5))
   (is (find #\f (map 'string #'code-char (serialize-atom 1.0)))))
 
 (test double-float-round-trips
   "Double-floats round-trip exactly and are distinguishable from
 single-floats in the wire format."
-  (is (%round-trips-p 1.0d0))
-  (is (%round-trips-p -0.5d0))
+  (is (round-trips-p 1.0d0))
+  (is (round-trips-p -0.5d0))
   (is (find #\d (map 'string #'code-char (serialize-atom 1.0d0)))))
 
 (test standard-character-round-trips
   "Standard characters round-trip exactly."
-  (is (%round-trips-p #\a))
-  (is (%round-trips-p #\Z))
-  (is (%round-trips-p #\Space)))
+  (is (round-trips-p #\a))
+  (is (round-trips-p #\Z))
+  (is (round-trips-p #\Space)))
 
 (test non-standard-character-round-trips
   "Non-standard characters (such as control characters or extended
 Unicode characters) round-trip exactly, using CHAR-NAME where one is
 available."
-  (is (%round-trips-p #\Tab))
-  (is (%round-trips-p (code-char 955))))
+  (is (round-trips-p #\Tab))
+  (is (round-trips-p (code-char 955))))
 
 (test string-round-trips
   "Strings, including ones containing quotes, backslashes, and
 non-ASCII characters, round-trip exactly."
-  (is (%round-trips-p ""))
-  (is (%round-trips-p "hello, world"))
-  (is (%round-trips-p "quotes \" and \\ backslashes"))
-  (is (%round-trips-p "unicode: \\u03bb")))
+  (is (round-trips-p ""))
+  (is (round-trips-p "hello, world"))
+  (is (round-trips-p "quotes \" and \\ backslashes"))
+  (is (round-trips-p "unicode: \\u03bb")))
 
 (test multiline-string-round-trips-with-literal-line-breaks
   "A string containing #\\Newline characters round-trips exactly,
@@ -89,7 +89,7 @@ single physical line."
   (let* ((original (format nil "alpha~%beta~%gamma"))
          (octets (serialize-atom original))
          (wire-text (sb-ext:octets-to-string octets :external-format :utf-8)))
-    (is (%round-trips-p original))
+    (is (round-trips-p original))
     ;; The raw wire bytes must contain three literal lines (two
     ;; newlines), not one.
     (is (= 2 (count #\Newline wire-text)))

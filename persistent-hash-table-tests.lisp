@@ -21,7 +21,7 @@ requested SIZE."
 (test phash-make-signals-error-for-non-positive-size
   "PHASH-MAKE rejects a SIZE that is not a positive integer, rather
 than deferring failure to a later division/mod error inside
-%PHASH-HASH."
+PHASH-HASH."
   (signals invalid-argument-error (phash-make :repository :dummy-repo :size 0))
   (signals invalid-argument-error (phash-make :repository :dummy-repo :size -1))
   (signals invalid-argument-error (phash-make :repository :dummy-repo :size "4")))

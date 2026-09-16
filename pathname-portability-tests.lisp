@@ -12,7 +12,7 @@
 ;;; REPOSITORY's NAME-PREFIX argument), inside a directory whose name
 ;;; contains a space or non-ASCII characters, exercised through the
 ;;; full GIT-HASH-OBJECT/GIT-CAT-FILE/GIT-TYPE round trip and through
-;;; GIT-SHOW-REF-SHA/GIT-UPDATE-REF (via RESOLVE-BRANCH/UPDATE-BRANCH
+;;; GIT-SHOW-REF-SHA/GIT-UPDATE-REF! (via RESOLVE-BRANCH/UPDATE-BRANCH!
 ;;; and a real CALL-WITH-REPOSITORY/WITH-TRANSACTION commit).
 ;;;
 ;;; UNC paths (\\server\share\...) are deliberately NOT covered here:
@@ -52,8 +52,8 @@ characters."
       (is (string= "blob" (git-type repository sha))))))
 
 (test resolve-branch-and-update-branch-round-trip-in-a-path-with-spaces
-  "GIT-SHOW-REF-SHA and GIT-UPDATE-REF (via RESOLVE-BRANCH and
-UPDATE-BRANCH) round-trip a real branch ref correctly when the
+  "GIT-SHOW-REF-SHA and GIT-UPDATE-REF! (via RESOLVE-BRANCH and
+UPDATE-BRANCH!) round-trip a real branch ref correctly when the
 repository's own --git-dir pathname contains spaces."
   (with-temporary-git-repository (repository "githack e2e with spaces ")
     ;; Build a genuinely valid commit -- an empty GIT-TREE persisted
@@ -80,7 +80,7 @@ repository's own --git-dir pathname contains spaces."
       (is (null (get-target (resolve-branch repository "main" :if-does-not-exist nil))))
       (let* ((stand-in-commit (make-instance 'git-commit :repository repository :sha commit-sha))
              (branch (make-instance 'git-branch :repository repository :name "main" :target stand-in-commit)))
-        (update-branch branch)
+        (update-branch! branch)
         (let ((resolved (resolve-branch repository "main")))
           (is (string= "main" (get-name resolved)))
           (is (string= commit-sha (sha (get-target resolved)))))))))
@@ -88,7 +88,7 @@ repository's own --git-dir pathname contains spaces."
 (test end-to-end-transaction-commits-successfully-in-a-path-with-non-ascii-characters
   "A full, real CALL-WITH-REPOSITORY/WITH-TRANSACTION read-write
 commit -- exercising GIT-HASH-OBJECT, GIT-CAT-FILE, GIT-SHOW-REF-SHA,
-and GIT-UPDATE-REF together -- succeeds when the repository's own
+and GIT-UPDATE-REF! together -- succeeds when the repository's own
 --git-dir pathname contains non-ASCII characters."
   (with-temporary-git-repository (repository-path "githack-e2e-\u00fcn\u00efc\u00f8d\u00e9-")
     (call-with-repository

@@ -11,7 +11,7 @@
 (defparameter +head-sha+ "1111111111111111111111111111111111111111"
   "An arbitrary, syntactically valid fake commit SHA standing in for a branch's current head in tests.")
 
-(defun %make-test-repository (mode)
+(defun make-test-repository (mode)
   "Return a fresh GIT-REPOSITORY (via CALL-WITH-REPOSITORY) rooted
 at +REPO-PATH+, defaulting to branch \"main\" and a fixed
 author/message, opened in MODE."
@@ -31,7 +31,7 @@ GIT-BRANCH targeting the (unloaded) commit +HEAD-SHA+."
 
 (test call-with-git-transaction-signals-error-for-read-write-on-read-only-repository
   "Opening a :READ-WRITE transaction against a :READ-ONLY repository signals an error."
-  (let ((repository (%make-test-repository :read-only)))
+  (let ((repository (make-test-repository :read-only)))
     (signals error
       (call-with-git-transaction repository :read-write
                                   :receiver (lambda (tx head)
@@ -48,7 +48,7 @@ GIT-REPOSITORY instance."
 (test call-with-git-transaction-signals-error-for-invalid-mode
   "CALL-WITH-GIT-TRANSACTION rejects a MODE other than :READ-ONLY or
 :READ-WRITE."
-  (let ((repository (%make-test-repository :read-only)))
+  (let ((repository (make-test-repository :read-only)))
     (signals invalid-argument-error
       (call-with-git-transaction repository :bogus-mode
                                   :receiver (lambda (tx head) (declare (ignore tx head)))))))
@@ -56,7 +56,7 @@ GIT-REPOSITORY instance."
 (test call-with-git-transaction-signals-error-for-non-callable-receiver
   "CALL-WITH-GIT-TRANSACTION rejects a RECEIVER that is not a
 callable function or fbound symbol."
-  (let ((repository (%make-test-repository :read-only)))
+  (let ((repository (make-test-repository :read-only)))
     (signals invalid-argument-error
       (call-with-git-transaction repository :read-only :receiver :not-a-function))))
 
@@ -78,7 +78,7 @@ non-empty string."
   "BRANCH/AUTHOR/COMMITTER/MESSAGE not explicitly supplied are
 inherited from the repository, and the branch's current head is
 resolved and passed to RECEIVER."
-  (let ((repository (%make-test-repository :read-write)))
+  (let ((repository (make-test-repository :read-write)))
     (with-fake-head-resolution ()
       (let (captured-transaction captured-head)
         (call-with-git-transaction repository :read-only
@@ -95,7 +95,7 @@ resolved and passed to RECEIVER."
 
 (test call-with-git-transaction-respects-explicit-overrides
   "Explicitly supplied BRANCH/AUTHOR/COMMITTER/MESSAGE/PARENTS override the repository's defaults."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (explicit-parents (list :a-fake-parent-commit)))
     (with-fake-git-show-ref-sha ((list (cons (cons +repo-path+ "other") +head-sha+)))
       (with-fake-git-type ((list (cons +head-sha+ "commit")))
@@ -118,7 +118,7 @@ resolved and passed to RECEIVER."
 (test abort-git-transaction-writes-nothing
   "ABORT-GIT-TRANSACTION discards the transaction: its status becomes
 :ABORTED, RESULT stays NIL, and nothing is written to Git."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (update-calls '())
         (ran-after-abort nil))
     (with-fake-head-resolution ()
@@ -139,7 +139,7 @@ resolved and passed to RECEIVER."
 (test error-in-receiver-writes-nothing
   "An error signaled inside RECEIVER propagates out of
 CALL-WITH-GIT-TRANSACTION and leaves nothing written."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (update-calls '()))
     (with-fake-head-resolution ()
       (with-fake-git-hash-object ()
@@ -153,7 +153,7 @@ CALL-WITH-GIT-TRANSACTION and leaves nothing written."
 
 (test call-with-git-transaction-read-only-normal-exit-writes-nothing
   "A :READ-ONLY transaction's normal exit never persists or advances the branch."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (update-calls '()))
     (with-fake-head-resolution ()
       (with-fake-git-hash-object ()
@@ -172,7 +172,7 @@ CALL-WITH-GIT-TRANSACTION and leaves nothing written."
 GIT-TREE is automatically committed: unpersisted children are
 persisted, a new GIT-COMMIT is created and persisted, and the branch
 is advanced to point at it."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (update-calls '()))
     (with-fake-head-resolution ()
       (with-fake-git-hash-object ()
@@ -211,7 +211,7 @@ in an ATOMIC-WRAPPER-TREE before being committed, since Git itself
 requires every commit to point at a tree; RESOLVE-COMMIT-ROOT then
 transparently retrieves the original blob back out again, making the
 wrapper invisible to application code."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (update-calls '()))
     (with-fake-head-resolution ()
       (with-fake-git-object-store ()
@@ -238,7 +238,7 @@ to the same values an explicit RECEIVER function passed to
 CALL-WITH-GIT-TRANSACTION would receive, cascades BRANCH/AUTHOR/
 COMMITTER/MESSAGE/PARENTS through unchanged, and honors the same
 auto-commit-on-normal-exit semantics."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (update-calls '()))
     (with-fake-head-resolution ()
       (with-fake-git-hash-object ()
@@ -263,7 +263,7 @@ auto-commit-on-normal-exit semantics."
 (test commit-git-transaction-commits-immediately-and-skips-later-receiver-code
   "COMMIT-GIT-TRANSACTION, called explicitly inside RECEIVER, commits
 immediately and unwinds so any subsequent code in RECEIVER never runs."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (update-calls '())
         (ran-after-commit nil))
     (with-fake-head-resolution ()
@@ -283,7 +283,7 @@ immediately and unwinds so any subsequent code in RECEIVER never runs."
 
 (test commit-git-transaction-signals-error-for-read-only-transaction
   "COMMIT-GIT-TRANSACTION signals an error if TRANSACTION is not :READ-WRITE."
-  (let ((repository (%make-test-repository :read-write)))
+  (let ((repository (make-test-repository :read-write)))
     (with-fake-head-resolution ()
       (signals error
         (call-with-git-transaction repository :read-only
@@ -302,7 +302,7 @@ dynamic extent of any CALL-WITH-GIT-TRANSACTION call."
 the exact GIT-TRANSACTION passed to RECEIVER, for the duration of
 the call, and *GIT-TRANSACTION* reverts to unbound once the call
 returns."
-  (let ((repository (%make-test-repository :read-write)))
+  (let ((repository (make-test-repository :read-write)))
     (with-fake-head-resolution ()
       (call-with-git-transaction repository :read-only
                                   :receiver (lambda (tx head)
@@ -314,7 +314,7 @@ returns."
 (test call-with-git-transaction-defaults-conflict-resolution-to-error
   "CALL-WITH-GIT-TRANSACTION's TRANSACTION defaults
 CONFLICT-RESOLUTION to :ERROR when not explicitly supplied."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (update-calls '()))
     (with-fake-head-resolution ()
       (with-fake-git-hash-object ()
@@ -331,7 +331,7 @@ CONFLICT-RESOLUTION to :ERROR when not explicitly supplied."
 failure on the branch update (some other writer already having
 advanced it) propagates a CONCURRENT-MODIFICATION-ERROR straight out
 of CALL-WITH-GIT-TRANSACTION, without any retry."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (attempts 0))
     (with-fake-head-resolution ()
       (with-fake-git-hash-object ()
@@ -347,9 +347,9 @@ of CALL-WITH-GIT-TRANSACTION, without any retry."
 (test call-with-git-transaction-retry-mode-retries-until-successful
   "With :CONFLICT-RESOLUTION :RETRY, a compare-and-swap failure is
 caught and the entire transaction re-attempted from scratch --
-re-invoking RECEIVER -- until GIT-UPDATE-REF's own compare-and-swap
+re-invoking RECEIVER -- until GIT-UPDATE-REF!'s own compare-and-swap
 check finally succeeds."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (attempts 0))
     (with-fake-head-resolution ()
       (with-fake-git-hash-object ()
@@ -370,7 +370,7 @@ check finally succeeds."
 (the common case), CALL-WITH-GIT-TRANSACTION commits exactly as
 :ERROR would -- the rebase machinery is never even invoked -- and
 GET-REBASE-FALLBACK defaults to :ERROR when not supplied."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (attempts 0)
         (update-calls '()))
     (with-fake-head-resolution ()
@@ -408,11 +408,11 @@ transaction has committed."
                                           :receiver (lambda (tx head)
                                                       (declare (ignore tx head))
                                                       (setf lock-held-during-receiver
-                                                            (and (probe-file (%transaction-lock-pathname git-dir)) t))
+                                                            (and (probe-file (transaction-lock-pathname git-dir)) t))
                                                       (make-instance 'git-tree :repository git-dir :entries '())))))
         (is (eq :committed (get-status transaction)))
         (is (eq t lock-held-during-receiver))
-        (is (not (probe-file (%transaction-lock-pathname git-dir))))))))
+        (is (not (probe-file (transaction-lock-pathname git-dir))))))))
 
 (test call-with-git-transaction-creates-an-orphan-root-commit-for-a-brand-new-branch
   "The very first CALL-WITH-GIT-TRANSACTION against a branch name
@@ -456,7 +456,7 @@ GET-RESULT stays NIL) or advances any branch, and on a normal exit
 copies its own final root up into the enclosing transaction's
 GET-CURRENT-ROOT, which alone is committed -- exactly once -- when
 the outermost transaction itself exits."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (update-calls '())
         captured-outer-transaction
         captured-nested-transaction)
@@ -493,7 +493,7 @@ error), the enclosing transaction's GET-CURRENT-ROOT is left
 completely untouched -- none of the nested transaction's own writes
 percolate up -- and the enclosing transaction's own eventual commit
 reflects only its pre-nesting state."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (update-calls '()))
     (with-fake-git-show-ref-sha ('())
       (with-fake-git-object-store ()
@@ -524,7 +524,7 @@ reflects only its pre-nesting state."
 (test call-with-git-transaction-signals-error-for-nested-read-write-inside-read-only-parent
   "A nested :READ-WRITE transaction cannot be opened from within an
 enclosing :READ-ONLY transaction's RECEIVER."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (update-calls '()))
     (with-fake-git-show-ref-sha ('())
       (with-fake-git-object-store ()
@@ -545,7 +545,7 @@ enclosing :READ-ONLY transaction's RECEIVER."
   "A nested transaction's REPOSITORY must match its enclosing
 transaction's own; otherwise CALL-WITH-GIT-TRANSACTION signals
 INVALID-ARGUMENT-ERROR before ever invoking RECEIVER."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (other-repository (call-with-repository "/fake/other-repo/"
                                                   :branch "main"
                                                   :author "The Boss <boss@githack.local>"
@@ -573,7 +573,7 @@ INVALID-ARGUMENT-ERROR before ever invoking RECEIVER."
 is bound to the nested GIT-TRANSACTION, not the enclosing one; once
 the nested call returns, *GIT-TRANSACTION* reverts to the enclosing
 transaction for the remainder of its own RECEIVER."
-  (let ((repository (%make-test-repository :read-write))
+  (let ((repository (make-test-repository :read-write))
         (update-calls '()))
     (with-fake-git-show-ref-sha ('())
       (with-fake-git-object-store ()

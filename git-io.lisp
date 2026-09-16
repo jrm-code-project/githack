@@ -8,7 +8,7 @@
 ;;; in its own file, loaded early, so that any proxy layer may depend
 ;;; on it without introducing a load-order cycle.
 
-(defun %unique-temporary-pathname (prefix)
+(defun unique-temporary-pathname (prefix)
   "Return a pathname, unlikely to collide with any other file, named
 PREFIX followed by random hexadecimal digits and a \".tmp\" type,
 within the system's default temporary directory."
@@ -29,12 +29,12 @@ within the system's default temporary directory."
 ;;; and fail fast with a clear diagnostic instead.
 
 (defvar *git-available-p* nil
-  "True once %ENSURE-GIT-AVAILABLE has confirmed a working `git`
+  "True once ENSURE-GIT-AVAILABLE has confirmed a working `git`
 executable is reachable on PATH in this Lisp image. Memoized so the
 check only ever shells out once per image (assuming success), not
 once per CALL-WITH-REPOSITORY call.")
 
-(defun %ensure-git-available ()
+(defun ensure-git-available ()
   "Run `git --version` once, memoized in *GIT-AVAILABLE-P*, to
 confirm a working `git` executable is reachable on PATH. Signals
 GIT-NOT-FOUND-ERROR, with a clear diagnostic message, if `git
@@ -85,7 +85,7 @@ call. Keyed by a list of the form (KIND REPOSITORY-NATIVE-NAMESTRING
 &optional TYPE), mapping to a UIOP process-info object. See
 %ENSURE-GIT-IO-SESSION and CLOSE-GIT-IO-SESSIONS.")
 
-(defun %git-io-session-key (kind repository &optional type)
+(defun git-io-session-key (kind repository &optional type)
   "Return the key under which a persistent Git subprocess for KIND
 (:BATCH-CHECK, :BATCH, or :HASH-OBJECT) against REPOSITORY (and, for
 :HASH-OBJECT, the object TYPE) is stored in *GIT-IO-SESSIONS*."
@@ -194,7 +194,7 @@ types within one `hash-object` invocation."
                         :input :stream :output :stream
                         :element-type '(unsigned-byte 8)))
 
-(defun %parse-batch-header (header sha)
+(defun parse-batch-header (header sha)
   "Parse HEADER -- a \"<sha> <type> <size>\" line read back from a
 `git cat-file --batch`/`--batch-check` session -- and return (VALUES
 TYPE SIZE). Signals MALFORMED-GIT-OBJECT-ERROR if HEADER instead
@@ -214,16 +214,16 @@ session already exited) or otherwise unparseable."
     (values (subseq header (1+ space1) space2)
             (parse-integer header :start (1+ space2)))))
 
-(defun %git-type-via-batch-check (repository sha)
+(defun git-type-via-batch-check (repository sha)
   "Look up SHA's object type using REPOSITORY's persistent `git
 cat-file --batch-check` session, starting one if necessary. See
 GIT-TYPE."
-  (let* ((key (%git-io-session-key :batch-check repository))
+  (let* ((key (git-io-session-key :batch-check repository))
          (process (%ensure-git-io-session key (lambda () (%start-git-batch-check-session repository)))))
     (%git-io-write-line-of-octets (uiop:process-info-input process) sha)
-    (%parse-batch-header (%git-io-read-line-of-octets (uiop:process-info-output process)) sha)))
+    (parse-batch-header (%git-io-read-line-of-octets (uiop:process-info-output process)) sha)))
 
-(defun %git-type-one-shot (repository sha)
+(defun git-type-one-shot (repository sha)
   "Shell out to a fresh `git cat-file -t <SHA>` process against
 REPOSITORY and return that Git object's type as a string. The
 one-shot fallback GIT-TYPE uses if its persistent session is
@@ -243,27 +243,27 @@ one-shot `git cat-file -t` subprocess if that session cannot be
 started or misbehaves. See INFLATE-GIT-PROXY, which dispatches on
 this to choose the concrete proxy subclass for SHA."
   (handler-case
-      (%git-type-via-batch-check repository sha)
+      (git-type-via-batch-check repository sha)
     (githack-error (condition) (error condition))
     (error ()
-      (%discard-git-io-session (%git-io-session-key :batch-check repository))
-      (%git-type-one-shot repository sha))))
+      (%discard-git-io-session (git-io-session-key :batch-check repository))
+      (git-type-one-shot repository sha))))
 
-(defun %git-cat-file-via-batch (repository sha)
+(defun git-cat-file-via-batch (repository sha)
   "Fetch SHA's raw object content using REPOSITORY's persistent `git
 cat-file --batch` session, starting one if necessary. See
 GIT-CAT-FILE."
-  (let* ((key (%git-io-session-key :batch repository))
+  (let* ((key (git-io-session-key :batch repository))
          (process (%ensure-git-io-session key (lambda () (%start-git-batch-session repository))))
          (output (uiop:process-info-output process)))
     (%git-io-write-line-of-octets (uiop:process-info-input process) sha)
-    (multiple-value-bind (type size) (%parse-batch-header (%git-io-read-line-of-octets output) sha)
+    (multiple-value-bind (type size) (parse-batch-header (%git-io-read-line-of-octets output) sha)
       (declare (ignore type))
       (prog1 (%git-io-read-exact-octets output size)
         ;; consume the single trailing newline `--batch` appends after the content
         (read-byte output nil nil)))))
 
-(defun %git-cat-file-one-shot (repository sha)
+(defun git-cat-file-one-shot (repository sha)
   "Shell out to a fresh `git cat-file <type> <SHA>` process against
 REPOSITORY (first determining SHA's own type via GIT-TYPE) and
 return that Git object's raw, already-decompressed content as a
@@ -280,7 +280,7 @@ arbitrary binary content -- such as a tree's packed binary SHA
 entries -- round-trips exactly, with no character-encoding or
 line-ending translation. The one-shot fallback GIT-CAT-FILE uses if
 its persistent session is unavailable or misbehaves."
-  (let ((path (%unique-temporary-pathname "githack-catfile-"))
+  (let ((path (unique-temporary-pathname "githack-catfile-"))
         (type (git-type repository sha)))
     (unwind-protect
          (progn
@@ -305,19 +305,19 @@ fallback below, which needs a separate GIT-TYPE call first);
 transparently falls back to a one-shot `git cat-file <type>`
 subprocess if that session cannot be started or misbehaves."
   (handler-case
-      (%git-cat-file-via-batch repository sha)
+      (git-cat-file-via-batch repository sha)
     (githack-error (condition) (error condition))
     (error ()
-      (%discard-git-io-session (%git-io-session-key :batch repository))
-      (%git-cat-file-one-shot repository sha))))
+      (%discard-git-io-session (git-io-session-key :batch repository))
+      (git-cat-file-one-shot repository sha))))
 
-(defun %git-hash-object-via-session (repository type path)
+(defun git-hash-object-via-session (repository type path)
   "Hash and write the file at PATH into REPOSITORY's object database
 as a new object of TYPE, using REPOSITORY/TYPE's persistent `git
 hash-object -w -t TYPE --stdin-paths` session (starting one if
 necessary), and return the resulting 40-character hexadecimal SHA.
 See GIT-HASH-OBJECT."
-  (let* ((key (%git-io-session-key :hash-object repository type))
+  (let* ((key (git-io-session-key :hash-object repository type))
          (process (%ensure-git-io-session key (lambda () (%start-git-hash-object-session repository type)))))
     (%git-io-write-line-of-octets (uiop:process-info-input process) (uiop:native-namestring path))
     (let ((sha (%git-io-read-line-of-octets (uiop:process-info-output process))))
@@ -325,7 +325,7 @@ See GIT-HASH-OBJECT."
         (error "Git hash-object session for type ~A produced no output (process may have exited)." type))
       (string-trim '(#\Space #\Return) sha))))
 
-(defun %git-hash-object-one-shot (repository type path)
+(defun git-hash-object-one-shot (repository type path)
   "Shell out to a fresh `git hash-object -w -t <TYPE> <PATH>` process
 against REPOSITORY and return the resulting 40-character hexadecimal
 SHA. The one-shot fallback GIT-HASH-OBJECT uses if its persistent
@@ -348,7 +348,7 @@ round-trip to a persistent, TYPE-specific `git hash-object
 --stdin-paths` session, transparently falling back to a one-shot
 `git hash-object` subprocess if that session cannot be started or
 misbehaves."
-  (let ((path (%unique-temporary-pathname "githack-object-")))
+  (let ((path (unique-temporary-pathname "githack-object-")))
     (unwind-protect
          (progn
            (with-open-file (stream path :direction :output
@@ -357,14 +357,14 @@ misbehaves."
                                          :if-does-not-exist :create)
              (write-sequence octets stream))
            (handler-case
-               (%git-hash-object-via-session repository type path)
+               (git-hash-object-via-session repository type path)
              (githack-error (condition) (error condition))
              (error ()
-               (%discard-git-io-session (%git-io-session-key :hash-object repository type))
-               (%git-hash-object-one-shot repository type path))))
+               (%discard-git-io-session (git-io-session-key :hash-object repository type))
+               (git-hash-object-one-shot repository type path))))
       (ignore-errors (delete-file path)))))
 
-(defun %git-merge-tree (repository commit-a commit-b)
+(defun git-merge-tree (repository commit-a commit-b)
   "Shell out to `git merge-tree --write-tree COMMIT-A COMMIT-B`
 against REPOSITORY (a pathname naming a Git directory): a real,
 working-tree-free three-way content merge of the two commits via
@@ -410,7 +410,7 @@ subprocess outlives the Lisp process that spawned it."
 ;;; same symbol across reloads.
 (pushnew '%close-all-git-io-sessions-at-exit sb-ext:*exit-hooks*)
 
-(defun %serialize-plist (plist)
+(defun serialize-plist (plist)
   "Encode PLIST (a property list of keyword keys and simple values --
 integers, strings, keywords, T, or NIL) as a UTF-8 octet vector,
 suitable for storing as the raw, human-readable content of a Git
@@ -425,8 +425,8 @@ familiar CL:T/CL:NIL rather than a same-named but distinct keyword."
         (*package* (find-package "COMMON-LISP")))
     (sb-ext:string-to-octets (prin1-to-string plist) :external-format :utf-8)))
 
-(defun %deserialize-plist (octets)
-  "Inverse of %SERIALIZE-PLIST: parse OCTETS -- the raw content of a
+(defun deserialize-plist (octets)
+  "Inverse of SERIALIZE-PLIST: parse OCTETS -- the raw content of a
 Git blob holding an encoded property list -- and return that plist."
   (let ((*read-eval* nil)
         (*package* (find-package "COMMON-LISP")))

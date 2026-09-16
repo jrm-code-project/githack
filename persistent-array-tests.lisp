@@ -19,7 +19,7 @@ deserialized."
     (is (null (persistent-array-dimensions array)))
     (is (string= "40000" (infer-git-mode array)))))
 
-(defun %make-persistent-vector-of (n)
+(defun make-persistent-vector-of (n)
   "Build an unpersisted PERSISTENT-VECTOR whose N index entries are
 GIT-BLOBs holding the integers 0..N-1, in order -- a convenience for
 PERSISTENT-ARRAY-TESTS below."
@@ -35,7 +35,7 @@ PERSISTENT-ARRAY-TESTS below."
 6-element PERSISTENT-VECTOR (via SERIALIZE-PERSISTENT-VECTOR),
 computes its own DIMENSIONS-implied volume, and produces the
 standard three tree entries in sorted order."
-  (let* ((data (%make-persistent-vector-of 6))
+  (let* ((data (make-persistent-vector-of 6))
          (array (make-instance 'persistent-array :repository :dummy-repo
                                                   :dimensions '(2 3)
                                                   :data data)))
@@ -52,7 +52,7 @@ standard three tree entries in sorted order."
   "SERIALIZE-PERSISTENT-ARRAY signals an error when DIMENSIONS has
 not been set (or is otherwise invalid)."
   (let ((array (make-instance 'persistent-array :repository :dummy-repo
-                                                 :data (%make-persistent-vector-of 1))))
+                                                 :data (make-persistent-vector-of 1))))
     (with-fake-git-hash-object ()
       (signals error (serialize-persistent-array array)))))
 
@@ -67,7 +67,7 @@ underlying persistent-vector) has not been set."
   "SERIALIZE-PERSISTENT-ARRAY signals an error when its DATA
 vector's actual element count does not match the volume implied by
 DIMENSIONS."
-  (let* ((data (%make-persistent-vector-of 5))
+  (let* ((data (make-persistent-vector-of 5))
          (array (make-instance 'persistent-array :repository :dummy-repo
                                                   :dimensions '(2 3)
                                                   :data data)))
@@ -88,7 +88,7 @@ markdown content as raw (non-atom-envelope) UTF-8 bytes. (Its
 \".meta\" blob's content is verified indirectly, by the round-trip
 test below via the exported DESERIALIZE-PERSISTENT-ARRAY.)"
   (let* ((calls '())
-         (data (%make-persistent-vector-of 1))
+         (data (make-persistent-vector-of 1))
          (array (make-instance 'persistent-array :repository :dummy-repo
                                                   :dimensions '(1)
                                                   :data data)))
@@ -103,7 +103,7 @@ SERIALIZE-PERSISTENT-ARRAY reconstructs an equivalent
 PERSISTENT-ARRAY with the same DIMENSIONS/ELEMENT-TYPE, and a hollow
 PERSISTENT-VECTOR proxy (not a generic GIT-TREE) for the same DATA
 SHA."
-  (let* ((data (%make-persistent-vector-of 4))
+  (let* ((data (make-persistent-vector-of 4))
          (original (make-instance 'persistent-array :repository :dummy-repo
                                                      :dimensions '(2 2)
                                                      :data data))
@@ -115,7 +115,7 @@ SHA."
            (readme-entry (cdr (assoc "README.md" (get-entries original) :test #'string=)))
            (data-sha (sha data))
            (meta-octets (third (find (sha meta-entry) calls
-                                      :key (lambda (call) (%fake-sha-for (second call) (third call)))
+                                      :key (lambda (call) (fake-sha-for (second call) (third call)))
                                       :test #'string=)))
            (hollow (make-instance 'persistent-array :repository :dummy-repo :sha (sha original))))
       (is (not (null meta-octets)))
@@ -148,7 +148,7 @@ correct flat row-major index for each set of subscripts, and
 delegates the actual fetch to the underlying PERSISTENT-VECTOR-REF,
 returning the same decoded values SERIALIZE-PERSISTENT-VECTOR
 originally stored at each flattened position."
-  (let* ((data (%make-persistent-vector-of 6))
+  (let* ((data (make-persistent-vector-of 6))
          (original (make-instance 'persistent-array :repository :dummy-repo
                                                      :dimensions '(2 3)
                                                      :data data)))
@@ -181,7 +181,7 @@ originally stored at each flattened position."
 (test persistent-array-ref-signals-for-wrong-subscript-count
   "PERSISTENT-ARRAY-REF signals an error when given the wrong number
 of subscripts for an already-loaded array."
-  (let* ((data (%make-persistent-vector-of 6))
+  (let* ((data (make-persistent-vector-of 6))
          (array (make-instance 'persistent-array :repository :dummy-repo
                                                   :dimensions '(2 3)
                                                   :data data
@@ -192,7 +192,7 @@ of subscripts for an already-loaded array."
 (test persistent-array-ref-signals-for-out-of-bounds-subscript
   "PERSISTENT-ARRAY-REF signals an error for any subscript out of
 bounds for its own dimension, for an already-loaded array."
-  (let* ((data (%make-persistent-vector-of 6))
+  (let* ((data (make-persistent-vector-of 6))
          (array (make-instance 'persistent-array :repository :dummy-repo
                                                   :dimensions '(2 3)
                                                   :data data

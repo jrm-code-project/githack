@@ -21,7 +21,7 @@
 ;;;                DOCUMENTATION string (its DEFCLASS's own per-slot
 ;;;                :DOCUMENTATION option), for a human Git user
 ;;;                browsing the object database -- see
-;;;                %PERSISTENT-OBJECT-README-CONTENT
+;;;                PERSISTENT-OBJECT-README-CONTENT
 ;;;   <initarg>    one further entry per non-transient initarg
 ;;;                recorded when the instance was created, named
 ;;;                with that initarg's keyword name, downcased, with
@@ -141,7 +141,7 @@ directly in \".meta\" (never as its own tree entry). Defaults to 0.")
 initarg/value pairs) most recently passed to
 (SETF SB-MOP:SLOT-VALUE-USING-CLASS)'s underlying SHARED-INITIALIZE,
 captured by the :AFTER method below. See
-%PERSISTENT-OBJECT-FILTERED-PAYLOAD, which filters this down to
+PERSISTENT-OBJECT-FILTERED-PAYLOAD, which filters this down to
 exactly the entries SERIALIZE-PERSISTENT-OBJECT writes to Git."))
   (:metaclass persistent-standard-class)
   (:documentation
@@ -161,7 +161,7 @@ its own tree entry). Defaults to 0.")
       "Return the full list of INITARGS (a plist of alternating
 initarg/value pairs) most recently passed to INSTANCE's (a
 PERSISTENT-OBJECT) (SETF SB-MOP:SLOT-VALUE-USING-CLASS)'s underlying
-SHARED-INITIALIZE. See %PERSISTENT-OBJECT-FILTERED-PAYLOAD, which
+SHARED-INITIALIZE. See PERSISTENT-OBJECT-FILTERED-PAYLOAD, which
 filters this down to exactly the entries SERIALIZE-PERSISTENT-OBJECT
 writes to Git.")
 
@@ -173,19 +173,19 @@ SERIALIZE-PERSISTENT-OBJECT to later filter and persist."
   (declare (ignore slot-names))
   (setf (%persistent-object-initializer-payload instance) initargs))
 
-(defun %persistent-object-initarg-filename (initarg)
+(defun persistent-object-initarg-filename (initarg)
   "Return the Git tree entry filename for INITARG (a keyword): its
 symbol name, downcased, with the leading colon dropped (e.g.
 :USERNAME becomes \"username\")."
   (string-downcase (symbol-name initarg)))
 
-(defun %persistent-object-filename-initarg (filename)
-  "Inverse of %PERSISTENT-OBJECT-INITARG-FILENAME: return the
+(defun persistent-object-filename-initarg (filename)
+  "Inverse of PERSISTENT-OBJECT-INITARG-FILENAME: return the
 keyword symbol FILENAME (a Git tree entry name) denotes (e.g.
 \"username\" becomes :USERNAME)."
   (intern (string-upcase filename) "KEYWORD"))
 
-(defun %persistent-object-effective-slots (instance)
+(defun persistent-object-effective-slots (instance)
   "Return the finalized list of (CLASS-OF INSTANCE)'s effective
 slot definitions, finalizing that class first via
 SB-MOP:FINALIZE-INHERITANCE if it is not already finalized."
@@ -194,7 +194,7 @@ SB-MOP:FINALIZE-INHERITANCE if it is not already finalized."
       (sb-mop:finalize-inheritance class))
     (sb-mop:class-slots class)))
 
-(defun %persistent-object-initarg-transient-p (instance initarg)
+(defun persistent-object-initarg-transient-p (instance initarg)
   "Return true if INITARG (a keyword) is among the initargs of some
 TRANSIENT effective slot of INSTANCE's class -- i.e. INITARG's data
 must never be persisted to Git. Returns NIL for any initarg that
@@ -204,56 +204,56 @@ semantics for an unrecognized initarg."
           (and (typep slot 'persistent-effective-slot-definition)
                (persistent-slot-definition-transient slot)
                (member initarg (sb-mop:slot-definition-initargs slot))))
-        (%persistent-object-effective-slots instance)))
+        (persistent-object-effective-slots instance)))
 
-(defun %persistent-object-filtered-payload (instance)
+(defun persistent-object-filtered-payload (instance)
   "Return INSTANCE's %INITIALIZER-PAYLOAD (a plist of alternating
 initarg/value pairs) as an alist of (INITARG . VALUE) conses,
 filtered to drop :VERSION (recorded separately, directly in
 \".meta\") and every INITARG mapping to a TRANSIENT slot (per
-%PERSISTENT-OBJECT-INITARG-TRANSIENT-P): exactly the entries
+PERSISTENT-OBJECT-INITARG-TRANSIENT-P): exactly the entries
 SERIALIZE-PERSISTENT-OBJECT writes to Git."
   (loop for (initarg value) on (%persistent-object-initializer-payload instance) by #'cddr
         unless (or (eq initarg :version)
-                   (%persistent-object-initarg-transient-p instance initarg))
+                   (persistent-object-initarg-transient-p instance initarg))
           collect (cons initarg value)))
 
-(defgeneric %persist-object-component-by-type (value)
+(defgeneric persist-object-component-by-type (value)
   (:documentation
    "Persist VALUE (a GIT-OBJECT known to already satisfy (TYPEP VALUE
 'GIT-OBJECT)) to Git's object database according to its concrete
-type. Broken out of %PERSIST-OBJECT-COMPONENT so this dispatch is its
+type. Broken out of PERSIST-OBJECT-COMPONENT so this dispatch is its
 own generic function, with one DEFMETHOD per concrete type in place
 of an ETYPECASE clause."))
 
-(defmethod %persist-object-component-by-type ((value persistent-object))
+(defmethod persist-object-component-by-type ((value persistent-object))
   (serialize-persistent-object value))
 
-(defmethod %persist-object-component-by-type ((value persistent-cons))
+(defmethod persist-object-component-by-type ((value persistent-cons))
   (serialize-persistent-cons value))
 
-(defmethod %persist-object-component-by-type ((value persistent-vector))
+(defmethod persist-object-component-by-type ((value persistent-vector))
   (serialize-persistent-vector value))
 
-(defmethod %persist-object-component-by-type ((value persistent-array))
+(defmethod persist-object-component-by-type ((value persistent-array))
   (serialize-persistent-array value))
 
-(defmethod %persist-object-component-by-type ((value persistent-wttree))
+(defmethod persist-object-component-by-type ((value persistent-wttree))
   (serialize-persistent-wttree-node value))
 
-(defmethod %persist-object-component-by-type ((value git-tree))
+(defmethod persist-object-component-by-type ((value git-tree))
   (unless (sha value)
     (setf (sha value)
           (git-hash-object (get-repository value) "tree" (serialize-tree value)))))
 
-(defmethod %persist-object-component-by-type ((value git-blob))
+(defmethod persist-object-component-by-type ((value git-blob))
   (unless (sha value)
     (setf (sha value)
           (git-hash-object (get-repository value) "blob"
                             (serialize-atom (get-payload value))))))
 
 ;;; PERSISTENT-CONS.LISP and PERSISTENT-VECTOR.LISP each define their
-;;; own analogous %PERSIST-CONS-COMPONENT-BY-TYPE/%PERSIST-VECTOR-
+;;; own analogous PERSIST-CONS-COMPONENT-BY-TYPE/%PERSIST-VECTOR-
 ;;; COMPONENT-BY-TYPE generic function, with methods for every
 ;;; concrete GIT-OBJECT type they knew about at the time -- but
 ;;; neither file can add a method specializing on PERSISTENT-OBJECT
@@ -270,16 +270,16 @@ of an ETYPECASE clause."))
 ;;; call, entirely skipping SERIALIZE-PERSISTENT-OBJECT and so never
 ;;; writing the \".meta\" entry DESERIALIZE-PERSISTENT-OBJECT requires
 ;;; to reconstruct the object's real class later.
-(defmethod %persist-cons-component-by-type ((git-object persistent-object))
+(defmethod persist-cons-component-by-type ((git-object persistent-object))
   (serialize-persistent-object git-object))
 
-(defmethod %persist-vector-component-by-type ((git-object persistent-object))
+(defmethod persist-vector-component-by-type ((git-object persistent-object))
   (serialize-persistent-object git-object))
 
-(defmethod %persist-wttree-component-by-type ((git-object persistent-object))
+(defmethod persist-wttree-component-by-type ((git-object persistent-object))
   (serialize-persistent-object git-object))
 
-(defun %persist-object-component (value repository)
+(defun persist-object-component (value repository)
   "Return the persisted GIT-OBJECT proxy for VALUE: if VALUE is
 already a GIT-OBJECT (a GIT-BLOB, plain GIT-TREE, PERSISTENT-CONS,
 PERSISTENT-VECTOR, PERSISTENT-ARRAY, or nested PERSISTENT-OBJECT),
@@ -288,11 +288,11 @@ its own children) if it does not already; otherwise, treat VALUE as
 a raw Lisp atom and freshly wrap and persist it as a new GIT-BLOB via
 SERIALIZE-ATOM. Mirrors PERSISTENT-CONS/PERSISTENT-VECTOR/PERSISTENT-
 ARRAY's own local %PERSIST-*-COMPONENT helpers, kept separate from
-GIT-TRANSACTION's shared %PERSIST-GIT-OBJECT so as not to introduce
+GIT-TRANSACTION's shared PERSIST-GIT-OBJECT so as not to introduce
 a load-order cycle."
   (if (typep value 'git-object)
       (progn
-        (%persist-object-component-by-type value)
+        (persist-object-component-by-type value)
         value)
       (make-instance 'git-blob :repository repository
                                 :sha (git-hash-object repository "blob" (serialize-atom value))
@@ -308,11 +308,11 @@ its own (i.e. (DOCUMENTATION (CLASS-OF INSTANCE) T) returns NIL).")
 (defparameter +persistent-object-no-slot-documentation-readme+
   "(No documentation string was provided for this slot.)"
   "The fixed README.md bullet-list body content
-%PERSISTENT-OBJECT-README-CONTENT writes for a non-TRANSIENT slot
+PERSISTENT-OBJECT-README-CONTENT writes for a non-TRANSIENT slot
 with no DOCUMENTATION string of its own (i.e. (DOCUMENTATION
 SLOT-DEFINITION T) returns NIL).")
 
-(defun %persistent-object-readme-slot-lines (instance)
+(defun persistent-object-readme-slot-lines (instance)
   "Return a single string, one Markdown bullet-list line per
 non-TRANSIENT effective slot of INSTANCE's own class (in
 SB-MOP:CLASS-SLOTS order), each reading \"  * **<slot-name>**:
@@ -324,7 +324,7 @@ slots (internal PERSISTENT-OBJECT bookkeeping, never serialized) are
 entirely excluded. Returns the empty string if INSTANCE's class has
 no non-TRANSIENT slots at all."
   (with-output-to-string (stream)
-    (dolist (slot (%persistent-object-effective-slots instance))
+    (dolist (slot (persistent-object-effective-slots instance))
       (unless (and (typep slot 'persistent-effective-slot-definition)
                    (persistent-slot-definition-transient slot))
         (format stream "  * **~(~A~)**: ~A~%"
@@ -332,7 +332,7 @@ no non-TRANSIENT slots at all."
                 (or (documentation slot t)
                     +persistent-object-no-slot-documentation-readme+))))))
 
-(defun %persistent-object-readme-content (instance)
+(defun persistent-object-readme-content (instance)
   "Return the UTF-8-encoded octet vector SERIALIZE-PERSISTENT-OBJECT
 writes as INSTANCE's own \"README.md\" entry: a Markdown \"# \"
 title line naming INSTANCE's own class (via CLASS-NAME), followed by
@@ -341,11 +341,11 @@ DEFCLASS's own :DOCUMENTATION option -- or, if that class has none,
 +PERSISTENT-OBJECT-NO-DOCUMENTATION-README+, and then, if INSTANCE's
 class has any non-TRANSIENT slots, a further blank line, a \"##
 Slots\" heading, another blank line, and a Markdown bullet-list line
-per such slot (via %PERSISTENT-OBJECT-README-SLOT-LINES)."
+per such slot (via PERSISTENT-OBJECT-README-SLOT-LINES)."
   (let* ((class-symbol (class-name (class-of instance)))
          (body (or (documentation (class-of instance) t)
                    +persistent-object-no-documentation-readme+))
-         (slot-lines (%persistent-object-readme-slot-lines instance)))
+         (slot-lines (persistent-object-readme-slot-lines instance)))
     (sb-ext:string-to-octets
      (if (zerop (length slot-lines))
          (format nil "# ~A~%~%~A~%" class-symbol body)
@@ -358,11 +358,11 @@ per such slot (via %PERSISTENT-OBJECT-README-SLOT-LINES)."
 \"PACKAGE-NAME\" :VERSION n), a \"README.md\" entry holding a
 Markdown title naming INSTANCE's own class followed by that class's
 own DOCUMENTATION string and a bullet list of its non-TRANSIENT
-slots (via %PERSISTENT-OBJECT-README-CONTENT), and one further entry
+slots (via PERSISTENT-OBJECT-README-CONTENT), and one further entry
 per non-transient initarg recorded in INSTANCE's %INITIALIZER-
-PAYLOAD (via %PERSISTENT-OBJECT-FILTERED-PAYLOAD) -- filename the
+PAYLOAD (via PERSISTENT-OBJECT-FILTERED-PAYLOAD) -- filename the
 initarg's own downcased name, each a proxy pointer to that initarg's
-own (recursively persisted, via %PERSIST-OBJECT-COMPONENT) GIT-OBJECT
+own (recursively persisted, via PERSIST-OBJECT-COMPONENT) GIT-OBJECT
 value. INSTANCE's own transient slots (VERSION, and any other slot
 marked :TRANSIENT T) are entirely excluded, appearing nowhere in the
 Git tree. Returns INSTANCE's own SHA, doing nothing further if
@@ -372,16 +372,16 @@ INSTANCE already has one."
              (class-symbol (class-name (class-of instance)))
              (class-name (symbol-name class-symbol))
              (class-package (package-name (symbol-package class-symbol)))
-             (payload (%persistent-object-filtered-payload instance))
+             (payload (persistent-object-filtered-payload instance))
              (tree-entries
                (mapcar (lambda (pair)
-                         (cons (%persistent-object-initarg-filename (car pair))
-                               (%persist-object-component (cdr pair) repository)))
+                         (cons (persistent-object-initarg-filename (car pair))
+                               (persist-object-component (cdr pair) repository)))
                        payload))
              (meta-blob (make-instance 'git-blob :repository repository
                                         :sha (git-hash-object
                                               repository "blob"
-                                              (%serialize-plist
+                                              (serialize-plist
                                                (list :tag :clos
                                                      :class class-name
                                                     :package class-package
@@ -389,7 +389,7 @@ INSTANCE already has one."
              (readme-blob (make-instance 'git-blob :repository repository
                                           :sha (git-hash-object
                                                 repository "blob"
-                                                (%persistent-object-readme-content instance)))))
+                                                (persistent-object-readme-content instance)))))
         (setf (get-entries instance) (list* (cons ".meta" meta-blob)
                                              (cons "README.md" readme-blob)
                                              tree-entries))
@@ -421,7 +421,7 @@ or if its \".meta\" blob's :TAG is not :CLOS."
     (unless meta-entry
       (error 'malformed-git-object-error
              :format-control "Malformed persistent object tree: missing \".meta\" entry."))
-    (let ((meta (%deserialize-plist (git-cat-file repository (sha (cdr meta-entry))))))
+    (let ((meta (deserialize-plist (git-cat-file repository (sha (cdr meta-entry))))))
       (unless (eq (getf meta :tag) :clos)
         (error 'malformed-git-object-error
                :format-control "Malformed persistent object .meta blob: ~S."
@@ -431,26 +431,26 @@ or if its \".meta\" blob's :TAG is not :CLOS."
              (initargs
                (loop for entry in entries
                      unless (member (car entry) '(".meta" "README.md") :test #'string=)
-                       append (list (%persistent-object-filename-initarg (car entry)) (cdr entry))))
+                       append (list (persistent-object-filename-initarg (car entry)) (cdr entry))))
              (instance (apply #'make-instance class-name :version version :repository repository initargs)))
         (setf (sha instance) (sha tree))
         (setf (get-entries instance) entries)
         (setf (get-loaded? instance) t)
         instance))))
 
-(defun %persistent-tree-tag (repository tree)
+(defun persistent-tree-tag (repository tree)
   "Return the :TAG keyword recorded in TREE's own \".meta\" entry
 (:CLOS, :CONS, :VECTOR, :ARRAY, or :ATOMIC-WRAPPER -- see
 SERIALIZE-PERSISTENT-OBJECT/-CONS/-VECTOR/-ARRAY and WRAP-ATOMIC-
-COMMIT-ROOT), fetched via GIT-CAT-FILE and %DESERIALIZE-PLIST from
+COMMIT-ROOT), fetched via GIT-CAT-FILE and DESERIALIZE-PLIST from
 TREE's \".meta\" entry (TREE's own ENTRIES must already be loaded);
 or NIL for any ordinary, untagged GIT-TREE with no \".meta\" entry
 at all."
   (let ((meta-entry (assoc ".meta" (get-entries tree) :test #'string=)))
     (and meta-entry
-         (getf (%deserialize-plist (git-cat-file repository (sha (cdr meta-entry)))) :tag))))
+         (getf (deserialize-plist (git-cat-file repository (sha (cdr meta-entry)))) :tag))))
 
-(defun %redispatch-persistent-tree (tree)
+(defun redispatch-persistent-tree (tree)
   "Return the correctly, specifically typed proxy for TREE (a plain,
 not-yet-more-specifically-typed GIT-TREE, with its own ENTRIES
 already loaded): a freshly DESERIALIZE-PERSISTENT-OBJECT'd CLOS
@@ -467,7 +467,7 @@ any persistent-object slot (e.g. a PERSISTENT-HASH-TABLE's own
 BUCKETS slot) whose stored value is one of these compound types."
   (let* ((repository (get-repository tree))
          (sha (sha tree))
-         (tag (%persistent-tree-tag repository tree)))
+         (tag (persistent-tree-tag repository tree)))
     (case tag
       (:clos (deserialize-persistent-object tree))
       ((:cons :vector :array :wttree)
@@ -487,12 +487,12 @@ BUCKETS slot) whose stored value is one of these compound types."
            (:wttree (deserialize-persistent-wttree-node hollow tree-octets meta-octets)))))
       (t tree))))
 
-(defun %resolve-persistent-slot-value (value)
+(defun resolve-persistent-slot-value (value)
   "Return the real Lisp data VALUE (a slot's raw stored value)
 represents: unchanged, if VALUE is not a GIT-OBJECT proxy at all;
 its decoded PAYLOAD, ensuring VALUE is first loaded via
 %ENSURE-BLOB-LOADED, if VALUE is a GIT-BLOB; the result of
-%REDISPATCH-PERSISTENT-TREE, if VALUE is a plain (not yet more
+REDISPATCH-PERSISTENT-TREE, if VALUE is a plain (not yet more
 specifically typed) GIT-TREE proxy (retyped into a PERSISTENT-CONS/
 -VECTOR/-ARRAY/-OBJECT if its own \".meta\" entry says so, or left
 unchanged otherwise); or VALUE itself, unchanged, for any other kind
@@ -506,7 +506,7 @@ correct, lazily self-loading proxy for their own compound data."
                                persistent-wttree persistent-object))))
      (let ((repository (get-repository value)))
        (%ensure-tree-entries-loaded repository value))
-     (%redispatch-persistent-tree value))
+     (redispatch-persistent-tree value))
     (t value)))
 
 (defmethod sb-mop:slot-value-using-class
@@ -514,13 +514,13 @@ correct, lazily self-loading proxy for their own compound data."
   "Transparently resolve and cache any GIT-OBJECT proxy held raw in
 this slot: if the raw stored value is a GIT-OBJECT, replace it (via
 (SETF SB-MOP:SLOT-VALUE-USING-CLASS)) with its fully resolved Lisp
-value (per %RESOLVE-PERSISTENT-SLOT-VALUE) and return that resolved
+value (per RESOLVE-PERSISTENT-SLOT-VALUE) and return that resolved
 value; otherwise return the raw value unchanged. To the end user,
 (SLOT-VALUE OBJ 'HEAVY-DATA) immediately returns the real Lisp data,
 never a proxy."
   (let ((value (call-next-method)))
     (if (typep value 'git-object)
-        (let ((resolved (%resolve-persistent-slot-value value)))
+        (let ((resolved (resolve-persistent-slot-value value)))
           (setf (sb-mop:slot-value-using-class class instance slot) resolved)
           resolved)
         value)))
@@ -545,7 +545,7 @@ also list repositories INSTANCE was merely read from, not just ones
 actually mutated. This is deliberately NOT the mechanism 2PC
 participation itself is decided by: see PENDING-WRITES
 \(distributed-transaction-context.lisp) and GIT-TRANSACTION.LISP's
-%ENLIST-TRANSACTION-WRITE!, which enlist a repository only once its
+ENLIST-TRANSACTION-WRITE!, which enlist a repository only once its
 own GIT-TRANSACTION genuinely commits, and which alone carry enough
 information (branch, author, committer, message) to actually
 2PC-commit with -- a bare repository pathname does not."

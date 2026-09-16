@@ -23,14 +23,14 @@
 of its own -- only a single shared TIMESTAMP -- so every commit this
 layer produces is recorded as UTC.")
 
-(defun %commit-signature-line (header signature timestamp)
+(defun commit-signature-line (header signature timestamp)
   "Return one Git commit header line: HEADER (\"author\" or
 \"committer\"), a space, SIGNATURE (e.g. \"The Boss
 <boss@githack.local>\"), TIMESTAMP printed as a decimal Unix epoch
 integer, and the default timezone offset."
   (format nil "~A ~A ~D ~A" header signature timestamp +default-commit-timezone-offset+))
 
-(defun %commit-object-sha (git-object description)
+(defun commit-object-sha (git-object description)
   "Return GIT-OBJECT's 40-character hexadecimal SHA, signaling an
 error mentioning DESCRIPTION if GIT-OBJECT has not yet been
 persisted (and so has no SHA)."
@@ -44,20 +44,20 @@ persisted (and so has no SHA)."
 commit object: a \"tree\" line, zero or more \"parent\" lines, an
 \"author\" line, a \"committer\" line, a blank line, and finally the
 raw MESSAGE, in that order."
-  (let* ((tree-sha (%commit-object-sha (get-tree commit) "TREE"))
+  (let* ((tree-sha (commit-object-sha (get-tree commit) "TREE"))
          (parent-shas
-           (mapcar (lambda (parent) (%commit-object-sha parent "PARENT"))
+           (mapcar (lambda (parent) (commit-object-sha parent "PARENT"))
                    (get-parents commit)))
          (timestamp (get-timestamp commit))
          (header-lines
            (append (list (format nil "tree ~A" tree-sha))
                    (mapcar (lambda (sha) (format nil "parent ~A" sha)) parent-shas)
-                   (list (%commit-signature-line "author" (get-author commit) timestamp)
-                         (%commit-signature-line "committer" (get-committer commit) timestamp)
+                   (list (commit-signature-line "author" (get-author commit) timestamp)
+                         (commit-signature-line "committer" (get-committer commit) timestamp)
                          ""))))
     (format nil "~{~A~%~}~A" header-lines (get-message commit))))
 
-(defun %split-commit-header-and-message (text)
+(defun split-commit-header-and-message (text)
   "Split TEXT -- the raw text of a Git commit object -- into two
 values: a list of its header lines (\"tree\", \"parent\", \"author\",
 \"committer\", and any others Git may add, such as \"gpgsig\") up
@@ -76,7 +76,7 @@ TEXT following that blank line's own trailing newline."
                  (push line lines)
                  (setf start next))))))
 
-(defun %parse-commit-header-line (prefix line)
+(defun parse-commit-header-line (prefix line)
   "If LINE begins with PREFIX followed by a single space, return the
 remainder of LINE following that space; otherwise return NIL."
   (let ((prefix-length (1+ (length prefix))))
@@ -85,9 +85,9 @@ remainder of LINE following that space; otherwise return NIL."
                (char= #\Space (char line (length prefix))))
       (subseq line prefix-length))))
 
-(defun %parse-commit-signature-line (remainder)
+(defun parse-commit-signature-line (remainder)
   "Parse REMAINDER -- the text following an \"author\"/\"committer\"
-header's name, as returned by %PARSE-COMMIT-HEADER-LINE -- into two
+header's name, as returned by PARSE-COMMIT-HEADER-LINE -- into two
 values: the signature string (e.g. \"The Boss
 <boss@githack.local>\") and its integer Unix epoch timestamp,
 discarding the trailing timezone offset."
@@ -106,7 +106,7 @@ COMMIT's TREE, PARENTS, AUTHOR, COMMITTER, TIMESTAMP, and MESSAGE
 slots from it, using INFLATE-GIT-PROXY (bound to COMMIT's own
 REPOSITORY) to lazily construct the TREE and PARENTS proxies. Marks
 COMMIT loaded and returns it."
-  (multiple-value-bind (header-lines message) (%split-commit-header-and-message text)
+  (multiple-value-bind (header-lines message) (split-commit-header-and-message text)
     (let ((repository (get-repository commit))
           (tree-sha nil)
           (parent-shas '())
@@ -115,13 +115,13 @@ COMMIT loaded and returns it."
       (dolist (line header-lines)
         (let (remainder)
           (cond
-            ((setf remainder (%parse-commit-header-line "tree" line))
+            ((setf remainder (parse-commit-header-line "tree" line))
              (setf tree-sha remainder))
-            ((setf remainder (%parse-commit-header-line "parent" line))
+            ((setf remainder (parse-commit-header-line "parent" line))
              (push remainder parent-shas))
-            ((setf remainder (%parse-commit-header-line "author" line))
+            ((setf remainder (parse-commit-header-line "author" line))
              (setf author-remainder remainder))
-            ((setf remainder (%parse-commit-header-line "committer" line))
+            ((setf remainder (parse-commit-header-line "committer" line))
              (setf committer-remainder remainder)))))
       (unless tree-sha
         (error 'malformed-git-object-error
@@ -133,8 +133,8 @@ COMMIT loaded and returns it."
         (error 'malformed-git-object-error
                :format-control "Malformed Git commit object: missing \"committer\" header."))
       (setf parent-shas (nreverse parent-shas))
-      (multiple-value-bind (author timestamp) (%parse-commit-signature-line author-remainder)
-        (multiple-value-bind (committer committer-timestamp) (%parse-commit-signature-line committer-remainder)
+      (multiple-value-bind (author timestamp) (parse-commit-signature-line author-remainder)
+        (multiple-value-bind (committer committer-timestamp) (parse-commit-signature-line committer-remainder)
           (declare (ignore committer-timestamp))
           (setf (get-tree commit) (inflate-git-proxy repository tree-sha))
           (setf (get-parents commit)
@@ -143,5 +143,5 @@ COMMIT loaded and returns it."
           (setf (get-committer commit) committer)
           (setf (get-timestamp commit) timestamp)
           (setf (get-message commit) message)
-          (setf (get-loaded? commit) t)
+          (%publish-loaded! commit)
           commit)))))

@@ -201,3 +201,106 @@ object type as reported by GIT-TYPE."
                  :format-arguments (list type sha))))
      :sha sha
      :repository repository)))
+
+;;; THREAD SAFETY: multiple threads in the same Lisp image may
+;;; safely share and concurrently navigate a single, already-
+;;; constructed GIT-OBJECT/PERSISTENT-OBJECT proxy graph -- e.g. a
+;;; GIT-BRANCH's own TARGET commit, handed to several worker threads
+;;; at once -- via the small set of lightweight, mostly lock-free
+;;; primitives below, used throughout every %ENSURE-*-LOADED lazy-
+;;; load function in this codebase (atomic-wrapper.lisp,
+;;; persistent-cons.lisp, persistent-vector.lisp, persistent-
+;;; array.lisp, persistent-wttree.lisp) and every per-element cache
+;;; (chief among them, PERSISTENT-VECTOR-REF's own index cache): see
+;;; %PUBLISH-LOADED!, %CAS-INSTALL-ONCE, and WITH-OBJECT-LOAD-LOCK.
+;;; Concurrent WRITERS (distinct GIT-TRANSACTIONs producing brand-new
+;;; proxy instances) were already safe, by construction, since
+;;; GitHack's persistent data model never mutates an already-
+;;; persisted proxy in place; this closes the remaining gap of
+;;; multiple threads racing to lazily populate one still-hollow proxy
+;;; they all happen to share. See git-transaction.lisp's own
+;;; CONCURRENCY POLICY comment for the bigger picture.
+
+(defparameter +load-stripe-mutex-count+ 32
+  "The number of mutexes in +LOAD-STRIPE-MUTEXES+ -- a small, fixed
+pool, rather than one mutex per GIT-OBJECT instance, so that
+acquiring a load lock never itself allocates or grows any shared
+table under contention. Any two distinct objects whose own SXHASH
+happens to fall in the same stripe merely serialize against each
+other during their own (rare, one-time) first concurrent load; this
+never affects correctness, only how widely that already-rare event's
+own contention is shared.")
+
+(defparameter +load-stripe-mutexes+
+  (coerce (loop repeat +load-stripe-mutex-count+
+                collect (sb-thread:make-mutex :name "githack-object-load-stripe"))
+          'simple-vector)
+  "A small, fixed pool of SB-THREAD:MUTEX objects, indexed via
+%LOAD-STRIPE-MUTEX, used by WITH-OBJECT-LOAD-LOCK to serialize only
+the rare event of two threads racing to perform a *retyping* lazy
+load (CL:CHANGE-CLASS, as %ENSURE-PERSISTENT-CONS-LOADED and
+%ENSURE-PERSISTENT-WTTREE-NODE-LOADED both perform) of the exact same
+GIT-OBJECT instance at once -- CHANGE-CLASS is not documented safe to
+invoke concurrently on one instance from two threads, unlike this
+file's other, plain-data lazy loads (which merely redo idempotent,
+side-effect-free Git fetch/decode work if raced, and so need no
+mutex at all -- see %PUBLISH-LOADED!).")
+
+(defun %load-stripe-mutex (object)
+  "Return one of +LOAD-STRIPE-MUTEXES+'s own fixed pool of mutexes,
+chosen deterministically from OBJECT's own SXHASH (guaranteed stable
+for OBJECT's whole lifetime, per the CL spec, even under a moving
+GC), for WITH-OBJECT-LOAD-LOCK to acquire while serializing a
+possible CL:CHANGE-CLASS lazy load of OBJECT."
+  (svref +load-stripe-mutexes+ (mod (sxhash object) +load-stripe-mutex-count+)))
+
+(defmacro with-object-load-lock ((object) &body body)
+  "Evaluate BODY with a lock held on one of +LOAD-STRIPE-MUTEXES+'s
+own fixed pool of mutexes (chosen deterministically from OBJECT's
+own SXHASH, via %LOAD-STRIPE-MUTEX), serializing BODY against any
+other thread concurrently trying to lazily load (in particular,
+CL:CHANGE-CLASS) OBJECT itself, or any other object that happens to
+hash to the same stripe. Callers should still check GET-LOADED? (or
+their own analogous already-loaded condition) *before* entering this
+macro at all, so the common, already-loaded case never even attempts
+to acquire a lock -- see, e.g., %ENSURE-PERSISTENT-CONS-LOADED's own
+outer (UNLESS (AND (TYPEP CONS 'PERSISTENT-CONS) (GET-LOADED? CONS))
+...) guard."
+  `(sb-thread:with-mutex ((%load-stripe-mutex ,object))
+     ,@body))
+
+(defun %publish-loaded! (object)
+  "Atomically transition OBJECT's (a GIT-OBJECT, or any other CLOS
+instance with a LOADED? slot, e.g. a PERSISTENT-OBJECT) own LOADED?
+slot from NIL to T, via SB-EXT:COMPARE-AND-SWAP. Every %ENSURE-*-
+LOADED lazy-load function in this codebase calls this only as its
+own very last step, after every other slot it populates (ENTRIES,
+PAYLOAD, TREE/PARENTS/AUTHOR/COMMITTER/..., etc.) has already been
+SETF: SBCL implements COMPARE-AND-SWAP as a full memory barrier, so
+any other thread that subsequently observes GET-LOADED? true for
+this same OBJECT -- including one racing to lazily load it at the
+very same time, and so redundantly redoing the identical, side-
+effect-free Git fetch/decode work itself -- is guaranteed to see
+every one of those other slots' own values too, never a half-
+populated OBJECT. Harmless (simply a no-op failed CAS) if another
+thread already won this same race first. Always returns OBJECT."
+  (sb-ext:compare-and-swap (slot-value object 'loaded?) nil t)
+  object)
+
+(defmacro %cas-install-once (place old new)
+  "Attempt to atomically install NEW into PLACE (any SETF-able,
+SB-EXT:COMPARE-AND-SWAP-capable place, e.g. a SLOT-VALUE or SVREF
+form) via SB-EXT:COMPARE-AND-SWAP, expecting to find OLD (compared
+via EQL) there beforehand, and return whichever value is now
+actually stored at PLACE: NEW itself, if this call won the race, or
+some other thread's own already-installed value, if it lost. Used
+for this codebase's other lock-free, install-only-once cache slots
+(PERSISTENT-VECTOR-REF's own per-index cache, PERSISTENT-ARRAY's own
+lazily-allocated DIMENSIONS/DATA), where -- unlike WITH-OBJECT-LOAD-
+LOCK's own CL:CHANGE-CLASS concern -- every racing thread computes an
+equally valid, purely functional NEW value, so losing this race costs
+only a little redundant work, never correctness."
+  (let ((old-var (gensym "OLD")) (new-var (gensym "NEW")) (previous (gensym "PREVIOUS")))
+    `(let* ((,old-var ,old) (,new-var ,new)
+            (,previous (sb-ext:compare-and-swap ,place ,old-var ,new-var)))
+       (if (eql ,previous ,old-var) ,new-var ,previous))))

@@ -110,7 +110,7 @@ UTF-8 encoded."
       (serialize-persistent-object widget))
     (let* ((readme-entry (cdr (assoc "README.md" (get-entries widget) :test #'string=)))
            (readme-octets (third (find (sha readme-entry) calls
-                                        :key (lambda (call) (%fake-sha-for (second call) (third call)))
+                                        :key (lambda (call) (fake-sha-for (second call) (third call)))
                                         :test #'string=)))
            (readme-text (sb-ext:octets-to-string readme-octets :external-format :utf-8)))
       (is (eql 0 (search (format nil "# PERSISTENT-WIDGET~%") readme-text)))
@@ -134,7 +134,7 @@ Slots\" bullet list for each of its own undocumented slots."
       (serialize-persistent-object owner))
     (let* ((readme-entry (cdr (assoc "README.md" (get-entries owner) :test #'string=)))
            (readme-octets (third (find (sha readme-entry) calls
-                                        :key (lambda (call) (%fake-sha-for (second call) (third call)))
+                                        :key (lambda (call) (fake-sha-for (second call) (third call)))
                                         :test #'string=)))
            (readme-text (sb-ext:octets-to-string readme-octets :external-format :utf-8)))
       (is (eql 0 (search (format nil "# PERSISTENT-OWNER~%") readme-text)))
@@ -154,9 +154,9 @@ Slots\" bullet list for each of its own undocumented slots."
       (serialize-persistent-object widget))
     (let* ((meta-entry (cdr (assoc ".meta" (get-entries widget) :test #'string=)))
            (meta-octets (third (find (sha meta-entry) calls
-                                      :key (lambda (call) (%fake-sha-for (second call) (third call)))
+                                      :key (lambda (call) (fake-sha-for (second call) (third call)))
                                       :test #'string=)))
-           (meta (githack::%deserialize-plist meta-octets)))
+           (meta (githack::deserialize-plist meta-octets)))
       (is (eq :clos (getf meta :tag)))
       (is (string= "PERSISTENT-WIDGET" (getf meta :class)))
       (is (string= "GITHACK-TEST" (getf meta :package)))
@@ -181,14 +181,14 @@ SERIALIZE-ATOM, rather than requiring the caller to pre-wrap it."
       (is (typep name-object 'git-blob))
       (is (string= "Bob" (get-payload name-object))))))
 
-(defun %persist-widget-in-fake-store (name tag)
+(defun persist-widget-in-fake-store (name tag)
   "Build and persist (against the current WITH-FAKE-GIT-OBJECT-STORE)
 a fresh, unpersisted PERSISTENT-WIDGET with NAME/TAG, returning it."
   (let ((widget (make-instance 'persistent-widget :repository :dummy-repo :name name :tag tag)))
     (serialize-persistent-object widget)
     widget))
 
-(defun %widget-git-type-mapping (widget)
+(defun widget-git-type-mapping (widget)
   "Return the (SHA . TYPE) alist WITH-FAKE-GIT-TYPE needs to
 correctly INFLATE-GIT-PROXY every entry of an already-persisted
 WIDGET's own tree."
@@ -202,9 +202,9 @@ already-persisted PERSISTENT-WIDGET's SHA, reconstructs a fresh
 instance of that same concrete class, with hollow GIT-OBJECT
 initarg proxies for NAME/TAG and VERSION 0."
   (with-fake-git-object-store ()
-    (let* ((original (%persist-widget-in-fake-store "Bob" :x))
+    (let* ((original (persist-widget-in-fake-store "Bob" :x))
            (hollow (make-instance 'git-tree :repository :dummy-repo :sha (sha original))))
-      (with-fake-git-type ((%widget-git-type-mapping original))
+      (with-fake-git-type ((widget-git-type-mapping original))
         (let ((rehydrated (deserialize-persistent-object hollow)))
           (is (typep rehydrated 'persistent-widget))
           (is (string= (sha original) (sha rehydrated)))
@@ -237,9 +237,9 @@ DESERIALIZE-PERSISTENT-OBJECT leaves it) transparently returns the
 decoded atom, and caches it: SLOT-VALUE never exposes a GIT-OBJECT
 to the caller."
   (with-fake-git-object-store ()
-    (let* ((original (%persist-widget-in-fake-store "Bob" :x))
+    (let* ((original (persist-widget-in-fake-store "Bob" :x))
            (hollow (make-instance 'git-tree :repository :dummy-repo :sha (sha original))))
-      (with-fake-git-type ((%widget-git-type-mapping original))
+      (with-fake-git-type ((widget-git-type-mapping original))
         (let ((rehydrated (deserialize-persistent-object hollow)))
           (is (string= "Bob" (widget-name rehydrated)))
           (is (eq :x (widget-tag rehydrated)))
@@ -257,11 +257,11 @@ PERSISTENT-OBJECT's own tree transparently returns a fully
 reconstructed instance of that nested object's own concrete class,
 not a bare GIT-TREE."
   (with-fake-git-object-store ()
-    (let* ((widget (%persist-widget-in-fake-store "Gadget" :y))
+    (let* ((widget (persist-widget-in-fake-store "Gadget" :y))
            (owner (make-instance 'persistent-owner :repository :dummy-repo :label "Owner" :widget widget)))
       (serialize-persistent-object owner)
       (let ((hollow (make-instance 'git-tree :repository :dummy-repo :sha (sha owner))))
-        (with-fake-git-type ((append (%widget-git-type-mapping owner) (%widget-git-type-mapping widget)))
+        (with-fake-git-type ((append (widget-git-type-mapping owner) (widget-git-type-mapping widget)))
           (let ((rehydrated (deserialize-persistent-object hollow)))
             (is (typep rehydrated 'persistent-owner))
             (is (string= "Owner" (owner-label rehydrated)))

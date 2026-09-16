@@ -58,7 +58,7 @@ or \"100644\" for a GIT-BLOB (regular file)."))
 (defmethod infer-git-mode ((git-object git-blob))
   "100644")
 
-(defun %tree-sort-key (name object)
+(defun tree-sort-key (name object)
   "Return the string Git itself sorts tree entries by: NAME as-is
 for a GIT-BLOB, or NAME with a trailing \"/\" appended for a
 GIT-TREE, since Git compares directory entries as though their
@@ -67,12 +67,12 @@ names were suffixed with a path separator."
       (concatenate 'string name "/")
       name))
 
-(defun %sort-tree-entries (entries)
+(defun sort-tree-entries (entries)
   "Return a new list of ENTRIES (each a (FILENAME . GIT-OBJECT)
 cons) sorted into the exact order Git requires for tree hashing."
   (sort (copy-list entries)
         #'string<
-        :key (lambda (entry) (%tree-sort-key (car entry) (cdr entry)))))
+        :key (lambda (entry) (tree-sort-key (car entry) (cdr entry)))))
 
 (defun %tree-entry->octets (name object)
   "Return the raw byte-vector encoding of one tree entry: NAME's
@@ -97,7 +97,7 @@ as <mode> <space> <filename> <NUL> <20-byte binary SHA>."
   (apply #'concatenate
          '(simple-array (unsigned-byte 8) (*))
          (mapcar (lambda (entry) (%tree-entry->octets (car entry) (cdr entry)))
-                 (%sort-tree-entries (get-entries tree)))))
+                 (sort-tree-entries (get-entries tree)))))
 
 (defun %read-tree-entry (octets start)
   "Parse one tree entry out of OCTETS beginning at START. Returns

@@ -102,9 +102,9 @@ RECEIVER returns. Signals INVALID-ARGUMENT-ERROR if
 REPOSITORY-SPECIFIER is NIL, if MODE is not :READ-ONLY or
 :READ-WRITE, or if RECEIVER is not a callable function. Signals
 GIT-NOT-FOUND-ERROR if no working `git` executable can be found on
-PATH (see %ENSURE-GIT-AVAILABLE)."
+PATH (see ENSURE-GIT-AVAILABLE)."
   (declare (ignore defaults))
-  (%ensure-git-available)
+  (ensure-git-available)
   (unless repository-specifier
     (error 'invalid-argument-error
            :format-control "REPOSITORY-SPECIFIER must not be NIL."))

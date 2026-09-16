@@ -39,13 +39,13 @@ belongs to, its BRANCH-NAME, the branch's OLD-SHA (its SHA when this
 distributed transaction's first write to this repository/branch
 began, or NIL if the branch did not exist yet -- see
 GIT-TRANSACTION's own EXPECTED-BRANCH-SHA), and the latest
-NEW-COMMIT-SHA %COMMIT-GIT-TRANSACTION-NOW computed for it (already
+NEW-COMMIT-SHA COMMIT-GIT-TRANSACTION-NOW! computed for it (already
 persisted to Git's object database, but not yet reachable from any
 ref). If the same (repository . branch) is written to more than once
 while one GITHACK-TRANSACTION is active, only the single latest
 NEW-COMMIT-SHA survives -- OLD-SHA is NOT updated, so the final 2PC
 commit or fast-path update is still checked against the branch's
-*original* SHA. See %ENLIST-TRANSACTION-WRITE! in git-
+*original* SHA. See ENLIST-TRANSACTION-WRITE! in git-
 transaction.lisp: a distributed transaction is scoped, for
 correctness, to at most one committed write per (repository .
 branch) -- see its docstring for the reasoning. PREPARE-REF is
@@ -80,7 +80,7 @@ architecture spec's terminology) -- it is what
 %FINISH-GITHACK-TRANSACTION! (distributed-transaction.lisp) consults
 to decide between the 0/1/>1-repository no-op/fast-path/2PC paths,
 and it is populated by GIT-TRANSACTION.LISP's own
-%COMMIT-GIT-TRANSACTION-NOW, the single choke point every ordinary
+COMMIT-GIT-TRANSACTION-NOW!, the single choke point every ordinary
 \(non-:REBASE) GIT-TRANSACTION commit -- and so, transitively, every
 PERSISTENT-OBJECT/PERSISTENT-VECTOR/PERSISTENT-HASH-TABLE mutation's
 eventual commit -- already passes through.
@@ -99,7 +99,7 @@ authoritative bookkeeping 2PC itself relies on."
   (pending-writes '())
   (touched-pathnames '()))
 
-(defun %generate-transaction-id ()
+(defun generate-transaction-id ()
   "Return a freshly generated, unique 32-hexadecimal-digit
 transaction identifier string, grouped like a UUID's canonical
 textual form (8-4-4-4-12) purely for readability -- this is not a
@@ -110,7 +110,7 @@ GITHACK-TRANSACTION's own TX-ID actually needs: global uniqueness
 `refs/githack/ledger/<tx-id>` refs so unrelated concurrent
 distributed transactions never collide), not standards conformance.
 SBCL/Quicklisp provide no UUID library this system already depends
-on, so this mirrors %UNIQUE-TEMPORARY-PATHNAME's own
+on, so this mirrors UNIQUE-TEMPORARY-PATHNAME's own
 random-digits-in-some-radix technique (git-io.lisp), just with more
 bits and grouped for readability."
   (let ((digits (format nil "~(~16,32,'0R~)" (random (expt 16 32) (make-random-state t)))))

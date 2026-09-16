@@ -91,57 +91,57 @@ fetching any element.")
 type, typically T for a generic persistent vector. Recorded purely
 as metadata; GitHack does not itself enforce it.")
 
-(defun %serialize-persistent-vector-meta (length element-type)
+(defun serialize-persistent-vector-meta (length element-type)
   "Encode the small property list (:TAG :VECTOR :LENGTH LENGTH
 :ELEMENT-TYPE ELEMENT-TYPE) as a UTF-8 octet vector, via
-%SERIALIZE-PLIST: the exact raw content of a persistent vector's
+SERIALIZE-PLIST: the exact raw content of a persistent vector's
 \".meta\" blob."
-  (%serialize-plist (list :tag :vector :length length :element-type element-type)))
+  (serialize-plist (list :tag :vector :length length :element-type element-type)))
 
-(defun %deserialize-persistent-vector-meta (octets)
-  "Inverse of %SERIALIZE-PERSISTENT-VECTOR-META: parse OCTETS -- the
+(defun deserialize-persistent-vector-meta (octets)
+  "Inverse of SERIALIZE-PERSISTENT-VECTOR-META: parse OCTETS -- the
 raw content of a persistent vector's \".meta\" blob -- via
-%DESERIALIZE-PLIST, and return two values, its :LENGTH and
+DESERIALIZE-PLIST, and return two values, its :LENGTH and
 :ELEMENT-TYPE. Signals an error if OCTETS is not a plist whose :TAG
 is :VECTOR."
-  (let ((plist (%deserialize-plist octets)))
+  (let ((plist (deserialize-plist octets)))
     (unless (eq (getf plist :tag) :vector)
       (error 'malformed-git-object-error
              :format-control "Malformed persistent vector .meta blob: ~S."
              :format-arguments (list plist)))
     (values (getf plist :length) (getf plist :element-type))))
 
-(defun %persistent-vector-index-entries (vector)
+(defun persistent-vector-index-entries (vector)
   "Return VECTOR's own ENTRIES with any \".meta\"/\"README.md\"
 entries excluded: just the \"0\"..\"N-1\" index entries, in whatever
 order GET-ENTRIES currently holds them."
   (remove-if (lambda (entry) (member (car entry) '(".meta" "README.md") :test #'string=))
              (get-entries vector)))
 
-(defgeneric %persist-vector-component-by-type (git-object)
+(defgeneric persist-vector-component-by-type (git-object)
   (:documentation
    "Persist GIT-OBJECT (which is known not to have a SHA yet) to
 Git's object database according to its concrete type, and return the
-resulting SHA. Broken out of %PERSIST-VECTOR-COMPONENT so this
+resulting SHA. Broken out of PERSIST-VECTOR-COMPONENT so this
 dispatch is its own generic function, with one DEFMETHOD per
 concrete type in place of an ETYPECASE clause."))
 
-(defmethod %persist-vector-component-by-type ((git-object persistent-vector))
+(defmethod persist-vector-component-by-type ((git-object persistent-vector))
   (serialize-persistent-vector git-object))
 
-(defmethod %persist-vector-component-by-type ((git-object persistent-cons))
+(defmethod persist-vector-component-by-type ((git-object persistent-cons))
   (serialize-persistent-cons git-object))
 
-(defmethod %persist-vector-component-by-type ((git-object git-tree))
+(defmethod persist-vector-component-by-type ((git-object git-tree))
   (setf (sha git-object)
         (git-hash-object (get-repository git-object) "tree" (serialize-tree git-object))))
 
-(defmethod %persist-vector-component-by-type ((git-object git-blob))
+(defmethod persist-vector-component-by-type ((git-object git-blob))
   (setf (sha git-object)
         (git-hash-object (get-repository git-object) "blob"
                           (serialize-atom (get-payload git-object)))))
 
-(defun %persist-vector-component (git-object)
+(defun persist-vector-component (git-object)
   "Ensure GIT-OBJECT (a GIT-BLOB, a plain GIT-TREE, a PERSISTENT-CONS,
 or a nested PERSISTENT-VECTOR) has a SHA, persisting it if it does
 not already: recursively, through SERIALIZE-PERSISTENT-VECTOR or
@@ -149,33 +149,33 @@ SERIALIZE-PERSISTENT-CONS, for a nested PERSISTENT-VECTOR or
 PERSISTENT-CONS; via GIT-HASH-OBJECT of its already-persisted
 ENTRIES for a plain GIT-TREE (exactly as SERIALIZE-TREE itself
 requires); or via GIT-HASH-OBJECT of its serialized PAYLOAD for a
-GIT-BLOB. Mirrors PERSISTENT-CONS's own %PERSIST-CONS-COMPONENT, kept
+GIT-BLOB. Mirrors PERSISTENT-CONS's own PERSIST-CONS-COMPONENT, kept
 separate (rather than shared) so this file need not depend on
 persistent-cons.lisp's internals, and so neither persistent structure
-need depend on GIT-TRANSACTION's own %PERSIST-GIT-OBJECT, breaking
+need depend on GIT-TRANSACTION's own PERSIST-GIT-OBJECT, breaking
 what would otherwise be a load-order cycle. Returns GIT-OBJECT's
 SHA."
   (or (sha git-object)
-      (%persist-vector-component-by-type git-object)))
+      (persist-vector-component-by-type git-object)))
 
 (defun serialize-persistent-vector (vector)
   "Compute VECTOR's LENGTH from its own index entries (every entry
 of GET-ENTRIES other than \".meta\"/\"README.md\", which
 SERIALIZE-PERSISTENT-VECTOR itself adds), create and persist its
 standard \".meta\" and \"README.md\" blobs, recursively persist every
-index entry's GIT-OBJECT (via %PERSIST-VECTOR-COMPONENT), and finally
+index entry's GIT-OBJECT (via PERSIST-VECTOR-COMPONENT), and finally
 write VECTOR's own Git tree object. Like SERIALIZE-PERSISTENT-CONS,
 this performs real I/O, not pure encoding. Returns VECTOR's own SHA,
 doing nothing further if VECTOR already has one."
   (or (sha vector)
-      (let* ((index-entries (%persistent-vector-index-entries vector))
+      (let* ((index-entries (persistent-vector-index-entries vector))
              (length (length index-entries))
              (element-type (persistent-vector-element-type vector))
              (repository (get-repository vector))
              (meta-blob (make-instance 'git-blob :repository repository
                                                   :sha (git-hash-object
                                                         repository "blob"
-                                                        (%serialize-persistent-vector-meta length element-type))))
+                                                        (serialize-persistent-vector-meta length element-type))))
              (readme-blob (make-instance 'git-blob :repository repository
                                                     :sha (git-hash-object
                                                           repository "blob"
@@ -183,7 +183,7 @@ doing nothing further if VECTOR already has one."
                                                            +persistent-vector-readme+
                                                            :external-format :utf-8)))))
         (dolist (entry index-entries)
-          (%persist-vector-component (cdr entry)))
+          (persist-vector-component (cdr entry)))
         (setf (persistent-vector-length vector) length)
         (setf (get-entries vector)
               (list* (cons ".meta" meta-blob)
@@ -211,12 +211,12 @@ Marks VECTOR loaded and returns it."
     (unless (assoc "README.md" entries :test #'string=)
       (error 'malformed-git-object-error
              :format-control "Malformed persistent vector tree: missing \"README.md\" entry."))
-    (multiple-value-bind (length element-type) (%deserialize-persistent-vector-meta meta-octets)
+    (multiple-value-bind (length element-type) (deserialize-persistent-vector-meta meta-octets)
       (setf (get-entries vector) entries)
       (setf (persistent-vector-length vector) length)
       (setf (persistent-vector-element-type vector) element-type)
       (setf (%persistent-vector-cache vector) nil)
-      (setf (get-loaded? vector) t)
+      (%publish-loaded! vector)
       vector)))
 
 (defun %ensure-persistent-vector-loaded (vector)
@@ -224,12 +224,20 @@ Marks VECTOR loaded and returns it."
 populated: parse VECTOR's underlying Git tree object (via
 %ENSURE-TREE-ENTRIES-LOADED, a no-op if already done), then, if
 LENGTH is still unknown, fetch and decode its \".meta\" entry's raw
-bytes via GIT-CAT-FILE and %DESERIALIZE-PERSISTENT-VECTOR-META.
-Mirrors %ATOMIC-WRAPPER-TREE-P's own direct GIT-CAT-FILE lookup of a
+bytes via GIT-CAT-FILE and DESERIALIZE-PERSISTENT-VECTOR-META.
+Mirrors ATOMIC-WRAPPER-TREE-P's own direct GIT-CAT-FILE lookup of a
 tree's \".meta\" entry, rather than routing it through
 %ENSURE-BLOB-LOADED, since a persistent vector's own PAYLOAD-less
 GIT-BLOB proxy for \".meta\" is never otherwise needed. Returns
-VECTOR."
+VECTOR.
+
+Thread-safe: no lock is taken. ELEMENT-TYPE is SETF first, then
+LENGTH is installed last via %CAS-INSTALL-ONCE (from NIL), whose own
+SB-EXT:COMPARE-AND-SWAP full memory barrier guarantees any other
+thread that subsequently observes a non-NIL LENGTH also sees that
+same ELEMENT-TYPE. Two threads racing here may each harmlessly
+redo this identical fetch/decode work; at most one's LENGTH actually
+gets installed, and both computed the same value regardless."
   (let ((repository (get-repository vector)))
     (%ensure-tree-entries-loaded repository vector)
     (unless (persistent-vector-length vector)
@@ -238,9 +246,9 @@ VECTOR."
           (error 'malformed-git-object-error
                  :format-control "Malformed persistent vector tree: missing \".meta\" entry."))
         (multiple-value-bind (length element-type)
-            (%deserialize-persistent-vector-meta (git-cat-file repository (sha (cdr meta-entry))))
-          (setf (persistent-vector-length vector) length)
-          (setf (persistent-vector-element-type vector) element-type)))))
+            (deserialize-persistent-vector-meta (git-cat-file repository (sha (cdr meta-entry))))
+          (setf (persistent-vector-element-type vector) element-type)
+          (%cas-install-once (slot-value vector 'length) nil length)))))
   vector)
 
 (defun scan-persistent-vector (vector)
@@ -287,9 +295,14 @@ Lisp error for an out-of-bounds INDEX -- but only after VECTOR's
 LENGTH has been established, since an unloaded proxy cannot know its
 own bounds without first consulting Git.
 
-Not thread-safe: see git-transaction.lisp's CONCURRENCY POLICY
-comment. Neither %ENSURE-PERSISTENT-VECTOR-LOADED nor this
-function's own per-index cache array is synchronized."
+Thread-safe: %ENSURE-PERSISTENT-VECTOR-LOADED is itself thread-safe
+(see its own commentary), and this function's per-index cache array
+is installed, and each of its slots filled, via %CAS-INSTALL-ONCE
+rather than a plain SETF: two threads racing to fetch/decode the
+same INDEX for the first time may each harmlessly redo that work
+(the result is a pure function of INDEX's own GIT-OBJECT SHA), but
+only one CACHE array, and only one final VALUE per INDEX, is ever
+actually installed and visible to every thread from then on."
   (%ensure-persistent-vector-loaded vector)
   (let ((length (persistent-vector-length vector)))
     (unless (and (integerp index) (<= 0 index) (< index length))
@@ -297,8 +310,8 @@ function's own per-index cache array is synchronized."
              :format-control "Index ~S out of bounds for persistent vector of length ~S."
              :format-arguments (list index length)))
     (let ((cache (or (%persistent-vector-cache vector)
-                      (setf (%persistent-vector-cache vector)
-                            (make-array length :initial-element +persistent-vector-unloaded+)))))
+                      (%cas-install-once (slot-value vector 'cache) nil
+                                          (make-array length :initial-element +persistent-vector-unloaded+)))))
       (let ((cached (svref cache index)))
         (if (not (eq cached +persistent-vector-unloaded+))
             cached
@@ -312,19 +325,18 @@ function's own per-index cache array is synchronized."
                      (value (if (typep object 'git-blob)
                                 (get-payload (%ensure-blob-loaded object))
                                 object)))
-                (setf (svref cache index) value)
-                value)))))))
+                (%cas-install-once (svref cache index) +persistent-vector-unloaded+ value))))))))
 
-(defun %persistent-vector-encode (repository value)
+(defun persistent-vector-encode (repository value)
   "Inverse of PERSISTENT-VECTOR-REF's own per-element decoding: return
 VALUE itself, unchanged, if it is already a GIT-OBJECT (a compound
 proxy -- a GIT-TREE, PERSISTENT-CONS, PERSISTENT-VECTOR, or GIT-BLOB
 -- to be stored directly as-is); otherwise wrap VALUE as the PAYLOAD
 of a freshly constructed, already GET-LOADED?, not-yet-persisted
 GIT-BLOB in REPOSITORY. Mirrors PERSISTENT-CONS.LISP's own
-%PERSISTENT-CONS-ENCODE, kept separate (rather than shared) for the
-same reason %PERSIST-VECTOR-COMPONENT is kept separate from
-PERSISTENT-CONS's own %PERSIST-CONS-COMPONENT."
+PERSISTENT-CONS-ENCODE, kept separate (rather than shared) for the
+same reason PERSIST-VECTOR-COMPONENT is kept separate from
+PERSISTENT-CONS's own PERSIST-CONS-COMPONENT."
   (if (typep value 'git-object)
       value
       (make-instance 'git-blob :repository repository :payload value :loaded? t)))
@@ -336,7 +348,7 @@ result of applying SERIES's own COLLECT to a series, exactly as
 COLLECT itself always terminates a series back into a concrete Lisp
 list before any further ordinary-Lisp processing), in the same order
 ITEMS itself holds them. Each element becomes one index entry's own
-GIT-OBJECT, via %PERSISTENT-VECTOR-ENCODE -- an already-compound
+GIT-OBJECT, via PERSISTENT-VECTOR-ENCODE -- an already-compound
 GIT-OBJECT proxy (a GIT-TREE, PERSISTENT-CONS, PERSISTENT-VECTOR, or
 GIT-BLOB) is stored as-is, while any other, raw Lisp value is
 wrapped in a fresh GIT-BLOB. Exactly inverts SCAN-PERSISTENT-VECTOR
@@ -354,5 +366,5 @@ SERIALIZE-PERSISTENT-VECTOR on it to actually persist it to Git."
                                        :loaded? t
                                        :entries (mapcar (lambda (value)
                                                           (cons (princ-to-string (incf index))
-                                                                (%persistent-vector-encode repository value)))
+                                                                (persistent-vector-encode repository value)))
                                                         items))))

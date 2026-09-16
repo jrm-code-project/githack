@@ -83,27 +83,27 @@ list of non-negative integers (D1 D2 ... DN), or NIL if not yet set
 typically T for a generic persistent array. Recorded purely as
 metadata; GitHack does not itself enforce it.")
 
-(defun %serialize-persistent-array-meta (dimensions element-type)
+(defun serialize-persistent-array-meta (dimensions element-type)
   "Encode the small property list (:TAG :ARRAY :DIMENSIONS
 DIMENSIONS :ELEMENT-TYPE ELEMENT-TYPE) as a UTF-8 octet vector, via
-%SERIALIZE-PLIST: the exact raw content of a persistent array's
+SERIALIZE-PLIST: the exact raw content of a persistent array's
 \".meta\" blob."
-  (%serialize-plist (list :tag :array :dimensions dimensions :element-type element-type)))
+  (serialize-plist (list :tag :array :dimensions dimensions :element-type element-type)))
 
-(defun %deserialize-persistent-array-meta (octets)
-  "Inverse of %SERIALIZE-PERSISTENT-ARRAY-META: parse OCTETS -- the
+(defun deserialize-persistent-array-meta (octets)
+  "Inverse of SERIALIZE-PERSISTENT-ARRAY-META: parse OCTETS -- the
 raw content of a persistent array's \".meta\" blob -- via
-%DESERIALIZE-PLIST, and return two values, its :DIMENSIONS and
+DESERIALIZE-PLIST, and return two values, its :DIMENSIONS and
 :ELEMENT-TYPE. Signals an error if OCTETS is not a plist whose :TAG
 is :ARRAY."
-  (let ((plist (%deserialize-plist octets)))
+  (let ((plist (deserialize-plist octets)))
     (unless (eq (getf plist :tag) :array)
       (error 'malformed-git-object-error
              :format-control "Malformed persistent array .meta blob: ~S."
              :format-arguments (list plist)))
     (values (getf plist :dimensions) (getf plist :element-type))))
 
-(defun %persistent-array-volume (dimensions)
+(defun persistent-array-volume (dimensions)
   "Return the total number of elements a persistent array of shape
 DIMENSIONS (a list of non-negative integers) holds: the product of
 every dimension size, or 1 for a zero-dimensional (scalar) array.
@@ -115,9 +115,9 @@ integers."
            :format-arguments (list dimensions)))
   (reduce #'* dimensions :initial-value 1))
 
-(defun %persistent-array-row-major-index (dimensions subscripts)
+(defun persistent-array-row-major-index (dimensions subscripts)
   "Return the single, flattened, zero-based row-major index -- into
-a PERSISTENT-VECTOR of (%PERSISTENT-ARRAY-VOLUME DIMENSIONS)
+a PERSISTENT-VECTOR of (PERSISTENT-ARRAY-VOLUME DIMENSIONS)
 elements -- corresponding to SUBSCRIPTS (a list of one zero-based
 index per entry of DIMENSIONS), computed exactly as CL:ARRAY expects
 for a standard, C/Lisp-order, row-major array of that shape: for
@@ -162,7 +162,7 @@ already has one."
         (unless data
           (error 'unpersisted-object-error
                  :format-control "Cannot serialize persistent array: its DATA (underlying persistent-vector) has not been set."))
-        (let ((volume (%persistent-array-volume dimensions)))
+        (let ((volume (persistent-array-volume dimensions)))
           (serialize-persistent-vector data)
           (unless (= volume (persistent-vector-length data))
             (error 'malformed-git-object-error
@@ -171,7 +171,7 @@ already has one."
           (let* ((meta-blob (make-instance 'git-blob :repository repository
                                                       :sha (git-hash-object
                                                             repository "blob"
-                                                            (%serialize-persistent-array-meta dimensions element-type))))
+                                                            (serialize-persistent-array-meta dimensions element-type))))
                  (readme-blob (make-instance 'git-blob :repository repository
                                                         :sha (git-hash-object
                                                               repository "blob"
@@ -210,7 +210,7 @@ ARRAY loaded and returns it."
     (unless data-entry
       (error 'malformed-git-object-error
              :format-control "Malformed persistent array tree: missing \"data\" entry."))
-    (multiple-value-bind (dimensions element-type) (%deserialize-persistent-array-meta meta-octets)
+    (multiple-value-bind (dimensions element-type) (deserialize-persistent-array-meta meta-octets)
       (setf (get-entries array) entries)
       (setf (persistent-array-dimensions array) dimensions)
       (setf (persistent-array-element-type array) element-type)
@@ -223,12 +223,22 @@ ARRAY loaded and returns it."
   "Ensure ARRAY's own Git tree entries, DIMENSIONS/ELEMENT-TYPE, and
 DATA are all populated, fetching and parsing whatever raw Git bytes
 are needed -- via %ENSURE-TREE-ENTRIES-LOADED for ARRAY's own tree,
-then GIT-CAT-FILE plus %DESERIALIZE-PERSISTENT-ARRAY-META for its
+then GIT-CAT-FILE plus DESERIALIZE-PERSISTENT-ARRAY-META for its
 \".meta\" entry -- for whichever of DIMENSIONS or DATA is not already
 set. Mirrors PERSISTENT-VECTOR's own %ENSURE-PERSISTENT-VECTOR-
 LOADED. Never fetches any element of the underlying DATA vector
 itself; that remains entirely PERSISTENT-VECTOR-REF's own
-responsibility. Returns ARRAY."
+responsibility. Returns ARRAY.
+
+Thread-safe: no lock is taken. ELEMENT-TYPE is SETF first, then
+DIMENSIONS is installed last via %CAS-INSTALL-ONCE (from NIL); DATA
+is likewise installed via %CAS-INSTALL-ONCE. Each of %CAS-INSTALL-
+ONCE's own SB-EXT:COMPARE-AND-SWAP calls is a full memory barrier,
+so any other thread that subsequently observes a non-NIL DIMENSIONS
+also sees that same ELEMENT-TYPE. Two threads racing here may each
+harmlessly redo this identical fetch/decode work; at most one's
+DIMENSIONS, and at most one's DATA, is ever actually installed, and
+every racing thread computes the same value regardless."
   (let ((repository (get-repository array)))
     (%ensure-tree-entries-loaded repository array)
     (unless (persistent-array-dimensions array)
@@ -237,16 +247,16 @@ responsibility. Returns ARRAY."
           (error 'malformed-git-object-error
                  :format-control "Malformed persistent array tree: missing \".meta\" entry."))
         (multiple-value-bind (dimensions element-type)
-            (%deserialize-persistent-array-meta (git-cat-file repository (sha (cdr meta-entry))))
-          (setf (persistent-array-dimensions array) dimensions)
-          (setf (persistent-array-element-type array) element-type))))
+            (deserialize-persistent-array-meta (git-cat-file repository (sha (cdr meta-entry))))
+          (setf (persistent-array-element-type array) element-type)
+          (%cas-install-once (slot-value array 'dimensions) nil dimensions))))
     (unless (%persistent-array-data array)
       (let ((data-entry (assoc "data" (get-entries array) :test #'string=)))
         (unless data-entry
           (error 'malformed-git-object-error
                  :format-control "Malformed persistent array tree: missing \"data\" entry."))
-        (setf (%persistent-array-data array)
-              (make-instance 'persistent-vector :repository repository :sha (sha (cdr data-entry)))))))
+        (%cas-install-once (slot-value array 'data) nil
+                            (make-instance 'persistent-vector :repository repository :sha (sha (cdr data-entry)))))))
   array)
 
 (defun persistent-array-ref (array &rest subscripts)
@@ -268,5 +278,5 @@ comment. %ENSURE-PERSISTENT-ARRAY-LOADED is not synchronized, on top
 of PERSISTENT-VECTOR-REF's own unsynchronized per-index cache."
   (%ensure-persistent-array-loaded array)
   (let* ((dimensions (persistent-array-dimensions array))
-         (index (%persistent-array-row-major-index dimensions subscripts)))
+         (index (persistent-array-row-major-index dimensions subscripts)))
     (persistent-vector-ref (%persistent-array-data array) index)))

@@ -17,7 +17,7 @@
 (defparameter +parent-2-sha+ "2222222222222222222222222222222222222222"
   "A syntactically valid, arbitrary 40-character hex SHA used to stand in for a second persisted GIT-COMMIT parent in tests.")
 
-(defun %make-test-commit (&key tree parents (author "The Boss <boss@githack.local>")
+(defun make-test-commit (&key tree parents (author "The Boss <boss@githack.local>")
                                 (committer "The Boss <boss@githack.local>")
                                 (timestamp 1700000000) (message "first commit"))
   (make-instance 'git-commit :repository :dummy-repo
@@ -31,14 +31,14 @@
 (test serialize-commit-signals-error-for-unpersisted-tree
   "SERIALIZE-COMMIT cannot encode a commit whose TREE has no SHA yet."
   (let* ((unsaved-tree (make-instance 'git-tree :repository :dummy-repo))
-         (commit (%make-test-commit :tree unsaved-tree)))
+         (commit (make-test-commit :tree unsaved-tree)))
     (signals error (serialize-commit commit))))
 
 (test serialize-commit-signals-error-for-unpersisted-parent
   "SERIALIZE-COMMIT cannot encode a commit whose one of PARENTS has no SHA yet."
   (let* ((tree (make-instance 'git-tree :sha +root-tree-sha+ :repository :dummy-repo))
          (unsaved-parent (make-instance 'git-commit :repository :dummy-repo))
-         (commit (%make-test-commit :tree tree :parents (list unsaved-parent))))
+         (commit (make-test-commit :tree tree :parents (list unsaved-parent))))
     (signals error (serialize-commit commit))))
 
 (test serialize-commit-with-no-parents
@@ -46,7 +46,7 @@
 \"tree\" line, an \"author\" line, a \"committer\" line, a blank
 line, and the message, with no \"parent\" lines at all."
   (let* ((tree (make-instance 'git-tree :sha +root-tree-sha+ :repository :dummy-repo))
-         (commit (%make-test-commit :tree tree)))
+         (commit (make-test-commit :tree tree)))
     (is (string= (format nil "tree ~A~%author The Boss <boss@githack.local> 1700000000 +0000~%committer The Boss <boss@githack.local> 1700000000 +0000~%~%first commit"
                          +root-tree-sha+)
                  (serialize-commit commit)))))
@@ -57,7 +57,7 @@ in order, between the \"tree\" line and the \"author\" line."
   (let* ((tree (make-instance 'git-tree :sha +root-tree-sha+ :repository :dummy-repo))
          (parent-1 (make-instance 'git-commit :sha +parent-1-sha+ :repository :dummy-repo))
          (parent-2 (make-instance 'git-commit :sha +parent-2-sha+ :repository :dummy-repo))
-         (commit (%make-test-commit :tree tree :parents (list parent-1 parent-2))))
+         (commit (make-test-commit :tree tree :parents (list parent-1 parent-2))))
     (is (string= (format nil "tree ~A~%parent ~A~%parent ~A~%author The Boss <boss@githack.local> 1700000000 +0000~%committer The Boss <boss@githack.local> 1700000000 +0000~%~%first commit"
                          +root-tree-sha+ +parent-1-sha+ +parent-2-sha+)
                  (serialize-commit commit)))))
@@ -113,7 +113,7 @@ line separating headers from message, including embedded newlines."
 into a fresh GIT-COMMIT reconstructs equivalent slot values."
   (let* ((tree (make-instance 'git-tree :sha +root-tree-sha+ :repository :dummy-repo))
          (parent (make-instance 'git-commit :sha +parent-1-sha+ :repository :dummy-repo))
-         (original (%make-test-commit :tree tree :parents (list parent)))
+         (original (make-test-commit :tree tree :parents (list parent)))
          (text (serialize-commit original))
          (reloaded (make-instance 'git-commit :repository :dummy-repo)))
     (with-fake-git-type ((list (cons +root-tree-sha+ "tree")

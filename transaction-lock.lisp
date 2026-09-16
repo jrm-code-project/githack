@@ -38,7 +38,7 @@ signaling TRANSACTION-LOCK-TIMEOUT-ERROR.")
 process or thread still holds a repository's transaction lock file
 after +TRANSACTION-LOCK-TIMEOUT+ seconds of polling for it."))
 
-(defun %transaction-lock-pathname (git-dir-pathname)
+(defun transaction-lock-pathname (git-dir-pathname)
   "Return the pathname of GIT-DIR-PATHNAME's own transaction lock
 file (\"transaction.lock\", directly under the Git directory,
 mirroring Git's own convention for e.g. `index.lock`)."
@@ -52,7 +52,7 @@ succeeds if the file did not already exist), then return that open
 output stream, still held open as the lock itself. Signals
 TRANSACTION-LOCK-TIMEOUT-ERROR if the lock is still held by someone
 else after +TRANSACTION-LOCK-TIMEOUT+ seconds."
-  (let ((lock-pathname (%transaction-lock-pathname git-dir-pathname))
+  (let ((lock-pathname (transaction-lock-pathname git-dir-pathname))
         (deadline (+ (get-internal-real-time)
                      (round (* +transaction-lock-timeout+ internal-time-units-per-second)))))
     (loop
@@ -71,7 +71,7 @@ else after +TRANSACTION-LOCK-TIMEOUT+ seconds."
 %ACQUIRE-REPOSITORY-TRANSACTION-LOCK: close STREAM and delete
 GIT-DIR-PATHNAME's own transaction lock file."
   (close stream)
-  (ignore-errors (delete-file (%transaction-lock-pathname git-dir-pathname))))
+  (ignore-errors (delete-file (transaction-lock-pathname git-dir-pathname))))
 
 (defmacro with-repository-transaction-lock ((git-dir-pathname) &body body)
   "Evaluate GIT-DIR-PATHNAME once, then hold that Git directory's own

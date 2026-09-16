@@ -12,7 +12,7 @@
 ;;; genuinely shells out to real `git` executables against real,
 ;;; temporary bare repositories (via WITH-TEMPORARY-GIT-REPOSITORY)
 ;;; -- no GIT-HASH-OBJECT/GIT-CAT-FILE/GIT-TYPE/GIT-SHOW-REF-SHA/
-;;; GIT-UPDATE-REF fake is ever installed here, since the whole
+;;; GIT-UPDATE-REF! fake is ever installed here, since the whole
 ;;; point of this feature is its use of genuine Git plumbing
 ;;; (`mktag`, `update-ref --stdin`, `for-each-ref`, `rev-parse`).
 
@@ -24,7 +24,7 @@
 
 (defparameter +dtx-author+ "Distributed Test <dtx@githack.local>")
 
-(defun %dtx-write! (repository branch value)
+(defun dtx-write! (repository branch value)
   "Open an ordinary, single-repository, real :READ-WRITE transaction
 against REPOSITORY/BRANCH (both real, via WITH-REPOSITORY/WITH-
 TRANSACTION) and commit VALUE as its new root. Whether this actually
@@ -39,7 +39,7 @@ about."
       (declare (ignore v))
       value)))
 
-(defun %dtx-read (repository branch)
+(defun dtx-read (repository branch)
   "Return the current plain Lisp value of REPOSITORY/BRANCH's own
 root, via a real, read-only WITH-REPOSITORY/WITH-TRANSACTION round
 trip, or NIL if BRANCH does not exist yet."
@@ -67,8 +67,8 @@ no prepare/ledger refs of any kind), and the branch ends up holding
 the expected value."
   (with-temporary-git-repository (repository)
     (with-githack-transaction ()
-      (%dtx-write! repository "main" "solo-value"))
-    (is (equal "solo-value" (%dtx-read repository "main")))
+      (dtx-write! repository "main" "solo-value"))
+    (is (equal "solo-value" (dtx-read repository "main")))
     (is (null (%git-for-each-ref repository "refs/githack/")))))
 
 (test two-participant-githack-transaction-commits-both-via-2pc
@@ -82,10 +82,10 @@ expected to remain)."
   (with-temporary-git-repository (repository-1)
     (with-temporary-git-repository (repository-2)
       (with-githack-transaction ()
-        (%dtx-write! repository-1 "main" "value-one")
-        (%dtx-write! repository-2 "main" "value-two"))
-      (is (equal "value-one" (%dtx-read repository-1 "main")))
-      (is (equal "value-two" (%dtx-read repository-2 "main")))
+        (dtx-write! repository-1 "main" "value-one")
+        (dtx-write! repository-2 "main" "value-two"))
+      (is (equal "value-one" (dtx-read repository-1 "main")))
+      (is (equal "value-two" (dtx-read repository-2 "main")))
       (is (null (remove-if (lambda (entry) (search "refs/githack/ledger/" (third entry)))
                             (%git-for-each-ref repository-1 "refs/githack/"))))
       (is (null (%git-for-each-ref repository-2 "refs/githack/"))))))
@@ -98,12 +98,12 @@ across more than the minimal two-participant case."
     (with-temporary-git-repository (repository-2)
       (with-temporary-git-repository (repository-3)
         (with-githack-transaction ()
-          (%dtx-write! repository-1 "main" "one")
-          (%dtx-write! repository-2 "main" "two")
-          (%dtx-write! repository-3 "main" "three"))
-        (is (equal "one" (%dtx-read repository-1 "main")))
-        (is (equal "two" (%dtx-read repository-2 "main")))
-        (is (equal "three" (%dtx-read repository-3 "main")))))))
+          (dtx-write! repository-1 "main" "one")
+          (dtx-write! repository-2 "main" "two")
+          (dtx-write! repository-3 "main" "three"))
+        (is (equal "one" (dtx-read repository-1 "main")))
+        (is (equal "two" (dtx-read repository-2 "main")))
+        (is (equal "three" (dtx-read repository-3 "main")))))))
 
 (test githack-transaction-error-in-body-leaves-every-participant-untouched
   "If a WITH-GITHACK-TRANSACTION body signals an error after already
@@ -115,8 +115,8 @@ the caller unchanged."
     (with-temporary-git-repository (repository-2)
       (signals simple-error
         (with-githack-transaction ()
-          (%dtx-write! repository-1 "main" "should-not-stick-1")
-          (%dtx-write! repository-2 "main" "should-not-stick-2")
+          (dtx-write! repository-1 "main" "should-not-stick-1")
+          (dtx-write! repository-2 "main" "should-not-stick-2")
           (error "simulated failure in body")))
       (is (null (git-show-ref-sha repository-1 "main")))
       (is (null (git-show-ref-sha repository-2 "main")))
@@ -132,13 +132,13 @@ the second."
   (with-temporary-git-repository (repository-1)
     (with-temporary-git-repository (repository-2)
       (with-githack-transaction ()
-        (%dtx-write! repository-1 "main" "first-round-1")
-        (%dtx-write! repository-2 "main" "first-round-2"))
+        (dtx-write! repository-1 "main" "first-round-1")
+        (dtx-write! repository-2 "main" "first-round-2"))
       (with-githack-transaction ()
-        (%dtx-write! repository-1 "main" "second-round-1")
-        (%dtx-write! repository-2 "main" "second-round-2"))
-      (is (equal "second-round-1" (%dtx-read repository-1 "main")))
-      (is (equal "second-round-2" (%dtx-read repository-2 "main"))))))
+        (dtx-write! repository-1 "main" "second-round-1")
+        (dtx-write! repository-2 "main" "second-round-2"))
+      (is (equal "second-round-1" (dtx-read repository-1 "main")))
+      (is (equal "second-round-2" (dtx-read repository-2 "main"))))))
 
 (test phase-1-prepare-failure-rolls-back-already-prepared-participants
   "If Phase 1's own Prepare step fails against a later participant
@@ -150,16 +150,16 @@ created prepare ref is deleted again (rolled back), and neither
 branch is ever advanced."
   (with-temporary-git-repository (repository-1)
     (with-temporary-git-repository (repository-2)
-      (let ((tx-id (%generate-transaction-id)))
+      (let ((tx-id (generate-transaction-id)))
         ;; Pre-occupy repository-2's own prepare ref path for TX-ID with
-        ;; a bogus blob, so %PREPARE-PARTICIPANT!'s own %GIT-RAW-UPDATE-REF
+        ;; a bogus blob, so %PREPARE-PARTICIPANT!'s own %GIT-RAW-UPDATE-REF!
         ;; (which requires the ref not already exist) fails for it.
         (let ((bogus-sha (git-hash-object repository-2 "blob" (sb-ext:string-to-octets "bogus" :external-format :utf-8))))
-          (%git-raw-update-ref repository-2 (%prepare-ref-path tx-id "main") bogus-sha :expected-sha nil))
+          (%git-raw-update-ref! repository-2 (prepare-ref-path tx-id "main") bogus-sha :expected-sha nil))
         (let ((txn (%make-githack-transaction tx-id)))
           (let ((*current-transaction* txn))
-            (%dtx-write! repository-1 "main" "will-be-rolled-back-1")
-            (%dtx-write! repository-2 "main" "will-be-rolled-back-2"))
+            (dtx-write! repository-1 "main" "will-be-rolled-back-1")
+            (dtx-write! repository-2 "main" "will-be-rolled-back-2"))
           (signals distributed-transaction-error
             (%finish-githack-transaction! txn)))
         ;; repository-1's own prepare ref (created before repository-2's
@@ -170,31 +170,31 @@ branch is ever advanced."
         (is (null (git-show-ref-sha repository-2 "main")))))))
 
 (test exorcist-rolls-back-a-stranded-prepare-ref-with-no-ledger
-  "RUN-GITHACK-EXORCIST, run against a repository holding a stranded
+  "RUN-GITHACK-EXORCIST!, run against a repository holding a stranded
 `refs/githack/prepare/<tx-id>/<branch-name>` ref whose own Ledger
 repository never received its `refs/githack/ledger/<tx-id>` marker
 (simulating a crash between Phase 1 and Phase 2's own Point-of-No-
 Return), simply deletes the stranded ref and leaves the branch
 untouched."
   (with-temporary-git-repository (repository)
-    (let* ((tx-id (%generate-transaction-id))
+    (let* ((tx-id (generate-transaction-id))
            (txn (%make-githack-transaction tx-id)))
       (let ((*current-transaction* txn))
-        (%dtx-write! repository "main" "never-committed"))
+        (dtx-write! repository "main" "never-committed"))
       (let* ((pw (first (%githack-transaction-pending-writes txn)))
-             (manifest-text (%format-transaction-manifest
-                              (%build-transaction-manifest tx-id (list pw) (pending-write-git-repository pw)))))
+             (manifest-text (format-transaction-manifest
+                              (build-transaction-manifest tx-id (list pw) (pending-write-git-repository pw)))))
         (%prepare-participant! pw tx-id manifest-text))
       ;; Crash simulated here: the Ledger ref (in this same repository,
       ;; since it is the sole, and so its own elected, participant) is
       ;; never written.
-      (let ((results (run-githack-exorcist repository)))
+      (let ((results (run-githack-exorcist! repository)))
         (is (equal (list (list tx-id "main" :rolled-back)) results)))
       (is (null (git-show-ref-sha repository "main")))
       (is (null (%git-for-each-ref repository "refs/githack/prepare/"))))))
 
 (test exorcist-rolls-forward-a-stranded-prepare-ref-with-a-written-ledger
-  "RUN-GITHACK-EXORCIST, run against a repository holding a stranded
+  "RUN-GITHACK-EXORCIST!, run against a repository holding a stranded
 `refs/githack/prepare/<tx-id>/<branch-name>` ref whose own Ledger
 repository DID already receive its `refs/githack/ledger/<tx-id>`
 marker (simulating a crash after Phase 2's own Point-of-No-Return
@@ -202,43 +202,43 @@ but before its roll-forward loop reached this participant), fast-
 forwards the branch to the prepared commit and deletes the stranded
 ref."
   (with-temporary-git-repository (repository)
-    (let* ((tx-id (%generate-transaction-id))
+    (let* ((tx-id (generate-transaction-id))
            (txn (%make-githack-transaction tx-id)))
       (let ((*current-transaction* txn))
-        (%dtx-write! repository "main" "should-be-committed"))
+        (dtx-write! repository "main" "should-be-committed"))
       (let* ((pw (first (%githack-transaction-pending-writes txn)))
-             (manifest-text (%format-transaction-manifest
-                              (%build-transaction-manifest tx-id (list pw) (pending-write-git-repository pw)))))
+             (manifest-text (format-transaction-manifest
+                              (build-transaction-manifest tx-id (list pw) (pending-write-git-repository pw)))))
         (%prepare-participant! pw tx-id manifest-text)
         ;; Point of no return reached, then crash simulated before roll-forward.
         (%write-ledger-commit-point! (pending-write-git-repository pw) tx-id))
-      (let ((results (run-githack-exorcist repository)))
+      (let ((results (run-githack-exorcist! repository)))
         (is (equal (list (list tx-id "main" :committed)) results)))
-      (is (equal "should-be-committed" (%dtx-read repository "main")))
+      (is (equal "should-be-committed" (dtx-read repository "main")))
       (is (null (%git-for-each-ref repository "refs/githack/prepare/"))))))
 
 (test exorcist-is-a-no-op-for-a-repository-with-no-stranded-refs
-  "RUN-GITHACK-EXORCIST against a repository with no stranded
+  "RUN-GITHACK-EXORCIST! against a repository with no stranded
 `refs/githack/prepare/...` refs at all (the overwhelmingly common
 case) returns the empty list and touches nothing."
   (with-temporary-git-repository (repository)
     (with-githack-transaction ()
-      (%dtx-write! repository "main" "ordinary-value"))
-    (is (null (run-githack-exorcist repository)))
-    (is (equal "ordinary-value" (%dtx-read repository "main")))))
+      (dtx-write! repository "main" "ordinary-value"))
+    (is (null (run-githack-exorcist! repository)))
+    (is (equal "ordinary-value" (dtx-read repository "main")))))
 
 (test exorcist-is-idempotent-once-a-stranded-ref-is-already-resolved
-  "Calling RUN-GITHACK-EXORCIST a second time, immediately after it
+  "Calling RUN-GITHACK-EXORCIST! a second time, immediately after it
 already resolved a stranded ref, finds nothing left to do."
   (with-temporary-git-repository (repository)
-    (let* ((tx-id (%generate-transaction-id))
+    (let* ((tx-id (generate-transaction-id))
            (txn (%make-githack-transaction tx-id)))
       (let ((*current-transaction* txn))
-        (%dtx-write! repository "main" "resolved-once"))
+        (dtx-write! repository "main" "resolved-once"))
       (let* ((pw (first (%githack-transaction-pending-writes txn)))
-             (manifest-text (%format-transaction-manifest
-                              (%build-transaction-manifest tx-id (list pw) (pending-write-git-repository pw)))))
+             (manifest-text (format-transaction-manifest
+                              (build-transaction-manifest tx-id (list pw) (pending-write-git-repository pw)))))
         (%prepare-participant! pw tx-id manifest-text)
         (%write-ledger-commit-point! (pending-write-git-repository pw) tx-id))
-      (run-githack-exorcist repository)
-      (is (null (run-githack-exorcist repository))))))
+      (run-githack-exorcist! repository)
+      (is (null (run-githack-exorcist! repository))))))

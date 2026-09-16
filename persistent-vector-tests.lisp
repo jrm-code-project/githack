@@ -59,7 +59,7 @@ ordering)."
 compound objects (a plain GIT-TREE and a PERSISTENT-CONS) recursively
 persists them first. (A plain, non-persistent GIT-TREE is only ever
 expected to arrive with its own entries already persisted -- see
-%PERSIST-VECTOR-COMPONENT -- so LEAF is persisted here first, exactly
+PERSIST-VECTOR-COMPONENT -- so LEAF is persisted here first, exactly
 as SERIALIZE-TREE itself requires.)"
   (let* ((leaf (make-instance 'git-blob :repository :dummy-repo :payload :leaf)))
     (with-fake-git-hash-object ()
@@ -121,7 +121,7 @@ element proxies for the same SHAs."
            (meta-entry (cdr (assoc ".meta" (get-entries original) :test #'string=)))
            (readme-entry (cdr (assoc "README.md" (get-entries original) :test #'string=)))
            (meta-octets (third (find (sha meta-entry) calls
-                                      :key (lambda (call) (%fake-sha-for (second call) (third call)))
+                                      :key (lambda (call) (fake-sha-for (second call) (third call)))
                                       :test #'string=)))
            (hollow (make-instance 'persistent-vector :repository :dummy-repo :sha (sha original))))
       (is (not (null meta-octets)))

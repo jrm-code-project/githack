@@ -28,19 +28,19 @@ afterward."
              (fmakunbound 'git-show-ref-sha))))))
 
 (defmacro with-recording-git-update-ref ((calls-var) &body body)
-  "Within BODY, GIT-UPDATE-REF does not shell out to Git; instead
+  "Within BODY, GIT-UPDATE-REF! does not shell out to Git; instead
 each call pushes a (REPOSITORY NAME SHA) list -- or, if called with
 an EXPECTED-SHA other than :UNCONDITIONAL, a (REPOSITORY NAME SHA
 EXPECTED-SHA) list -- onto the setf-able place CALLS-VAR and returns
-SHA, exactly mimicking GIT-UPDATE-REF's real return value. Never
+SHA, exactly mimicking GIT-UPDATE-REF!'s real return value. Never
 simulates a compare-and-swap failure; see
 WITH-CAS-FAILING-GIT-UPDATE-REF for that. The real definition (or
-lack of one) of GIT-UPDATE-REF is restored afterward."
+lack of one) of GIT-UPDATE-REF! is restored afterward."
   (let ((was-bound (gensym "WAS-BOUND"))
         (original (gensym "ORIGINAL")))
-    `(let* ((,was-bound (fboundp 'git-update-ref))
-            (,original (and ,was-bound (fdefinition 'git-update-ref))))
-       (setf (fdefinition 'git-update-ref)
+    `(let* ((,was-bound (fboundp 'git-update-ref!))
+            (,original (and ,was-bound (fdefinition 'git-update-ref!))))
+       (setf (fdefinition 'git-update-ref!)
              (lambda (repository name sha &key (expected-sha :unconditional))
                (push (if (eq expected-sha :unconditional)
                          (list repository name sha)
@@ -49,27 +49,27 @@ lack of one) of GIT-UPDATE-REF is restored afterward."
                sha))
        (unwind-protect (progn ,@body)
          (if ,was-bound
-             (setf (fdefinition 'git-update-ref) ,original)
-             (fmakunbound 'git-update-ref))))))
+             (setf (fdefinition 'git-update-ref!) ,original)
+             (fmakunbound 'git-update-ref!))))))
 
 (defmacro with-cas-failing-git-update-ref ((&key (fail-count 1)) &body body)
-  "Within BODY, GIT-UPDATE-REF does not shell out to Git; instead,
+  "Within BODY, GIT-UPDATE-REF! does not shell out to Git; instead,
 whenever it is called with an EXPECTED-SHA other than :UNCONDITIONAL
 (i.e. a genuine compare-and-swap attempt), the first FAIL-COUNT such
 calls signal CONCURRENT-MODIFICATION-ERROR (simulating some other
 writer having already advanced the ref), and every call thereafter
 (and any unconditional call, at any time) succeeds and returns SHA,
-exactly mimicking GIT-UPDATE-REF's real return value. Suitable for
+exactly mimicking GIT-UPDATE-REF!'s real return value. Suitable for
 testing CALL-WITH-GIT-TRANSACTION's :CONFLICT-RESOLUTION :RETRY
 mode's re-attempt loop. The real definition (or lack of one) of
-GIT-UPDATE-REF is restored afterward."
+GIT-UPDATE-REF! is restored afterward."
   (let ((was-bound (gensym "WAS-BOUND"))
         (original (gensym "ORIGINAL"))
         (remaining (gensym "REMAINING")))
-    `(let* ((,was-bound (fboundp 'git-update-ref))
-            (,original (and ,was-bound (fdefinition 'git-update-ref)))
+    `(let* ((,was-bound (fboundp 'git-update-ref!))
+            (,original (and ,was-bound (fdefinition 'git-update-ref!)))
             (,remaining ,fail-count))
-       (setf (fdefinition 'git-update-ref)
+       (setf (fdefinition 'git-update-ref!)
              (lambda (repository name sha &key (expected-sha :unconditional))
                (if (and (not (eq expected-sha :unconditional)) (plusp ,remaining))
                    (progn
@@ -81,10 +81,10 @@ GIT-UPDATE-REF is restored afterward."
                    sha)))
        (unwind-protect (progn ,@body)
          (if ,was-bound
-             (setf (fdefinition 'git-update-ref) ,original)
-             (fmakunbound 'git-update-ref))))))
+             (setf (fdefinition 'git-update-ref!) ,original)
+             (fmakunbound 'git-update-ref!))))))
 
-(defun %fake-sha-for (type octets)
+(defun fake-sha-for (type octets)
   "Deterministically derive a syntactically valid 40-character
 hexadecimal string from TYPE and OCTETS, suitable for use as a fake
 Git SHA in tests: identical TYPE/OCTETS pairs always produce the
@@ -106,7 +106,7 @@ prefix."
 (defmacro with-fake-git-hash-object (() &body body)
   "Within BODY, GIT-HASH-OBJECT does not shell out to Git or touch
 the filesystem; instead it returns a fake SHA deterministically
-derived from its TYPE and OCTETS arguments by %FAKE-SHA-FOR. The
+derived from its TYPE and OCTETS arguments by FAKE-SHA-FOR. The
 real definition (or lack of one) of GIT-HASH-OBJECT is restored
 afterward."
   (let ((was-bound (gensym "WAS-BOUND"))
@@ -116,7 +116,7 @@ afterward."
        (setf (fdefinition 'git-hash-object)
              (lambda (repository type octets)
                (declare (ignore repository))
-               (%fake-sha-for type octets)))
+               (fake-sha-for type octets)))
        (unwind-protect (progn ,@body)
          (if ,was-bound
              (setf (fdefinition 'git-hash-object) ,original)
@@ -126,7 +126,7 @@ afterward."
   "Within BODY, GIT-HASH-OBJECT does not shell out to Git or touch
 the filesystem; instead each call pushes a (REPOSITORY TYPE OCTETS)
 list onto the setf-able place CALLS-VAR and returns a fake SHA
-deterministically derived from TYPE and OCTETS by %FAKE-SHA-FOR,
+deterministically derived from TYPE and OCTETS by FAKE-SHA-FOR,
 exactly as WITH-FAKE-GIT-HASH-OBJECT's fake SHAs behave. The real
 definition (or lack of one) of GIT-HASH-OBJECT is restored
 afterward."
@@ -137,7 +137,7 @@ afterward."
        (setf (fdefinition 'git-hash-object)
              (lambda (repository type octets)
                (push (list repository type octets) ,calls-var)
-               (%fake-sha-for type octets)))
+               (fake-sha-for type octets)))
        (unwind-protect (progn ,@body)
          (if ,was-bound
              (setf (fdefinition 'git-hash-object) ,original)
@@ -169,7 +169,7 @@ afterward."
   "Within BODY, GIT-HASH-OBJECT and GIT-CAT-FILE cooperate as a
 single in-memory fake Git object database, neither shelling out to
 Git nor touching the filesystem: GIT-HASH-OBJECT computes a fake SHA
-for its TYPE/OCTETS arguments via %FAKE-SHA-FOR and remembers OCTETS
+for its TYPE/OCTETS arguments via FAKE-SHA-FOR and remembers OCTETS
 under that SHA; GIT-CAT-FILE returns the OCTETS previously remembered
 for a SHA, signaling an error for any SHA never hashed in this way.
 The real definitions (or lack thereof) of both functions are
@@ -187,7 +187,7 @@ restored afterward."
        (setf (fdefinition 'git-hash-object)
              (lambda (repository type octets)
                (declare (ignore repository))
-               (let ((sha (%fake-sha-for type octets)))
+               (let ((sha (fake-sha-for type octets)))
                  (setf (gethash sha ,table) octets)
                  sha)))
        (setf (fdefinition 'git-cat-file)
@@ -209,7 +209,7 @@ restored afterward."
   "Within BODY, GIT-HASH-OBJECT, GIT-CAT-FILE, and GIT-TYPE all
 cooperate as a single in-memory fake Git object database, none of
 them shelling out to Git or touching the filesystem: GIT-HASH-OBJECT
-computes a fake SHA for its TYPE/OCTETS arguments via %FAKE-SHA-FOR
+computes a fake SHA for its TYPE/OCTETS arguments via FAKE-SHA-FOR
 and remembers both OCTETS and TYPE under that SHA; GIT-CAT-FILE
 returns the OCTETS previously remembered for a SHA; GIT-TYPE returns
 the TYPE previously remembered for a SHA; each of the latter two
@@ -239,7 +239,7 @@ afterward."
        (setf (fdefinition 'git-hash-object)
              (lambda (repository type octets)
                (declare (ignore repository))
-               (let ((sha (%fake-sha-for type octets)))
+               (let ((sha (fake-sha-for type octets)))
                  (setf (gethash sha ,table) (cons type octets))
                  sha)))
        (setf (fdefinition 'git-cat-file)
@@ -267,12 +267,12 @@ afterward."
              (setf (fdefinition 'git-type) ,type-original)
              (fmakunbound 'git-type))))))
 
-(defun %e2e-unique-repository-pathname (&optional (name-prefix "githack-e2e-"))
+(defun e2e-unique-repository-pathname (&optional (name-prefix "githack-e2e-"))
   "Return a pathname, extremely unlikely to collide with any other
 directory, naming a fresh temporary directory (not yet created)
 within the system's default temporary directory, suitable to `git
 init --bare` a real end-to-end test repository into. Mirrors
-GIT-IO.LISP's own %UNIQUE-TEMPORARY-PATHNAME, but names a directory
+GIT-IO.LISP's own UNIQUE-TEMPORARY-PATHNAME, but names a directory
 (a trailing \"/\") rather than a file. NAME-PREFIX (a string,
 defaulting to \"githack-e2e-\") is prepended verbatim before the
 random unique suffix, letting a caller embed characters of interest
@@ -289,10 +289,10 @@ init --bare`, genuinely shelling out to the Git executable, not any
 WITH-FAKE-GIT-*/WITH-RECORDING-GIT-* fixture above -- inside a fresh
 temporary directory. Bind REPOSITORY-VAR, for the extent of BODY, to
 that repository's pathname (its --git-dir, exactly what
-GIT-HASH-OBJECT/GIT-CAT-FILE/GIT-TYPE/GIT-SHOW-REF-SHA/GIT-UPDATE-REF
+GIT-HASH-OBJECT/GIT-CAT-FILE/GIT-TYPE/GIT-SHOW-REF-SHA/GIT-UPDATE-REF!
 all expect as their own REPOSITORY argument). NAME-PREFIX (a string
 form, evaluated once, defaulting to \"githack-e2e-\") is passed
-through to %E2E-UNIQUE-REPOSITORY-PATHNAME, letting a test embed
+through to E2E-UNIQUE-REPOSITORY-PATHNAME, letting a test embed
 characters of interest (spaces, non-ASCII text) in the repository's
 own pathname. Closes any persistent `git` subprocess sessions
 GIT-HASH-OBJECT/GIT-TYPE/GIT-CAT-FILE opened against this repository
@@ -302,7 +302,7 @@ temporary directory afterward, regardless of how BODY exits
 session's pipes would otherwise silently outlive, and keep
 referencing, a directory this macro is about to delete."
   (let ((path (gensym "PATH")))
-    `(let ((,path (%e2e-unique-repository-pathname ,@(and name-prefix (list name-prefix)))))
+    `(let ((,path (e2e-unique-repository-pathname ,@(and name-prefix (list name-prefix)))))
        (ensure-directories-exist ,path)
        (uiop:run-program (list "git" "init" "--bare" (uiop:native-namestring ,path))
                           :output nil :error-output nil)

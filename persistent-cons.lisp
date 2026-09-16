@@ -66,7 +66,7 @@ deserializing, before this cons's ENTRIES have been examined).")
     :documentation
     "This cons's list length, counting itself and every cons in its
 CDR chain (1 for a dotted pair or a singleton list), or NIL if not
-yet computed/loaded. See %PERSISTENT-CONS-METADATA.")
+yet computed/loaded. See PERSISTENT-CONS-METADATA.")
    (proper
     :initarg :proper
     :initform nil
@@ -75,7 +75,7 @@ yet computed/loaded. See %PERSISTENT-CONS-METADATA.")
     "True if this cons and its entire CDR chain terminates in NIL
 (a proper list); NIL if it instead terminates in some other atom (a
 dotted pair), or if not yet computed/loaded. See
-%PERSISTENT-CONS-METADATA."))
+PERSISTENT-CONS-METADATA."))
   (:documentation
    "Proxy for a single, immutable Lisp cons cell, stored as a Git
 tree with exactly four entries: \".meta\", \"README.md\", \"car\",
@@ -102,45 +102,45 @@ chain terminates in NIL (a proper list); NIL if it instead
 terminates in some other atom (a dotted pair), or if not yet
 computed/loaded.")
 
-(defun %serialize-persistent-cons-meta (length proper)
+(defun serialize-persistent-cons-meta (length proper)
   "Encode the small property list (:TAG :CONS :LENGTH LENGTH :PROPER
-PROPER) as a UTF-8 octet vector, via %SERIALIZE-PLIST: the exact raw
+PROPER) as a UTF-8 octet vector, via SERIALIZE-PLIST: the exact raw
 content of a persistent cons's \".meta\" blob."
-  (%serialize-plist (list :tag :cons :length length :proper proper)))
+  (serialize-plist (list :tag :cons :length length :proper proper)))
 
-(defun %deserialize-persistent-cons-meta (octets)
-  "Inverse of %SERIALIZE-PERSISTENT-CONS-META: parse OCTETS -- the
+(defun deserialize-persistent-cons-meta (octets)
+  "Inverse of SERIALIZE-PERSISTENT-CONS-META: parse OCTETS -- the
 raw content of a persistent cons's \".meta\" blob -- via
-%DESERIALIZE-PLIST, and return two values, its :LENGTH and :PROPER.
+DESERIALIZE-PLIST, and return two values, its :LENGTH and :PROPER.
 Signals an error if OCTETS is not a plist whose :TAG is :CONS."
-  (let ((plist (%deserialize-plist octets)))
+  (let ((plist (deserialize-plist octets)))
     (unless (eq (getf plist :tag) :cons)
       (error 'malformed-git-object-error
              :format-control "Malformed persistent cons .meta blob: ~S."
              :format-arguments (list plist)))
     (values (getf plist :length) (getf plist :proper))))
 
-(defgeneric %persist-cons-component-by-type (git-object)
+(defgeneric persist-cons-component-by-type (git-object)
   (:documentation
    "Persist GIT-OBJECT (which is known not to have a SHA yet) to
 Git's object database according to its concrete type, and return the
-resulting SHA. Broken out of %PERSIST-CONS-COMPONENT so this
+resulting SHA. Broken out of PERSIST-CONS-COMPONENT so this
 dispatch is its own generic function, with one DEFMETHOD per
 concrete type in place of an ETYPECASE clause."))
 
-(defmethod %persist-cons-component-by-type ((git-object persistent-cons))
+(defmethod persist-cons-component-by-type ((git-object persistent-cons))
   (serialize-persistent-cons git-object))
 
-(defmethod %persist-cons-component-by-type ((git-object git-tree))
+(defmethod persist-cons-component-by-type ((git-object git-tree))
   (setf (sha git-object)
         (git-hash-object (get-repository git-object) "tree" (serialize-tree git-object))))
 
-(defmethod %persist-cons-component-by-type ((git-object git-blob))
+(defmethod persist-cons-component-by-type ((git-object git-blob))
   (setf (sha git-object)
         (git-hash-object (get-repository git-object) "blob"
                           (serialize-atom (get-payload git-object)))))
 
-(defun %persist-cons-component (git-object)
+(defun persist-cons-component (git-object)
   "Ensure GIT-OBJECT (a GIT-BLOB, a plain GIT-TREE, or a nested
 PERSISTENT-CONS) has a SHA, persisting it via GIT-HASH-OBJECT if it
 does not already. A PERSISTENT-CONS is persisted recursively,
@@ -149,22 +149,22 @@ other GIT-TREE is assumed to already have every one of its ENTRIES
 persisted, exactly as SERIALIZE-TREE itself requires. Returns
 GIT-OBJECT's SHA."
   (or (sha git-object)
-      (%persist-cons-component-by-type git-object)))
+      (persist-cons-component-by-type git-object)))
 
-(defun %persistent-cons-metadata (cons)
+(defun persistent-cons-metadata (cons)
   "Return two values, the :LENGTH and :PROPER CONS's \".meta\" must
 record, computed from CONS's PERSISTENT-CDR: 1 and T if
 PERSISTENT-CDR is NIL (CONS is the last cons of a proper list); one
 more than, and the same properness as, PERSISTENT-CDR's own
 LENGTH/PROPER if PERSISTENT-CDR is itself a PERSISTENT-CONS
-(persisting it first via %PERSIST-CONS-COMPONENT if necessary, so
+(persisting it first via PERSIST-CONS-COMPONENT if necessary, so
 those slots are guaranteed to already be populated); or 1 and NIL
 for any other (dotted pair) PERSISTENT-CDR."
   (let ((cdr (persistent-cdr cons)))
     (cond
       ((null cdr) (values 1 t))
       ((typep cdr 'persistent-cons)
-       (%persist-cons-component cdr)
+       (persist-cons-component cdr)
        (values (1+ (persistent-cons-length cdr)) (persistent-cons-proper cdr)))
       (t (values 1 nil)))))
 
@@ -177,18 +177,18 @@ cons of a proper list, and replacing CONS's PERSISTENT-CDR with that
 GIT-BLOB), and finally write CONS's own Git tree object. Unlike
 SERIALIZE-TREE/SERIALIZE-COMMIT elsewhere in this layer, this
 function performs real I/O: it is the PERSISTENT-CONS analogue of
-GIT-TRANSACTION's %PERSIST-GIT-TREE-OBJECT, not a pure encoder.
+GIT-TRANSACTION's PERSIST-GIT-TREE-OBJECT, not a pure encoder.
 Signals an error if CONS's PERSISTENT-CAR has not been set. Returns
 CONS's own SHA, doing nothing further if CONS already has one."
   (or (sha cons)
-      (multiple-value-bind (length proper) (%persistent-cons-metadata cons)
+      (multiple-value-bind (length proper) (persistent-cons-metadata cons)
         (setf (persistent-cons-length cons) length)
         (setf (persistent-cons-proper cons) proper)
         (let* ((repository (get-repository cons))
                (meta-blob (make-instance 'git-blob :repository repository
                                                     :sha (git-hash-object
                                                           repository "blob"
-                                                          (%serialize-persistent-cons-meta length proper))))
+                                                          (serialize-persistent-cons-meta length proper))))
                (readme-blob (make-instance 'git-blob :repository repository
                                                       :sha (git-hash-object
                                                             repository "blob"
@@ -201,8 +201,8 @@ CONS's own SHA, doing nothing further if CONS already has one."
           (unless car-object
             (error 'unpersisted-object-error
                    :format-control "Cannot serialize persistent cons: its PERSISTENT-CAR has not been set."))
-          (%persist-cons-component car-object)
-          (%persist-cons-component cdr-object)
+          (persist-cons-component car-object)
+          (persist-cons-component cdr-object)
           (setf (persistent-cdr cons) cdr-object)
           (setf (get-entries cons)
                 (list (cons ".meta" meta-blob)
@@ -242,13 +242,13 @@ error if TREE-OCTETS' entries do not include \".meta\", \"README.md\",
     (unless cdr-entry
       (error 'malformed-git-object-error
              :format-control "Malformed persistent cons tree: missing \"cdr\" entry."))
-    (multiple-value-bind (length proper) (%deserialize-persistent-cons-meta meta-octets)
+    (multiple-value-bind (length proper) (deserialize-persistent-cons-meta meta-octets)
       (setf (get-entries cons) entries)
       (setf (persistent-car cons) (cdr car-entry))
       (setf (persistent-cdr cons) (cdr cdr-entry))
       (setf (persistent-cons-length cons) length)
       (setf (persistent-cons-proper cons) proper)
-      (setf (get-loaded? cons) t)
+      (%publish-loaded! cons)
       cons)))
 
 (defun %ensure-persistent-cons-loaded (cons)
@@ -261,19 +261,29 @@ nested PERSISTENT-CONS from an ordinary GIT-TREE), retype it in place
 into a PERSISTENT-CONS via CHANGE-CLASS; then, if CONS is not yet
 loaded, fetch its raw tree bytes and its own \".meta\" blob via
 GIT-CAT-FILE, and populate it via DESERIALIZE-PERSISTENT-CONS.
-Returns CONS."
-  (unless (typep cons 'persistent-cons)
-    (change-class cons 'persistent-cons))
-  (unless (get-loaded? cons)
-    (let* ((repository (get-repository cons))
-           (tree-octets (git-cat-file repository (sha cons)))
-           (entries (deserialize-tree repository tree-octets))
-           (meta-entry (assoc ".meta" entries :test #'string=))
-           (meta-octets (git-cat-file repository (sha (cdr meta-entry)))))
-      (deserialize-persistent-cons cons tree-octets meta-octets)))
+Returns CONS.
+
+Thread-safe: the common case -- CONS already retyped and loaded --
+is checked, and returns, with no lock ever taken. Only if CONS might
+still need its own CL:CHANGE-CLASS retyping (not safe to race, unlike
+this file's other, plain-data lazy loads) is WITH-OBJECT-LOAD-LOCK's
+own stripe mutex acquired, with the same check redone once inside it
+in case another thread already finished retyping/loading CONS while
+this one was waiting for the lock."
+  (unless (and (typep cons 'persistent-cons) (get-loaded? cons))
+    (with-object-load-lock (cons)
+      (unless (typep cons 'persistent-cons)
+        (change-class cons 'persistent-cons))
+      (unless (get-loaded? cons)
+        (let* ((repository (get-repository cons))
+               (tree-octets (git-cat-file repository (sha cons)))
+               (entries (deserialize-tree repository tree-octets))
+               (meta-entry (assoc ".meta" entries :test #'string=))
+               (meta-octets (git-cat-file repository (sha (cdr meta-entry)))))
+          (deserialize-persistent-cons cons tree-octets meta-octets)))))
   cons)
 
-(defun %persistent-cons-decode (git-object)
+(defun persistent-cons-decode (git-object)
   "Return the real Lisp value GIT-OBJECT represents: its decoded
 PAYLOAD, if GIT-OBJECT is a GIT-BLOB (fetching it from the
 repository first via %ENSURE-BLOB-LOADED, if not yet loaded); or
@@ -283,14 +293,14 @@ proxy."
       (get-payload (%ensure-blob-loaded git-object))
       git-object))
 
-(defun %persistent-cons-tail-p (tail)
+(defun persistent-cons-tail-p (tail)
   "Return true if TAIL (a raw PERSISTENT-CDR value, possibly not yet
 retyped by %ENSURE-PERSISTENT-CONS-LOADED) represents a further cons
 cell continuing the list, as opposed to NIL (a proper list's own
 terminator) or a GIT-BLOB (the sentinel SERIALIZE-PERSISTENT-CONS
 always uses to encode either a proper list's terminal NIL or a
 dotted pair's own final atom) -- either of which ends the chain.
-Mirrors PERSISTENT-HASH-TABLE.LISP's own %PHASH-BUCKET-NODE-P, which
+Mirrors PERSISTENT-HASH-TABLE.LISP's own PHASH-BUCKET-NODE-P, which
 applies this identical convention to its own PERSISTENT-CONS
 bucket chains."
   (and tail (not (typep tail 'git-blob))))
@@ -298,12 +308,12 @@ bucket chains."
 (defun scan-persistent-list (list)
   "Return a series of the successive PERSISTENT-CAR elements of LIST
 (a PERSISTENT-CONS, a not-yet-retyped GIT-TREE proxy for one, or NIL
-for the empty list), each decoded via %PERSISTENT-CONS-DECODE (a
+for the empty list), each decoded via PERSISTENT-CONS-DECODE (a
 GIT-BLOB element's own PAYLOAD, or any other, compound GIT-OBJECT
 proxy left unchanged), fetching each successive cons cell via
 %ENSURE-PERSISTENT-CONS-LOADED one at a time as the underlying
 SCAN-FN/MAP-FN series is advanced. Terminates -- producing a finite
-series -- at the first tail for which %PERSISTENT-CONS-TAIL-P is
+series -- at the first tail for which PERSISTENT-CONS-TAIL-P is
 false: NIL (a proper list's own terminator) or a GIT-BLOB (a dotted
 pair's own final atom); LIST itself may already be either of these,
 in which case the series is empty. An OPTIMIZABLE-SERIES-FUNCTION,
@@ -322,10 +332,10 @@ the resulting series is later consumed."
   (let ((tails (scan-fn t
                         (lambda () list)
                         (lambda (tail) (persistent-cdr (%ensure-persistent-cons-loaded tail)))
-                        (lambda (tail) (not (%persistent-cons-tail-p tail))))))
+                        (lambda (tail) (not (persistent-cons-tail-p tail))))))
     (map-fn t
             (lambda (tail)
-              (%persistent-cons-decode (persistent-car (%ensure-persistent-cons-loaded tail))))
+              (persistent-cons-decode (persistent-car (%ensure-persistent-cons-loaded tail))))
             tails)))
 
 (defun scan-persistent-alist (list)
@@ -338,9 +348,9 @@ not-yet-retyped GIT-TREE proxy for one) whose own PERSISTENT-CAR is
 that entry's key and PERSISTENT-CDR is that entry's value, exactly
 the PERSISTENT-CONS-of-PERSISTENT-CONSes shape used throughout
 PERSISTENT-HASH-TABLE.LISP for its own bucket chains. Each key and
-value is decoded via %PERSISTENT-CONS-DECODE, precisely as
+value is decoded via PERSISTENT-CONS-DECODE, precisely as
 SCAN-PERSISTENT-LIST decodes its own elements. Terminates at the
-first spine tail for which %PERSISTENT-CONS-TAIL-P is false, exactly
+first spine tail for which PERSISTENT-CONS-TAIL-P is false, exactly
 as SCAN-PERSISTENT-LIST does.
 
 Unlike CL:SCAN-ALIST, this does NOT suppress shadowed duplicate keys
@@ -365,13 +375,13 @@ one shared, single underlying (key . value) Lisp cons series."
   (let* ((tails (scan-fn t
                          (lambda () list)
                          (lambda (tail) (persistent-cdr (%ensure-persistent-cons-loaded tail)))
-                         (lambda (tail) (not (%persistent-cons-tail-p tail)))))
+                         (lambda (tail) (not (persistent-cons-tail-p tail)))))
          (pairs (map-fn t
                         (lambda (tail)
                           (let ((pair (%ensure-persistent-cons-loaded
-                                       (%persistent-cons-decode (persistent-car (%ensure-persistent-cons-loaded tail))))))
-                            (cons (%persistent-cons-decode (persistent-car pair))
-                                  (%persistent-cons-decode (persistent-cdr pair)))))
+                                       (persistent-cons-decode (persistent-car (%ensure-persistent-cons-loaded tail))))))
+                            (cons (persistent-cons-decode (persistent-car pair))
+                                  (persistent-cons-decode (persistent-cdr pair)))))
                         tails)))
     (values (map-fn t #'car pairs)
             (map-fn t #'cdr pairs))))
@@ -385,9 +395,9 @@ elements directly alternate indicator, value, indicator, value, ...
 -- a flat spine of 2*N cons cells for N indicator/value pairs, unlike
 SCAN-PERSISTENT-ALIST's spine of N pairs each itself a further
 PERSISTENT-CONS. Each indicator and value is decoded via
-%PERSISTENT-CONS-DECODE, precisely as SCAN-PERSISTENT-LIST decodes
+PERSISTENT-CONS-DECODE, precisely as SCAN-PERSISTENT-LIST decodes
 its own elements. Terminates at the first indicator-position tail
-for which %PERSISTENT-CONS-TAIL-P is false, exactly as
+for which PERSISTENT-CONS-TAIL-P is false, exactly as
 SCAN-PERSISTENT-LIST does; LIST is assumed to hold an even number of
 elements, exactly as CL:GETF/SCAN-PLIST assume of an ordinary plist.
 
@@ -418,19 +428,19 @@ indicator-position tail is not re-fetched when later decoded."
                          (lambda (tail)
                            (persistent-cdr (%ensure-persistent-cons-loaded
                                              (persistent-cdr (%ensure-persistent-cons-loaded tail)))))
-                         (lambda (tail) (not (%persistent-cons-tail-p tail)))))
+                         (lambda (tail) (not (persistent-cons-tail-p tail)))))
          (pairs (map-fn t
                         (lambda (tail)
                           (let* ((indicator-cons (%ensure-persistent-cons-loaded tail))
                                  (value-cons (%ensure-persistent-cons-loaded (persistent-cdr indicator-cons))))
-                            (cons (%persistent-cons-decode (persistent-car indicator-cons))
-                                  (%persistent-cons-decode (persistent-car value-cons)))))
+                            (cons (persistent-cons-decode (persistent-car indicator-cons))
+                                  (persistent-cons-decode (persistent-car value-cons)))))
                         tails)))
     (values (map-fn t #'car pairs)
             (map-fn t #'cdr pairs))))
 
-(defun %persistent-cons-encode (repository value)
-  "Inverse of %PERSISTENT-CONS-DECODE: return VALUE itself, unchanged,
+(defun persistent-cons-encode (repository value)
+  "Inverse of PERSISTENT-CONS-DECODE: return VALUE itself, unchanged,
 if it is already a GIT-OBJECT (a compound proxy -- a GIT-TREE,
 PERSISTENT-CONS, PERSISTENT-VECTOR, or GIT-BLOB -- to be stored
 directly as-is); otherwise wrap VALUE as the PAYLOAD of a freshly
@@ -448,7 +458,7 @@ COLLECT itself always terminates a series back into a concrete Lisp
 list before any further ordinary-Lisp processing), in the same order
 ITEMS itself holds them, or NIL if ITEMS is empty. Each element
 becomes one new cons cell's own PERSISTENT-CAR, via
-%PERSISTENT-CONS-ENCODE -- an already-compound GIT-OBJECT proxy (a
+PERSISTENT-CONS-ENCODE -- an already-compound GIT-OBJECT proxy (a
 GIT-TREE, PERSISTENT-CONS, PERSISTENT-VECTOR, or GIT-BLOB) is stored
 as-is, while any other, raw Lisp value is wrapped in a fresh
 GIT-BLOB. Exactly inverts SCAN-PERSISTENT-LIST composed with
@@ -464,7 +474,7 @@ SERIALIZE-PERSISTENT-CONS on the returned head (or on any nested,
 newly built cons cell) to actually persist it to Git."
   (reduce (lambda (value tail)
             (make-instance 'persistent-cons :repository repository :loaded? t
-                                             :persistent-car (%persistent-cons-encode repository value)
+                                             :persistent-car (persistent-cons-encode repository value)
                                              :persistent-cdr tail))
           items
           :from-end t
@@ -479,7 +489,7 @@ own COLLECT to SCAN-PERSISTENT-ALIST's own two output series), or
 NIL if both are empty. Each corresponding (KEYS[i] . VALUES[i]) pair
 becomes one new \"pair\" cons cell -- a further PERSISTENT-CONS whose
 PERSISTENT-CAR/PERSISTENT-CDR are KEYS[i]/VALUES[i], each via
-%PERSISTENT-CONS-ENCODE exactly as COLLECT-PERSISTENT-LIST encodes
+PERSISTENT-CONS-ENCODE exactly as COLLECT-PERSISTENT-LIST encodes
 its own elements -- chained via the outer spine's own
 PERSISTENT-CDR, in KEYS/VALUES' own order: the same PERSISTENT-CONS-
 of-PERSISTENT-CONSes shape SCAN-PERSISTENT-ALIST expects and
@@ -496,8 +506,8 @@ of its two output series, and vice versa."
   (reduce (lambda (pair tail)
             (make-instance 'persistent-cons :repository repository :loaded? t
                                              :persistent-car (make-instance 'persistent-cons :repository repository :loaded? t
-                                                                             :persistent-car (%persistent-cons-encode repository (car pair))
-                                                                             :persistent-cdr (%persistent-cons-encode repository (cdr pair)))
+                                                                             :persistent-car (persistent-cons-encode repository (car pair))
+                                                                             :persistent-cdr (persistent-cons-encode repository (cdr pair)))
                                              :persistent-cdr tail))
           (mapcar #'cons keys values)
           :from-end t
@@ -512,7 +522,7 @@ applying SERIES's own COLLECT to SCAN-PERSISTENT-PLIST's own two
 output series), or NIL if both are empty. Each corresponding
 (INDICATORS[i] . VALUES[i]) pair becomes two successive cons cells
 of the same spine -- INDICATORS[i] then VALUES[i], each via
-%PERSISTENT-CONS-ENCODE exactly as COLLECT-PERSISTENT-LIST encodes
+PERSISTENT-CONS-ENCODE exactly as COLLECT-PERSISTENT-LIST encodes
 its own elements -- alternating indicator, value, indicator, value,
 ... in INDICATORS/VALUES' own order: the same flat, 2*N-cons-cell
 shape SCAN-PERSISTENT-PLIST expects, unlike COLLECT-PERSISTENT-
@@ -528,9 +538,9 @@ versa."
            (length indicators) (length values)))
   (reduce (lambda (pair tail)
             (make-instance 'persistent-cons :repository repository :loaded? t
-                                             :persistent-car (%persistent-cons-encode repository (car pair))
+                                             :persistent-car (persistent-cons-encode repository (car pair))
                                              :persistent-cdr (make-instance 'persistent-cons :repository repository :loaded? t
-                                                                             :persistent-car (%persistent-cons-encode repository (cdr pair))
+                                                                             :persistent-car (persistent-cons-encode repository (cdr pair))
                                                                              :persistent-cdr tail)))
           (mapcar #'cons indicators values)
           :from-end t

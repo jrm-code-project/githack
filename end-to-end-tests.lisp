@@ -22,7 +22,7 @@
 
 (defparameter +e2e-author+ "Test Author <test@githack.local>")
 
-(defun %e2e-fetch-tree-and-meta-octets (repository sha)
+(defun e2e-fetch-tree-and-meta-octets (repository sha)
   "Return, as two values, the raw Git tree bytes for SHA and the raw
 bytes of its own \".meta\" entry, fetched via GIT-CAT-FILE/
 DESERIALIZE-TREE against the real REPOSITORY -- exactly the two
@@ -35,27 +35,27 @@ of their own caller."
       (error "Malformed persistent tree ~S: missing \".meta\" entry." sha))
     (values tree-octets (git-cat-file repository (sha (cdr meta-entry))))))
 
-(defun %e2e-load-persistent-cons (repository sha)
+(defun e2e-load-persistent-cons (repository sha)
   "Return a fully loaded PERSISTENT-CONS proxy for SHA, fetched for
 real from REPOSITORY."
   (let ((cons (make-instance 'persistent-cons :repository repository :sha sha)))
-    (multiple-value-bind (tree-octets meta-octets) (%e2e-fetch-tree-and-meta-octets repository sha)
+    (multiple-value-bind (tree-octets meta-octets) (e2e-fetch-tree-and-meta-octets repository sha)
       (deserialize-persistent-cons cons tree-octets meta-octets))))
 
-(defun %e2e-decode-blob (git-object)
+(defun e2e-decode-blob (git-object)
   "Decode GIT-OBJECT (a GIT-BLOB, fetched for real via
 %ENSURE-BLOB-LOADED if not already loaded) into its real Lisp
 PAYLOAD."
   (get-payload (%ensure-blob-loaded git-object)))
 
-(defun %e2e-hijack-branch! (repository-path branch-name payload)
+(defun e2e-hijack-branch! (repository-path branch-name payload)
   "Simulate a genuine concurrent external writer racing an in-flight
 transaction: build and persist, via the very same low-level
 primitives GitHack's own commit path itself uses (GIT-HASH-OBJECT,
 WRAP-ATOMIC-COMMIT-ROOT), a brand-new, real, orphan GIT-COMMIT
 wrapping PAYLOAD as its root, then unconditionally force BRANCH-NAME
 (in the real, bare Git repository at REPOSITORY-PATH) to point at
-it via GIT-UPDATE-REF -- exactly as if some other, wholly independent
+it via GIT-UPDATE-REF! -- exactly as if some other, wholly independent
 process had already advanced BRANCH-NAME out from under the caller's
 own in-flight transaction, between its own read and its own commit.
 Bypasses CALL-WITH-GIT-TRANSACTION/CALL-WITH-TRANSACTION entirely
@@ -81,11 +81,11 @@ mock."
       (setf (sha commit)
             (git-hash-object repository-path "commit"
                               (sb-ext:string-to-octets (serialize-commit commit) :external-format :utf-8)))
-      (git-update-ref repository-path branch-name (sha commit)))))
+      (git-update-ref! repository-path branch-name (sha commit)))))
 
-(defun %e2e-hijack-branch-with-tree! (repository-path branch-name parent-sha entries)
+(defun e2e-hijack-branch-with-tree! (repository-path branch-name parent-sha entries)
   "Simulate a genuine concurrent external writer racing an in-flight
-:REBASE transaction, but -- unlike %E2E-HIJACK-BRANCH! -- as a real
+:REBASE transaction, but -- unlike E2E-HIJACK-BRANCH! -- as a real
 descendant of PARENT-SHA rather than a brand-new orphan, so that its
 resulting commit shares real Git ancestry with whatever the racing
 transaction itself started from: this is what lets `git merge-tree`
@@ -97,7 +97,7 @@ persisted as its own real GIT-BLOB and referenced from a single new
 real GIT-TREE built from all of ENTRIES; PARENT-SHA becomes that new
 commit's sole real parent. Force BRANCH-NAME (in the real, bare Git
 repository at REPOSITORY-PATH) to point at the new commit via
-GIT-UPDATE-REF, unconditionally, exactly as an independent racing
+GIT-UPDATE-REF!, unconditionally, exactly as an independent racing
 writer would, and return the new commit's own SHA."
   (let ((tree (make-instance 'git-tree
                               :repository repository-path
@@ -124,18 +124,18 @@ writer would, and return the new commit's own SHA."
       (setf (sha commit)
             (git-hash-object repository-path "commit"
                               (sb-ext:string-to-octets (serialize-commit commit) :external-format :utf-8)))
-      (git-update-ref repository-path branch-name (sha commit))
+      (git-update-ref! repository-path branch-name (sha commit))
       (sha commit))))
 
-(defun %e2e-hijack-branch-atomic! (repository-path branch-name parent-sha payload)
-  "Like %E2E-HIJACK-BRANCH-WITH-TREE!, but for a single bare atomic
+(defun e2e-hijack-branch-atomic! (repository-path branch-name parent-sha payload)
+  "Like E2E-HIJACK-BRANCH-WITH-TREE!, but for a single bare atomic
 root value (e.g. a string) instead of a multi-entry tree: PAYLOAD is
 persisted as its own real GIT-BLOB, wrapped via WRAP-ATOMIC-COMMIT-
 ROOT exactly as GIT-TRANSACTION's own commit path would wrap it, and
 committed as a real descendant of PARENT-SHA -- so that `git
 merge-tree` can locate a genuine common merge base against this
 racing writer's own atomic-wrapper commit. Force BRANCH-NAME to
-point at the new commit via GIT-UPDATE-REF, unconditionally, and
+point at the new commit via GIT-UPDATE-REF!, unconditionally, and
 return the new commit's own SHA."
   (let ((blob (make-instance 'git-blob :repository repository-path :payload payload)))
     (setf (sha blob) (git-hash-object repository-path "blob" (serialize-atom payload)))
@@ -154,10 +154,10 @@ return the new commit's own SHA."
       (setf (sha commit)
             (git-hash-object repository-path "commit"
                               (sb-ext:string-to-octets (serialize-commit commit) :external-format :utf-8)))
-      (git-update-ref repository-path branch-name (sha commit))
+      (git-update-ref! repository-path branch-name (sha commit))
       (sha commit))))
 
-(defun %e2e-commit-tree-sha (repository commit-sha)
+(defun e2e-commit-tree-sha (repository commit-sha)
   "Return the real root tree SHA a real commit COMMIT-SHA points at,
 parsed directly out of its own raw \"tree \" header line via
 GIT-CAT-FILE, bypassing any GitHack commit-loading machinery
@@ -169,7 +169,7 @@ entirely."
       (error "Malformed commit ~S: no \"tree\" header line." commit-sha))
     (subseq line 5)))
 
-(defun %e2e-tree-entry-payload (repository sha filename)
+(defun e2e-tree-entry-payload (repository sha filename)
   "Return the real, decoded atomic Lisp payload stored at FILENAME
 within the real Git tree SHA, fetched via GIT-CAT-FILE/
 DESERIALIZE-TREE/DESERIALIZE-ATOM against REPOSITORY, bypassing any
@@ -236,15 +236,15 @@ structural sharing survives real Git persistence."
          ;; Transaction 2: read the real root back, verify its shape,
          ;; then extend it with a new head node.
          (with-transaction (value) (repository :read-write)
-           (let ((head (%e2e-load-persistent-cons repository-path (sha value))))
+           (let ((head (e2e-load-persistent-cons repository-path (sha value))))
              (is (= 3 (persistent-cons-length head)))
              (is (eq t (persistent-cons-proper head)))
-             (is (eql 1 (%e2e-decode-blob (persistent-car head))))
-             (let ((mid (%e2e-load-persistent-cons repository-path (sha (persistent-cdr head)))))
-               (is (eql 2 (%e2e-decode-blob (persistent-car mid))))
-               (let ((tail (%e2e-load-persistent-cons repository-path (sha (persistent-cdr mid)))))
-                 (is (eql 3 (%e2e-decode-blob (persistent-car tail))))
-                 (is (null (%e2e-decode-blob (persistent-cdr tail))))
+             (is (eql 1 (e2e-decode-blob (persistent-car head))))
+             (let ((mid (e2e-load-persistent-cons repository-path (sha (persistent-cdr head)))))
+               (is (eql 2 (e2e-decode-blob (persistent-car mid))))
+               (let ((tail (e2e-load-persistent-cons repository-path (sha (persistent-cdr mid)))))
+                 (is (eql 3 (e2e-decode-blob (persistent-car tail))))
+                 (is (null (e2e-decode-blob (persistent-cdr tail))))
                  ;; Capture the tail's own SHA for transaction 3 to
                  ;; confirm it goes untouched (never re-persisted).
                  (setf tail-sha (sha tail))))
@@ -255,12 +255,12 @@ structural sharing survives real Git persistence."
          ;; Transaction 3: verify the extended list, and that the
          ;; original (1 2 3) tail's SHA still has not changed.
          (with-transaction (value) (repository :read-write)
-           (let* ((new-head (%e2e-load-persistent-cons repository-path (sha value)))
-                  (head (%e2e-load-persistent-cons repository-path (sha (persistent-cdr new-head))))
-                  (mid (%e2e-load-persistent-cons repository-path (sha (persistent-cdr head))))
-                  (tail (%e2e-load-persistent-cons repository-path (sha (persistent-cdr mid)))))
+           (let* ((new-head (e2e-load-persistent-cons repository-path (sha value)))
+                  (head (e2e-load-persistent-cons repository-path (sha (persistent-cdr new-head))))
+                  (mid (e2e-load-persistent-cons repository-path (sha (persistent-cdr head))))
+                  (tail (e2e-load-persistent-cons repository-path (sha (persistent-cdr mid)))))
              (is (= 4 (persistent-cons-length new-head)))
-             (is (eql 0 (%e2e-decode-blob (persistent-car new-head))))
+             (is (eql 0 (e2e-decode-blob (persistent-car new-head))))
              (is (string= tail-sha (sha tail)))
              value)))))))
 
@@ -405,8 +405,8 @@ of buckets) round-trips correctly through a real transaction:
 PHASH-GET, against a fresh DESERIALIZE-PERSISTENT-OBJECT instance in
 a second, independent transaction, must itself be
 DESERIALIZE-PERSISTENT-OBJECT'd again to recover the nested
-STRUCT-WIDGET's own slots -- exercising %PERSIST-CONS-COMPONENT-BY-
-TYPE/%PERSIST-VECTOR-COMPONENT-BY-TYPE's PERSISTENT-OBJECT methods
+STRUCT-WIDGET's own slots -- exercising PERSIST-CONS-COMPONENT-BY-
+TYPE/PERSIST-VECTOR-COMPONENT-BY-TYPE's PERSISTENT-OBJECT methods
 (persistent-standard-class.lisp), without which the nested value
 would silently lose its \".meta\" entry and so its real class on
 read-back."
@@ -457,7 +457,7 @@ against a real, temporary bare Git repository -- no mocks anywhere:
   exists for the whole of transaction 1: none of A/B/C/D ever
   advances the branch or creates a GIT-COMMIT of their own.
 * Transaction 2 exercises a genuine, non-mocked :RETRY: on its very
-  first attempt, RECEIVER uses %E2E-HIJACK-BRANCH! to force a real
+  first attempt, RECEIVER uses E2E-HIJACK-BRANCH! to force a real
   concurrent writer to advance the branch out from under it (to a
   brand-new committed value, 500), causing transaction 2's own first
   commit attempt to fail with a real CONCURRENT-MODIFICATION-ERROR;
@@ -524,7 +524,7 @@ against a real, temporary bare Git repository -- no mocks anywhere:
          (with-transaction (value) (repository :read-write :conflict-resolution :retry)
            (incf attempt-count)
            (when (= attempt-count 1)
-             (%e2e-hijack-branch! repository-path "main" 500))
+             (e2e-hijack-branch! repository-path "main" 500))
            (1+ value))
          (is (= 2 attempt-count)))
        (with-transaction (value) (repository :read-only)
@@ -533,7 +533,7 @@ against a real, temporary bare Git repository -- no mocks anywhere:
 (test end-to-end-rebase-mode-merges-cleanly-with-a-real-concurrent-writer
   "A genuine, non-mocked :REBASE end-to-end walk through the clean-
 merge branch: the transaction under test changes entry \"a\" while a
-real concurrent writer (created via %E2E-HIJACK-BRANCH-WITH-TREE!,
+real concurrent writer (created via E2E-HIJACK-BRANCH-WITH-TREE!,
 sharing real ancestry with the original head) independently changes
 only entry \"b\" -- disjoint content, so `git merge-tree` merges
 cleanly with no conflict at all. RECEIVER runs exactly ONCE (never
@@ -564,16 +564,16 @@ BOTH transactions' changes: \"a\" from the transaction under test,
                                                 (declare (ignore tx head))
                                                 (incf attempts)
                                                 (when (= attempts 1)
-                                                  (%e2e-hijack-branch-with-tree! repository-path "main" original-head-sha
+                                                  (e2e-hijack-branch-with-tree! repository-path "main" original-head-sha
                                                                                  (list (cons "a" 1) (cons "b" 2))))
                                                 (make-instance 'git-tree
                                                                 :repository repository-path
                                                                 :entries (list (cons "a" (make-instance 'git-blob :repository repository-path :payload 2))
                                                                                (cons "b" (make-instance 'git-blob :repository repository-path :payload 1))))))
         (is (= 1 attempts))
-        (let ((final-tree-sha (%e2e-commit-tree-sha repository-path (git-show-ref-sha repository-path "main"))))
-          (is (eql 2 (%e2e-tree-entry-payload repository-path final-tree-sha "a")))
-          (is (eql 2 (%e2e-tree-entry-payload repository-path final-tree-sha "b"))))))))
+        (let ((final-tree-sha (e2e-commit-tree-sha repository-path (git-show-ref-sha repository-path "main"))))
+          (is (eql 2 (e2e-tree-entry-payload repository-path final-tree-sha "a")))
+          (is (eql 2 (e2e-tree-entry-payload repository-path final-tree-sha "b"))))))))
 
 (test end-to-end-rebase-mode-falls-back-to-retry-on-a-real-unresolvable-conflict
   "A genuine, non-mocked :REBASE walk through a real, unresolvable
@@ -611,16 +611,16 @@ conflict."
                                                 (declare (ignore tx head))
                                                 (incf attempts)
                                                 (when (= attempts 1)
-                                                  (%e2e-hijack-branch-with-tree! repository-path "main" original-head-sha
+                                                  (e2e-hijack-branch-with-tree! repository-path "main" original-head-sha
                                                                                  (list (cons "a" 99) (cons "b" 1))))
                                                 (make-instance 'git-tree
                                                                 :repository repository-path
                                                                 :entries (list (cons "a" (make-instance 'git-blob :repository repository-path :payload (if (> attempts 1) 100 2)))
                                                                                (cons "b" (make-instance 'git-blob :repository repository-path :payload 1))))))
         (is (= 2 attempts))
-        (let ((final-tree-sha (%e2e-commit-tree-sha repository-path (git-show-ref-sha repository-path "main"))))
-          (is (eql 100 (%e2e-tree-entry-payload repository-path final-tree-sha "a")))
-          (is (eql 1 (%e2e-tree-entry-payload repository-path final-tree-sha "b"))))))))
+        (let ((final-tree-sha (e2e-commit-tree-sha repository-path (git-show-ref-sha repository-path "main"))))
+          (is (eql 100 (e2e-tree-entry-payload repository-path final-tree-sha "a")))
+          (is (eql 1 (e2e-tree-entry-payload repository-path final-tree-sha "b"))))))))
 
 (test end-to-end-rebase-mode-falls-back-to-error-on-a-real-unresolvable-conflict
   "The same real, unresolvable content conflict as
@@ -657,7 +657,7 @@ writer's hijacked head, respectively; RECEIVER runs exactly once."
                                                       (declare (ignore tx head))
                                                       (incf attempts)
                                                       (setf hijacked-sha
-                                                            (%e2e-hijack-branch-with-tree! repository-path "main" original-head-sha
+                                                            (e2e-hijack-branch-with-tree! repository-path "main" original-head-sha
                                                                                            (list (cons "a" 99) (cons "b" 1))))
                                                       (make-instance 'git-tree
                                                                      :repository repository-path
@@ -677,7 +677,7 @@ line-by-line text merging\" design goal exists for: a single string
 atom root value, \"alpha\\nbeta\\ngamma\", is concurrently edited on
 two different lines -- the transaction under test changes only the
 first line (to \"ALPHA\"), while a real concurrent writer (via
-%E2E-HIJACK-BRANCH-ATOMIC!, sharing real ancestry with the original
+E2E-HIJACK-BRANCH-ATOMIC!, sharing real ancestry with the original
 head) independently changes only the third line (to \"GAMMA\").
 Because SERIALIZE-ATOM writes literal, unescaped line breaks (see
 MULTILINE-STRING-ROUND-TRIPS-WITH-LITERAL-LINE-BREAKS in atom-
@@ -710,14 +710,14 @@ value reflects BOTH edits at once: \"ALPHA\\nbeta\\nGAMMA\"."
                                                 (declare (ignore tx head))
                                                 (incf attempts)
                                                 (when (= attempts 1)
-                                                  (%e2e-hijack-branch-atomic! repository-path "main" original-head-sha
+                                                  (e2e-hijack-branch-atomic! repository-path "main" original-head-sha
                                                                               (format nil "alpha~%beta~%GAMMA")))
                                                 (make-instance 'git-blob :repository repository-path
                                                                           :payload (format nil "ALPHA~%beta~%gamma"))))
         (is (= 1 attempts))
         (let* ((final-commit-sha (git-show-ref-sha repository-path "main"))
                (final-commit (make-instance 'git-commit :repository repository-path :sha final-commit-sha))
-               (final-value (%e2e-decode-blob (resolve-commit-root final-commit))))
+               (final-value (e2e-decode-blob (resolve-commit-root final-commit))))
           (is (string= (format nil "ALPHA~%beta~%GAMMA") final-value)))))))
 
 ;;; --- Comprehensive real-concurrency coverage for every
@@ -725,13 +725,13 @@ value reflects BOTH edits at once: \"ALPHA\\nbeta\\nGAMMA\"."
 ;;; lifecycle options (:READ-ONLY, explicit ABORT-GIT-TRANSACTION,
 ;;; and an error signaled from RECEIVER) -- every test below uses a
 ;;; real, temporary, bare Git repository and, where a race is
-;;; needed, a real concurrent writer (via %E2E-HIJACK-BRANCH!/
-;;; %E2E-HIJACK-BRANCH-ATOMIC!/%E2E-HIJACK-BRANCH-WITH-TREE!, or a
+;;; needed, a real concurrent writer (via E2E-HIJACK-BRANCH!/
+;;; E2E-HIJACK-BRANCH-ATOMIC!/E2E-HIJACK-BRANCH-WITH-TREE!, or a
 ;;; genuine second OS thread for :LOCK) -- no mocks anywhere.
 
 (test end-to-end-error-mode-propagates-a-real-concurrent-modification-error
   "With the default :CONFLICT-RESOLUTION :ERROR, a real concurrent
-writer (via %E2E-HIJACK-BRANCH!) that advances BRANCH between this
+writer (via E2E-HIJACK-BRANCH!) that advances BRANCH between this
 transaction's own head-read and its own commit attempt causes a
 genuine (non-mocked) CONCURRENT-MODIFICATION-ERROR to propagate
 straight out of CALL-WITH-GIT-TRANSACTION, with no retry at all:
@@ -761,7 +761,7 @@ a genuinely dangling object for `git gc` to eventually reclaim."
                                         :receiver (lambda (tx head)
                                                     (declare (ignore tx head))
                                                     (incf attempts)
-                                                    (%e2e-hijack-branch! repository-path "main" 500)
+                                                    (e2e-hijack-branch! repository-path "main" 500)
                                                     (make-instance 'git-blob :repository repository-path :payload 2)))
           (concurrent-modification-error (c) (setf condition c)))
         (is (not (null condition)))
@@ -771,7 +771,7 @@ a genuinely dangling object for `git gc` to eventually reclaim."
         (is (stringp (get-new-sha condition)))
         (let* ((final-commit-sha (git-show-ref-sha repository-path "main"))
                (final-commit (make-instance 'git-commit :repository repository-path :sha final-commit-sha))
-               (final-value (%e2e-decode-blob (resolve-commit-root final-commit))))
+               (final-value (e2e-decode-blob (resolve-commit-root final-commit))))
           ;; The branch still points at the real racer's own commit
           ;; (500), not at the failed transaction's candidate (2).
           (is (eql 500 final-value)))))))
@@ -780,7 +780,7 @@ a genuinely dangling object for `git gc` to eventually reclaim."
   "With :CONFLICT-RESOLUTION :RETRY, RECEIVER is genuinely re-invoked
 from scratch, against a freshly re-read head each time, for as many
 real concurrent races as actually occur -- not just one: a real
-concurrent writer (via %E2E-HIJACK-BRANCH!) advances BRANCH out from
+concurrent writer (via E2E-HIJACK-BRANCH!) advances BRANCH out from
 under this transaction's own commit attempt on its first TWO
 attempts, and only lets the third attempt's own commit succeed.
 RECEIVER runs exactly three times, and the final committed value
@@ -806,14 +806,14 @@ discarded attempts'."
                                                 (declare (ignore tx))
                                                 (incf attempts)
                                                 (case attempts
-                                                  (1 (%e2e-hijack-branch! repository-path "main" 100))
-                                                  (2 (%e2e-hijack-branch! repository-path "main" 300)))
+                                                  (1 (e2e-hijack-branch! repository-path "main" 100))
+                                                  (2 (e2e-hijack-branch! repository-path "main" 300)))
                                                 (make-instance 'git-blob :repository repository-path
-                                                                          :payload (1+ (%e2e-decode-blob (resolve-commit-root head))))))
+                                                                          :payload (1+ (e2e-decode-blob (resolve-commit-root head))))))
         (is (= 3 attempts))
         (let* ((final-commit-sha (git-show-ref-sha repository-path "main"))
                (final-commit (make-instance 'git-commit :repository repository-path :sha final-commit-sha))
-               (final-value (%e2e-decode-blob (resolve-commit-root final-commit))))
+               (final-value (e2e-decode-blob (resolve-commit-root final-commit))))
           (is (eql 301 final-value)))))))
 
 (test end-to-end-lock-mode-serializes-two-real-concurrent-transactions-across-threads
@@ -870,7 +870,7 @@ serialization rather than merely inferring it from the final count."
                                                  (declare (ignore tx))
                                                  (let ((start (get-internal-real-time)))
                                                    (sleep 0.1)
-                                                   (let ((new-value (1+ (%e2e-decode-blob (resolve-commit-root head)))))
+                                                   (let ((new-value (1+ (e2e-decode-blob (resolve-commit-root head)))))
                                                      (sb-thread:with-mutex (intervals-lock)
                                                        (push (cons start (get-internal-real-time)) intervals))
                                                      (make-instance 'git-blob :repository repository-path :payload new-value))))))))
@@ -887,9 +887,9 @@ serialization rather than merely inferring it from the final count."
           (is (or (<= end-1 start-2) (<= end-2 start-1))))
         (let* ((final-commit-sha (git-show-ref-sha repository-path "main"))
                (final-commit (make-instance 'git-commit :repository repository-path :sha final-commit-sha))
-               (final-value (%e2e-decode-blob (resolve-commit-root final-commit))))
+               (final-value (e2e-decode-blob (resolve-commit-root final-commit))))
           (is (eql 2 final-value)))
-        (is (not (probe-file (%transaction-lock-pathname repository-path))))))))
+        (is (not (probe-file (transaction-lock-pathname repository-path))))))))
 
 (test end-to-end-read-only-transaction-never-writes-even-when-receiver-returns-a-new-value
   "A :READ-ONLY transaction against a real repository never advances
@@ -918,7 +918,7 @@ and returns is simply discarded on normal exit."
           (is (null (get-result transaction))))
         (is (string= original-head-sha (git-show-ref-sha repository-path "main")))
         (let* ((final-commit (make-instance 'git-commit :repository repository-path :sha original-head-sha))
-               (final-value (%e2e-decode-blob (resolve-commit-root final-commit))))
+               (final-value (e2e-decode-blob (resolve-commit-root final-commit))))
           (is (eql 42 final-value)))))))
 
 (test end-to-end-explicit-abort-writes-nothing-even-for-a-brand-new-branch
@@ -982,5 +982,5 @@ returned) a brand-new candidate GIT-BLOB."
                                                   (error "RECEIVER failed on purpose."))))
         (is (string= original-head-sha (git-show-ref-sha repository-path "main")))
         (let* ((final-commit (make-instance 'git-commit :repository repository-path :sha original-head-sha))
-               (final-value (%e2e-decode-blob (resolve-commit-root final-commit))))
+               (final-value (e2e-decode-blob (resolve-commit-root final-commit))))
           (is (eql 10 final-value)))))))

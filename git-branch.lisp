@@ -27,7 +27,7 @@
 still unloaded)."))
   (:documentation
    "A mutable reference onto a GIT-COMMIT, mirroring a Git branch ref
-under `refs/heads/`. See RESOLVE-BRANCH and UPDATE-BRANCH."))
+under `refs/heads/`. See RESOLVE-BRANCH and UPDATE-BRANCH!."))
 
 (setf (documentation 'get-name 'function)
       "Return OBJECT's name: for a GIT-BRANCH, its branch name (e.g.
@@ -39,7 +39,7 @@ or being updated.")
 the commit it currently points to (possibly still unloaded), or NIL
 if BRANCH names a not-yet-existing branch.")
 
-(defun %branch-ref-name (name)
+(defun branch-ref-name (name)
   "Return the full Git ref path (\"refs/heads/<NAME>\") for the
 branch named NAME."
   (format nil "refs/heads/~A" name))
@@ -53,7 +53,7 @@ NIL if no branch named NAME exists in REPOSITORY."
       (uiop:run-program (list "git"
                                (format nil "--git-dir=~A" (uiop:native-namestring repository))
                                "show-ref" "--verify" "--hash"
-                               (%branch-ref-name name))
+                               (branch-ref-name name))
                          :output :string
                          :ignore-error-status t)
     (declare (ignore error-output))
@@ -75,7 +75,7 @@ NIL if no branch named NAME exists in REPOSITORY."
              (get-new-sha condition)
              (get-detail condition))))
   (:documentation
-   "Signaled by GIT-UPDATE-REF (and, transitively, UPDATE-BRANCH and
+   "Signaled by GIT-UPDATE-REF! (and, transitively, UPDATE-BRANCH! and
 CALL-WITH-GIT-TRANSACTION's own commit path) when it is called with
 an EXPECTED-SHA compare-and-swap check -- either a specific SHA, or
 NIL meaning \"the ref must not exist yet\" -- and Git's own
@@ -98,7 +98,7 @@ attempted, and failed, to advance a branch to.")
 free-text detail describing the conflict, or NIL if none was
 supplied.")
 
-(defun git-update-ref (repository name sha &key (expected-sha :unconditional))
+(defun git-update-ref! (repository name sha &key (expected-sha :unconditional))
   "Shell out to `git update-ref refs/heads/<NAME> <SHA> [<EXPECTED-SHA>]`
 against REPOSITORY (a pathname naming a Git directory), safely and
 atomically creating or advancing that branch's ref to point at SHA.
@@ -120,7 +120,7 @@ the ref out from under us. Returns SHA on success."
   (let ((args (append (list "git"
                              (format nil "--git-dir=~A" (uiop:native-namestring repository))
                              "update-ref"
-                             (%branch-ref-name name)
+                             (branch-ref-name name)
                              sha)
                        (unless (eq expected-sha :unconditional)
                          (list (or expected-sha ""))))))
@@ -154,11 +154,11 @@ awaiting its initial commit) from one whose commit failed to load."
                    :name name
                    :target (and sha (inflate-git-proxy repository sha)))))
 
-(defun update-branch (branch &key (expected-sha :unconditional))
+(defun update-branch! (branch &key (expected-sha :unconditional))
   "Force Git to advance BRANCH's ref (refs/heads/<name>) to the SHA
 of the GIT-COMMIT currently held in its TARGET slot, via
-GIT-UPDATE-REF. EXPECTED-SHA is passed through unchanged to
-GIT-UPDATE-REF's own compare-and-swap argument of the same name:
+GIT-UPDATE-REF!. EXPECTED-SHA is passed through unchanged to
+GIT-UPDATE-REF!'s own compare-and-swap argument of the same name:
 :UNCONDITIONAL (the default) for an ordinary unconditional update, a
 40-character SHA string to require the ref currently point at that
 commit, or NIL to require the ref not yet exist. Signals an error if
@@ -171,5 +171,5 @@ BRANCH."
       (error 'unpersisted-object-error
              :format-control "Cannot update branch ~S: its TARGET commit has no SHA (not yet persisted)."
              :format-arguments (list (get-name branch))))
-    (git-update-ref (get-repository branch) (get-name branch) sha :expected-sha expected-sha)
+    (git-update-ref! (get-repository branch) (get-name branch) sha :expected-sha expected-sha)
     branch))

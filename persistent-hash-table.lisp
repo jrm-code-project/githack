@@ -32,7 +32,7 @@
   "The number of buckets PHASH-MAKE allocates when the caller does
 not request a specific SIZE.")
 
-(defgeneric %normalize-hash-test (test)
+(defgeneric normalize-hash-test (test)
   (:documentation
    "Return TEST as a symbol suitable for PERSISTENT-HASH-TABLE-TEST:
 TEST itself, if already a symbol (e.g. 'EQL, 'EQUAL); or, if TEST is
@@ -42,35 +42,35 @@ a function whose name cannot be determined this way, since an
 unnamed function is not a serializable atom -- callers should pass a
 symbol (e.g. 'EQUAL) instead of #'EQUAL."))
 
-(defmethod %normalize-hash-test ((test symbol))
+(defmethod normalize-hash-test ((test symbol))
   (unless (fboundp test)
     (error 'invalid-argument-error
            :format-control "TEST ~S does not name a callable function."
            :format-arguments (list test)))
   test)
 
-(defmethod %normalize-hash-test ((test function))
+(defmethod normalize-hash-test ((test function))
   (or (nth-value 2 (function-lambda-expression test))
       (error 'invalid-argument-error
              :format-control "Cannot determine a symbol name for the function ~S; pass TEST as a symbol (e.g. 'EQUAL) instead."
              :format-arguments (list test))))
 
-(defun %phash-test-function (table)
+(defun phash-test-function (table)
   "Return the two-argument equality predicate function named by
 TABLE's own TEST slot (a symbol, e.g. EQL, EQUAL, EQUALP)."
   (fdefinition (persistent-hash-table-test table)))
 
-(defun %phash-hash (key)
+(defun phash-hash (key)
   "Return an integer hash code for KEY, used by PHASH-GET/PHASH-PUT/
 PHASH-REMOVE to select KEY's bucket index."
   (sxhash key))
 
-(defun %phash-bucket-index (key bucket-count)
+(defun phash-bucket-index (key bucket-count)
   "Return KEY's bucket index within a BUCKETS vector of BUCKET-COUNT
 elements."
-  (mod (%phash-hash key) bucket-count))
+  (mod (phash-hash key) bucket-count))
 
-(defun %phash-decode (git-object)
+(defun phash-decode (git-object)
   "Return the real Lisp value GIT-OBJECT represents: its decoded
 PAYLOAD, if GIT-OBJECT is a GIT-BLOB (fetching it from the repository
 first via %ENSURE-BLOB-LOADED, if not yet loaded); or GIT-OBJECT
@@ -79,7 +79,7 @@ itself, unchanged, for any other (compound) GIT-OBJECT proxy."
       (get-payload (%ensure-blob-loaded git-object))
       git-object))
 
-(defun %phash-wrap (repository value)
+(defun phash-wrap (repository value)
   "Return VALUE unchanged if it is already a GIT-OBJECT proxy (e.g.
 a nested PERSISTENT-VECTOR, PERSISTENT-CONS, or PERSISTENT-OBJECT);
 otherwise, return a fresh, already-loaded GIT-BLOB, associated with
@@ -88,21 +88,21 @@ REPOSITORY, wrapping VALUE as a serializable atom."
       value
       (make-instance 'git-blob :repository repository :payload value :loaded? t)))
 
-(defun %make-pair-node (repository key value)
+(defun make-pair-node (repository key value)
   "Return a fresh, already-loaded, dotted-pair PERSISTENT-CONS
 representing one (KEY . VALUE) association: its own PERSISTENT-CAR
 holds KEY and its own PERSISTENT-CDR holds VALUE, each wrapped via
-%PHASH-WRAP."
+PHASH-WRAP."
   (make-instance 'persistent-cons
                  :repository repository
                  :loaded? t
-                 :persistent-car (%phash-wrap repository key)
-                 :persistent-cdr (%phash-wrap repository value)))
+                 :persistent-car (phash-wrap repository key)
+                 :persistent-cdr (phash-wrap repository value)))
 
-(defun %make-list-node (repository head-pair tail)
+(defun make-list-node (repository head-pair tail)
   "Return a fresh, already-loaded PERSISTENT-CONS bucket-chain node:
 its own PERSISTENT-CAR is HEAD-PAIR (a dotted-pair PERSISTENT-CONS
-for one key/value association, from %MAKE-PAIR-NODE), and its own
+for one key/value association, from MAKE-PAIR-NODE), and its own
 PERSISTENT-CDR is TAIL (the next node in the chain, or NIL to
 terminate it)."
   (make-instance 'persistent-cons
@@ -111,15 +111,15 @@ terminate it)."
                  :persistent-car head-pair
                  :persistent-cdr tail))
 
-(defun %make-empty-buckets (repository n)
+(defun make-empty-buckets (repository n)
   "Return a fresh, already-loaded PERSISTENT-VECTOR of N elements,
 every element NIL (an empty bucket). Both the in-memory cache and the
-real ENTRIES alist (each index wrapped via %PHASH-WRAP, so an empty
+real ENTRIES alist (each index wrapped via PHASH-WRAP, so an empty
 bucket becomes a GIT-BLOB with a NIL payload) are populated, so this
 vector serializes correctly via SERIALIZE-PERSISTENT-VECTOR, which
 reads ENTRIES exclusively -- not the cache."
   (let* ((entries (loop for i from 0 below n
-                         collect (cons (princ-to-string i) (%phash-wrap repository nil))))
+                         collect (cons (princ-to-string i) (phash-wrap repository nil))))
          (vector (make-instance 'persistent-vector
                                  :repository repository
                                  :length n
@@ -129,14 +129,14 @@ reads ENTRIES exclusively -- not the cache."
     (setf (%persistent-vector-cache vector) (make-array n :initial-element nil))
     vector))
 
-(defun %persistent-vector-copy-with (vector index new-value)
+(defun persistent-vector-copy-with (vector index new-value)
   "Return a new, already-loaded PERSISTENT-VECTOR of the same LENGTH,
 ELEMENT-TYPE, and REPOSITORY as VECTOR, whose cache is a fresh copy of
 VECTOR's own cache with NEW-VALUE substituted at INDEX -- every other
 index's cached value (or not-yet-fetched status) is preserved
 unchanged. VECTOR's own ENTRIES (if any -- e.g. if VECTOR was freshly
 loaded from Git) are likewise copied, with only INDEX's own entry
-replaced by NEW-VALUE (wrapped via %PHASH-WRAP), so every other
+replaced by NEW-VALUE (wrapped via PHASH-WRAP), so every other
 index's entry -- including any not-yet-resolved lazy proxy -- remains
 shared, unmodified, with VECTOR, and the result still serializes
 correctly via SERIALIZE-PERSISTENT-VECTOR (which reads ENTRIES
@@ -151,7 +151,7 @@ exclusively, not the cache). VECTOR itself is never modified."
          (old-entries (get-entries vector))
          (new-entries (mapcar (lambda (entry)
                                  (if (string= (car entry) index-string)
-                                     (cons index-string (%phash-wrap repository new-value))
+                                     (cons index-string (phash-wrap repository new-value))
                                      entry))
                                old-entries))
          (new-vector (make-instance 'persistent-vector
@@ -164,7 +164,7 @@ exclusively, not the cache). VECTOR itself is never modified."
     (setf (%persistent-vector-cache new-vector) new-cache)
     new-vector))
 
-(defun %phash-bucket-node-p (node)
+(defun phash-bucket-node-p (node)
   "Return true if NODE is a real, non-terminal bucket-chain node (a
 PERSISTENT-CONS, or a plain GIT-TREE proxy for one not yet retyped by
 %ENSURE-PERSISTENT-CONS-LOADED), as opposed to NIL (an in-memory,
@@ -174,19 +174,19 @@ CDR once persisted for real -- either of which marks the end of the
 chain."
   (and node (not (typep node 'git-blob))))
 
-(defun %phash-bucket-find (bucket key test)
+(defun phash-bucket-find (bucket key test)
   "Return the dotted-pair PERSISTENT-CONS holding KEY's association
 within BUCKET (a PERSISTENT-CONS chain, or NIL for an empty bucket),
 comparing each node's own key against KEY via TEST, or NIL if KEY is
 not present."
   (loop for node = bucket then (persistent-cdr (%ensure-persistent-cons-loaded node))
-        while (%phash-bucket-node-p node)
+        while (phash-bucket-node-p node)
         do (let* ((pair (persistent-car (%ensure-persistent-cons-loaded node)))
-                  (existing-key (%phash-decode (persistent-car (%ensure-persistent-cons-loaded pair)))))
+                  (existing-key (phash-decode (persistent-car (%ensure-persistent-cons-loaded pair)))))
              (when (funcall test existing-key key)
                (return pair)))))
 
-(defun %phash-bucket-put (repository bucket key value test)
+(defun phash-bucket-put (repository bucket key value test)
   "Return two values: a new bucket chain associating KEY with VALUE,
 and T if KEY did not previously appear in BUCKET (so the caller must
 increment the table's COUNT), or NIL if an existing association was
@@ -197,24 +197,24 @@ its own node is rebuilt; every node after it is shared, unmodified,
 with BUCKET."
   (labels ((walk (node)
              (cond
-               ((not (%phash-bucket-node-p node)) (values nil nil))
+               ((not (phash-bucket-node-p node)) (values nil nil))
                (t (%ensure-persistent-cons-loaded node)
                   (let* ((pair (%ensure-persistent-cons-loaded (persistent-car node)))
-                         (existing-key (%phash-decode (persistent-car pair))))
+                         (existing-key (phash-decode (persistent-car pair))))
                     (if (funcall test existing-key key)
-                        (values (%make-list-node repository (%make-pair-node repository key value)
+                        (values (make-list-node repository (make-pair-node repository key value)
                                                   (persistent-cdr node))
                                 t)
                         (multiple-value-bind (new-tail found?) (walk (persistent-cdr node))
                           (if found?
-                              (values (%make-list-node repository pair new-tail) t)
+                              (values (make-list-node repository pair new-tail) t)
                               (values nil nil)))))))))
     (multiple-value-bind (updated-bucket found?) (walk bucket)
       (if found?
           (values updated-bucket nil)
-          (values (%make-list-node repository (%make-pair-node repository key value) bucket) t)))))
+          (values (make-list-node repository (make-pair-node repository key value) bucket) t)))))
 
-(defun %phash-bucket-remove (repository bucket key test)
+(defun phash-bucket-remove (repository bucket key test)
   "Return two values: a new bucket chain with KEY's association
 removed, and T; or (VALUES NIL NIL) if KEY is not present in BUCKET.
 The node holding KEY is dropped outright (its successor is shared
@@ -222,19 +222,19 @@ directly as the new tail); every node before it is rebuilt, and every
 node after it remains shared, unmodified, with BUCKET."
   (labels ((walk (node)
              (cond
-               ((not (%phash-bucket-node-p node)) (values nil nil))
+               ((not (phash-bucket-node-p node)) (values nil nil))
                (t (%ensure-persistent-cons-loaded node)
                   (let* ((pair (%ensure-persistent-cons-loaded (persistent-car node)))
-                         (existing-key (%phash-decode (persistent-car pair))))
+                         (existing-key (phash-decode (persistent-car pair))))
                     (if (funcall test existing-key key)
                         (values (persistent-cdr node) t)
                         (multiple-value-bind (new-tail removed?) (walk (persistent-cdr node))
                           (if removed?
-                              (values (%make-list-node repository pair new-tail) t)
+                              (values (make-list-node repository pair new-tail) t)
                               (values nil nil)))))))))
     (walk bucket)))
 
-(defun %phash-rehash (table)
+(defun phash-rehash (table)
   "Return a new PERSISTENT-HASH-TABLE holding exactly the same
 associations as TABLE, but with a fresh BUCKETS vector of twice
 TABLE's own bucket count, every association re-hashed into its new
@@ -247,16 +247,16 @@ the number of buckets (load factor > 1.0)."
          (old-buckets (persistent-hash-table-buckets table))
          (old-count (persistent-vector-length (%ensure-persistent-vector-loaded old-buckets)))
          (new-bucket-count (max 1 (* old-count 2)))
-         (new-buckets (%make-empty-buckets repository new-bucket-count)))
+         (new-buckets (make-empty-buckets repository new-bucket-count)))
     (dotimes (i old-count)
       (loop for node = (persistent-vector-ref old-buckets i) then (persistent-cdr (%ensure-persistent-cons-loaded node))
-            while (%phash-bucket-node-p node)
+            while (phash-bucket-node-p node)
             do (let* ((pair (%ensure-persistent-cons-loaded (persistent-car (%ensure-persistent-cons-loaded node))))
-                      (key (%phash-decode (persistent-car pair)))
-                      (new-index (%phash-bucket-index key new-bucket-count))
+                      (key (phash-decode (persistent-car pair)))
+                      (new-index (phash-bucket-index key new-bucket-count))
                       (existing (persistent-vector-ref new-buckets new-index)))
-                 (setf new-buckets (%persistent-vector-copy-with new-buckets new-index
-                                                                  (%make-list-node repository pair existing))))))
+                 (setf new-buckets (persistent-vector-copy-with new-buckets new-index
+                                                                  (make-list-node repository pair existing))))))
     (make-instance 'persistent-hash-table
                    :repository repository
                    :test (persistent-hash-table-test table)
@@ -267,7 +267,7 @@ the number of buckets (load factor > 1.0)."
   "Return a new, empty PERSISTENT-HASH-TABLE with SIZE initial
 buckets, comparing keys via TEST (a symbol naming a two-argument
 equality predicate -- EQ, EQL, EQUAL, or EQUALP -- normalized via
-%NORMALIZE-HASH-TEST so it is always stored as a serializable
+NORMALIZE-HASH-TEST so it is always stored as a serializable
 symbol, never a raw function object). Signals INVALID-ARGUMENT-ERROR
 if SIZE is not a positive integer."
   (unless (and (integerp size) (plusp size))
@@ -276,9 +276,9 @@ if SIZE is not a positive integer."
            :format-arguments (list size)))
   (make-instance 'persistent-hash-table
                  :repository repository
-                 :test (%normalize-hash-test test)
+                 :test (normalize-hash-test test)
                  :count 0
-                 :buckets (%make-empty-buckets repository size)))
+                 :buckets (make-empty-buckets repository size)))
 
 (defun phash-get (key table &optional default)
   "Return two values: the value associated with KEY in TABLE
@@ -286,11 +286,11 @@ if SIZE is not a positive integer."
 if KEY is not present."
   (let* ((buckets (persistent-hash-table-buckets table))
          (bucket-count (persistent-vector-length (%ensure-persistent-vector-loaded buckets)))
-         (index (%phash-bucket-index key bucket-count))
+         (index (phash-bucket-index key bucket-count))
          (bucket (persistent-vector-ref buckets index))
-         (pair (%phash-bucket-find bucket key (%phash-test-function table))))
+         (pair (phash-bucket-find bucket key (phash-test-function table))))
     (if pair
-        (values (%phash-decode (persistent-cdr pair)) t)
+        (values (phash-decode (persistent-cdr pair)) t)
         (values default nil))))
 
 (defun phash-put (key value table)
@@ -299,22 +299,22 @@ TABLE wherever KEY's own bucket is unaffected, associating KEY with
 VALUE. TABLE itself is left completely unmodified. If inserting a
 new KEY would cause COUNT to exceed the number of buckets (load
 factor > 1.0), the returned table is automatically rehashed (via
-%PHASH-REHASH) into a larger BUCKETS vector."
+PHASH-REHASH) into a larger BUCKETS vector."
   (let* ((repository (get-repository table))
          (buckets (persistent-hash-table-buckets table))
          (bucket-count (persistent-vector-length (%ensure-persistent-vector-loaded buckets)))
-         (index (%phash-bucket-index key bucket-count))
+         (index (phash-bucket-index key bucket-count))
          (bucket (persistent-vector-ref buckets index)))
     (multiple-value-bind (new-bucket added?)
-        (%phash-bucket-put repository bucket key value (%phash-test-function table))
+        (phash-bucket-put repository bucket key value (phash-test-function table))
       (let* ((new-count (if added? (1+ (persistent-hash-table-count table)) (persistent-hash-table-count table)))
              (new-table (make-instance 'persistent-hash-table
                                         :repository repository
                                         :test (persistent-hash-table-test table)
                                         :count new-count
-                                        :buckets (%persistent-vector-copy-with buckets index new-bucket))))
+                                        :buckets (persistent-vector-copy-with buckets index new-bucket))))
         (if (and added? (> new-count bucket-count))
-            (%phash-rehash new-table)
+            (phash-rehash new-table)
             new-table)))))
 
 (defun phash-remove (key table)
@@ -324,21 +324,21 @@ unaffected; or TABLE itself, unchanged, if KEY is not present."
   (let* ((repository (get-repository table))
          (buckets (persistent-hash-table-buckets table))
          (bucket-count (persistent-vector-length (%ensure-persistent-vector-loaded buckets)))
-         (index (%phash-bucket-index key bucket-count))
+         (index (phash-bucket-index key bucket-count))
          (bucket (persistent-vector-ref buckets index)))
     (multiple-value-bind (new-bucket removed?)
-        (%phash-bucket-remove repository bucket key (%phash-test-function table))
+        (phash-bucket-remove repository bucket key (phash-test-function table))
       (if (not removed?)
           table
           (make-instance 'persistent-hash-table
                          :repository repository
                          :test (persistent-hash-table-test table)
                          :count (1- (persistent-hash-table-count table))
-                         :buckets (%persistent-vector-copy-with buckets index new-bucket))))))
+                         :buckets (persistent-vector-copy-with buckets index new-bucket))))))
 
 (defun phash-map (function table)
   "Call FUNCTION with two arguments -- KEY and VALUE, each already
-decoded via %PHASH-DECODE exactly as PHASH-GET would return them --
+decoded via PHASH-DECODE exactly as PHASH-GET would return them --
 once for every association currently in TABLE, in an unspecified
 order. Returns NIL. Purely a read: TABLE itself is never modified,
 and no bucket-chain node visited is retyped/loaded any differently
@@ -347,9 +347,9 @@ than PHASH-GET's own traversal already would."
          (bucket-count (persistent-vector-length (%ensure-persistent-vector-loaded buckets))))
     (dotimes (i bucket-count)
       (loop for node = (persistent-vector-ref buckets i) then (persistent-cdr (%ensure-persistent-cons-loaded node))
-            while (%phash-bucket-node-p node)
+            while (phash-bucket-node-p node)
             do (let* ((pair (%ensure-persistent-cons-loaded (persistent-car (%ensure-persistent-cons-loaded node))))
-                      (key (%phash-decode (persistent-car pair)))
-                      (value (%phash-decode (persistent-cdr pair))))
+                      (key (phash-decode (persistent-car pair)))
+                      (value (phash-decode (persistent-cdr pair))))
                  (funcall function key value))))
     nil))

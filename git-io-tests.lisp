@@ -19,11 +19,11 @@
 
 (in-suite git-io-suite)
 
-(defun %count-githack-temp-files ()
+(defun count-githack-temp-files ()
   "Return the number of files in the system's default temporary
 directory whose name begins with \"githack-object-\" or
 \"githack-catfile-\" -- GIT-IO.LISP's own temp-file naming
-convention (see %UNIQUE-TEMPORARY-PATHNAME) -- so a test can confirm
+convention (see UNIQUE-TEMPORARY-PATHNAME) -- so a test can confirm
 none are ever left behind, even when the subprocess using one
 fails."
   (length
@@ -42,11 +42,11 @@ session (see *GIT-IO-SESSIONS*) instead of spawning a fresh
 subprocess every time."
   (with-temporary-git-repository (repository)
     (git-hash-object repository "blob" (sb-ext:string-to-octets "one" :external-format :utf-8))
-    (let ((process (gethash (%git-io-session-key :hash-object repository "blob") *git-io-sessions*)))
+    (let ((process (gethash (git-io-session-key :hash-object repository "blob") *git-io-sessions*)))
       (is-true process)
       (is-true (uiop:process-alive-p process))
       (git-hash-object repository "blob" (sb-ext:string-to-octets "two" :external-format :utf-8))
-      (is (eq process (gethash (%git-io-session-key :hash-object repository "blob") *git-io-sessions*))))))
+      (is (eq process (gethash (git-io-session-key :hash-object repository "blob") *git-io-sessions*))))))
 
 (test git-type-and-git-cat-file-reuse-their-own-persistent-sessions
   "GIT-TYPE and GIT-CAT-FILE each reuse their own cached session
@@ -55,15 +55,15 @@ across repeated calls against the same repository."
   (with-temporary-git-repository (repository)
     (let ((sha (git-hash-object repository "blob" (sb-ext:string-to-octets "atom" :external-format :utf-8))))
       (git-type repository sha)
-      (let ((batch-check-process (gethash (%git-io-session-key :batch-check repository) *git-io-sessions*)))
+      (let ((batch-check-process (gethash (git-io-session-key :batch-check repository) *git-io-sessions*)))
         (is-true batch-check-process)
         (git-type repository sha)
-        (is (eq batch-check-process (gethash (%git-io-session-key :batch-check repository) *git-io-sessions*))))
+        (is (eq batch-check-process (gethash (git-io-session-key :batch-check repository) *git-io-sessions*))))
       (git-cat-file repository sha)
-      (let ((batch-process (gethash (%git-io-session-key :batch repository) *git-io-sessions*)))
+      (let ((batch-process (gethash (git-io-session-key :batch repository) *git-io-sessions*)))
         (is-true batch-process)
         (git-cat-file repository sha)
-        (is (eq batch-process (gethash (%git-io-session-key :batch repository) *git-io-sessions*)))))))
+        (is (eq batch-process (gethash (git-io-session-key :batch repository) *git-io-sessions*)))))))
 
 (test close-git-io-sessions-terminates-and-forgets-a-repositorys-sessions
   "CLOSE-GIT-IO-SESSIONS terminates every cached session for a given
@@ -73,14 +73,14 @@ sessions cached for a different repository."
     (with-temporary-git-repository (repository-2)
       (git-hash-object repository-1 "blob" (sb-ext:string-to-octets "a" :external-format :utf-8))
       (git-hash-object repository-2 "blob" (sb-ext:string-to-octets "b" :external-format :utf-8))
-      (let ((process-1 (gethash (%git-io-session-key :hash-object repository-1 "blob") *git-io-sessions*))
-            (process-2 (gethash (%git-io-session-key :hash-object repository-2 "blob") *git-io-sessions*)))
+      (let ((process-1 (gethash (git-io-session-key :hash-object repository-1 "blob") *git-io-sessions*))
+            (process-2 (gethash (git-io-session-key :hash-object repository-2 "blob") *git-io-sessions*)))
         (is-true process-1)
         (is-true process-2)
         (close-git-io-sessions repository-1)
-        (is (null (gethash (%git-io-session-key :hash-object repository-1 "blob") *git-io-sessions*)))
+        (is (null (gethash (git-io-session-key :hash-object repository-1 "blob") *git-io-sessions*)))
         (is-false (uiop:process-alive-p process-1))
-        (is (eq process-2 (gethash (%git-io-session-key :hash-object repository-2 "blob") *git-io-sessions*)))
+        (is (eq process-2 (gethash (git-io-session-key :hash-object repository-2 "blob") *git-io-sessions*)))
         (is-true (uiop:process-alive-p process-2))
         (close-git-io-sessions repository-2)))))
 
@@ -170,11 +170,11 @@ hash-object` on disk) is deleted via UNWIND-PROTECT even when the
 subprocess itself fails and signals an error, leaving no stray
 \"githack-object-*.tmp\" file behind."
   (with-temporary-git-repository (repository)
-    (let ((before (%count-githack-temp-files)))
+    (let ((before (count-githack-temp-files)))
       (signals error
         (git-hash-object repository "not-a-real-type"
                           (sb-ext:string-to-octets "x" :external-format :utf-8)))
-      (is (= before (%count-githack-temp-files))))))
+      (is (= before (count-githack-temp-files))))))
 
 (test git-cat-file-cleans-up-its-temp-file-even-when-git-itself-fails
   "GIT-CAT-FILE's temporary output file is deleted via UNWIND-PROTECT
@@ -183,12 +183,12 @@ itself signals first, before any `cat-file <type> <sha>` temp file
 is even created), leaving no stray \"githack-catfile-*.tmp\" file
 behind."
   (with-temporary-git-repository (repository)
-    (let ((before (%count-githack-temp-files)))
+    (let ((before (count-githack-temp-files)))
       (signals error
         (git-cat-file repository "dddddddddddddddddddddddddddddddddddddddd"))
-      (is (= before (%count-githack-temp-files))))))
+      (is (= before (count-githack-temp-files))))))
 
-(defmacro %with-fresh-git-availability-cache (() &body body)
+(defmacro with-fresh-git-availability-cache (() &body body)
   "Within BODY, rebind *GIT-AVAILABLE-P* to NIL, so %ENSURE-GIT-
 AVAILABLE's memoization does not leak between tests (or reflect
 whatever earlier test in this suite already ran a real `git
@@ -196,34 +196,34 @@ whatever earlier test in this suite already ran a real `git
   `(let ((*git-available-p* nil)) ,@body))
 
 (test ensure-git-available-succeeds-and-memoizes-against-a-real-git
-  "%ENSURE-GIT-AVAILABLE returns T when a real `git` executable is on
+  "ENSURE-GIT-AVAILABLE returns T when a real `git` executable is on
 PATH (as it must be, for every other test in this suite to work at
 all), and memoizes that result in *GIT-AVAILABLE-P* so a second call
 does not need to shell out again."
-  (%with-fresh-git-availability-cache ()
-    (is (eq t (%ensure-git-available)))
+  (with-fresh-git-availability-cache ()
+    (is (eq t (ensure-git-available)))
     (is (eq t *git-available-p*))
-    (is (eq t (%ensure-git-available)))))
+    (is (eq t (ensure-git-available)))))
 
 (test ensure-git-available-signals-git-not-found-error-when-git-is-unreachable
-  "%ENSURE-GIT-AVAILABLE signals GIT-NOT-FOUND-ERROR, not some raw
+  "ENSURE-GIT-AVAILABLE signals GIT-NOT-FOUND-ERROR, not some raw
 UIOP condition, when running `git --version` itself fails (e.g. no
 such executable on PATH), and does not memoize that failure."
-  (%with-fresh-git-availability-cache ()
+  (with-fresh-git-availability-cache ()
     (let ((was-bound (fboundp 'uiop:run-program))
           (original (fdefinition 'uiop:run-program)))
       (setf (fdefinition 'uiop:run-program)
             (lambda (&rest args) (declare (ignore args)) (error "no such executable")))
       (unwind-protect
-           (signals git-not-found-error (%ensure-git-available))
+           (signals git-not-found-error (ensure-git-available))
         (if was-bound (setf (fdefinition 'uiop:run-program) original) (fmakunbound 'uiop:run-program)))
       (is (null *git-available-p*)))))
 
 (test ensure-git-available-signals-git-not-found-error-for-a-nonzero-exit-status
-  "%ENSURE-GIT-AVAILABLE signals GIT-NOT-FOUND-ERROR when `git
+  "ENSURE-GIT-AVAILABLE signals GIT-NOT-FOUND-ERROR when `git
 --version` itself runs but exits with a non-zero status, not just
 when the subprocess fails to start at all."
-  (%with-fresh-git-availability-cache ()
+  (with-fresh-git-availability-cache ()
     (let ((was-bound (fboundp 'uiop:run-program))
           (original (fdefinition 'uiop:run-program)))
       (setf (fdefinition 'uiop:run-program)
@@ -231,15 +231,15 @@ when the subprocess fails to start at all."
               (declare (ignore args))
               (values "" "not git" 1)))
       (unwind-protect
-           (signals git-not-found-error (%ensure-git-available))
+           (signals git-not-found-error (ensure-git-available))
         (if was-bound (setf (fdefinition 'uiop:run-program) original) (fmakunbound 'uiop:run-program)))
       (is (null *git-available-p*)))))
 
 (test call-with-repository-signals-git-not-found-error-when-git-is-unreachable
-  "CALL-WITH-REPOSITORY propagates %ENSURE-GIT-AVAILABLE's
+  "CALL-WITH-REPOSITORY propagates ENSURE-GIT-AVAILABLE's
 GIT-NOT-FOUND-ERROR up front, before ever constructing a
 GIT-REPOSITORY or invoking RECEIVER."
-  (%with-fresh-git-availability-cache ()
+  (with-fresh-git-availability-cache ()
     (let ((was-bound (fboundp 'uiop:run-program))
           (original (fdefinition 'uiop:run-program))
           (receiver-called nil))

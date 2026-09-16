@@ -34,7 +34,7 @@
 ;;;     with no timing dependency at all -- force a real second
 ;;;     commit onto the branch (via %DEMO-HIJACK-ORPHAN!/
 ;;;     %DEMO-HIJACK-WITH-TREE!, using the very same low-level
-;;;     GIT-HASH-OBJECT/GIT-UPDATE-REF primitives GitHack's own commit
+;;;     GIT-HASH-OBJECT/GIT-UPDATE-REF! primitives GitHack's own commit
 ;;;     path itself uses) before returning. GitHack's own commit logic
 ;;;     then discovers that real race exactly as it would against any
 ;;;     genuinely independent process, with no mock anywhere in the
@@ -109,9 +109,9 @@
 ;;; SECTIONS 2-3 SUPPORT: a disposable scratch repository, and a pair
 ;;; of "hijack" helpers that simulate a genuine concurrent external
 ;;; writer -- built from the very same low-level primitives GitHack's
-;;; own commit path itself uses (GIT-HASH-OBJECT, GIT-UPDATE-REF,
+;;; own commit path itself uses (GIT-HASH-OBJECT, GIT-UPDATE-REF!,
 ;;; WRAP-ATOMIC-COMMIT-ROOT) -- exactly mirroring end-to-end-tests.lisp's
-;;; own %E2E-HIJACK-BRANCH!/%E2E-HIJACK-BRANCH-WITH-TREE! helpers. Unlike
+;;; own E2E-HIJACK-BRANCH!/E2E-HIJACK-BRANCH-WITH-TREE! helpers. Unlike
 ;;; SECTIONS 1 and 4, which read/write the self-hosting
 ;;; "database-example-bank" branch, SECTIONS 2 and 3 use their own
 ;;; scratch repository: they demonstrate GitHack's raw CONFLICT-
@@ -155,7 +155,7 @@ Lisp PAYLOAD."
 (defun %demo-hijack-orphan! (repository-path branch-name payload)
   "Simulate a genuine concurrent external writer: build and persist a
 brand-new, real, orphan GIT-COMMIT wrapping PAYLOAD as its root, then
-unconditionally force BRANCH-NAME to point at it via GIT-UPDATE-REF --
+unconditionally force BRANCH-NAME to point at it via GIT-UPDATE-REF! --
 exactly as if some other, wholly independent process had already
 advanced BRANCH-NAME out from under an in-flight transaction, between
 its own read and its own commit. Used to force a genuine
@@ -176,7 +176,7 @@ share any real Git ancestry with the transaction it races."
       (setf (githack:sha commit)
             (githack:git-hash-object repository-path "commit"
                                       (sb-ext:string-to-octets (githack:serialize-commit commit) :external-format :utf-8)))
-      (githack:git-update-ref repository-path branch-name (githack:sha commit)))))
+      (githack:git-update-ref! repository-path branch-name (githack:sha commit)))))
 
 (defun %demo-hijack-with-tree! (repository-path branch-name parent-sha entries)
   "Simulate a genuine concurrent external writer racing an in-flight
@@ -212,7 +212,7 @@ single new real GIT-TREE built from all of ENTRIES."
       (setf (githack:sha commit)
             (githack:git-hash-object repository-path "commit"
                                       (sb-ext:string-to-octets (githack:serialize-commit commit) :external-format :utf-8)))
-      (githack:git-update-ref repository-path branch-name (githack:sha commit))
+      (githack:git-update-ref! repository-path branch-name (githack:sha commit))
       (githack:sha commit))))
 
 (defun %demo-tree-entry-payload (repository-path tree filename)

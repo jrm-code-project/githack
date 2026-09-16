@@ -8,7 +8,7 @@
 ;;; support (GIT-TRANSACTION's own automatic nesting, exercised alone
 ;;; by END-TO-END-NESTED-TRANSACTIONS-COMMIT-ABORT-AND-RETRY in
 ;;; end-to-end-tests.lisp) -- i.e. real, non-mocked coverage of
-;;; exactly the composition %ENLIST-TRANSACTION-WRITE!'s own
+;;; exactly the composition ENLIST-TRANSACTION-WRITE!'s own
 ;;; docstring recommends: "nested GIT-TRANSACTIONs inside one single
 ;;; outer WITH-TRANSACTION/CALL-WITH-TRANSACTION call for that
 ;;; repository... reserve separate, top-level WITH-TRANSACTION calls
@@ -20,7 +20,7 @@
 ;;; WITH-TEMPORARY-GIT-REPOSITORY, exactly as DISTRIBUTED-
 ;;; TRANSACTION-SUITE and END-TO-END-SUITE both do) -- no
 ;;; GIT-HASH-OBJECT/GIT-CAT-FILE/GIT-TYPE/GIT-SHOW-REF-SHA/
-;;; GIT-UPDATE-REF fake is ever installed.
+;;; GIT-UPDATE-REF! fake is ever installed.
 
 (def-suite distributed-nested-transaction-suite
   :in githack-suite
@@ -28,7 +28,7 @@
 
 (in-suite distributed-nested-transaction-suite)
 
-(defun %dntx-current-value ()
+(defun dntx-current-value ()
   "Return *TRANSACTION*'s own current, fully-percolated root value
 as a plain Lisp value -- shorthand for (GET-PAYLOAD (GET-CURRENT-ROOT
 *TRANSACTION*)), used throughout this file exactly as END-TO-END-
@@ -51,7 +51,7 @@ real 2PC round trip, with no `refs/githack/prepare/...` ref left
 stranded in either repository afterward."
   (with-temporary-git-repository (repository-1)
     (with-temporary-git-repository (repository-2)
-      (%dtx-write! repository-1 "main" 100)
+      (dtx-write! repository-1 "main" 100)
       (with-githack-transaction ()
         (with-repository (repo1) (repository-1 :branch "main" :author +dtx-author+ :committer +dtx-author+
                                                  :message "dntx" :mode :read-write)
@@ -60,16 +60,16 @@ stranded in either repository afterward."
             ;; Nested A: +10, committed normally (percolates up, no
             ;; GIT-COMMIT of its own).
             (with-transaction (a) (repo1 :read-write) (+ a 10))
-            (is (eql 110 (%dntx-current-value)))
+            (is (eql 110 (dntx-current-value)))
             ;; Nested B: attempts +1000 but explicitly aborts instead
             ;; of returning -- must leave the percolated state
             ;; completely untouched (still 110, not 1110).
             (with-transaction (b) (repo1 :read-write) (abort-git-transaction *transaction*))
-            (is (eql 110 (%dntx-current-value)))
-            (%dntx-current-value)))
-        (%dtx-write! repository-2 "main" "solo-participant"))
-      (is (eql 110 (%dtx-read repository-1 "main")))
-      (is (equal "solo-participant" (%dtx-read repository-2 "main")))
+            (is (eql 110 (dntx-current-value)))
+            (dntx-current-value)))
+        (dtx-write! repository-2 "main" "solo-participant"))
+      (is (eql 110 (dtx-read repository-1 "main")))
+      (is (equal "solo-participant" (dtx-read repository-2 "main")))
       (is (null (%git-for-each-ref repository-1 "refs/githack/prepare/")))
       (is (null (%git-for-each-ref repository-2 "refs/githack/prepare/"))))))
 
@@ -86,7 +86,7 @@ together."
   (with-temporary-git-repository (repository-1)
     (with-temporary-git-repository (repository-2)
       (with-temporary-git-repository (repository-3)
-        (%dtx-write! repository-1 "main" 100)
+        (dtx-write! repository-1 "main" 100)
         (with-githack-transaction ()
           (with-repository (repo1) (repository-1 :branch "main" :author +dtx-author+ :committer +dtx-author+
                                                    :message "dntx" :mode :read-write)
@@ -97,14 +97,14 @@ together."
                 (with-transaction (d) (repo1 :read-write)
                   (is (eql 100 d))
                   (+ d 5))
-                (%dntx-current-value))
-              (is (eql 105 (%dntx-current-value)))
-              (%dntx-current-value)))
-          (%dtx-write! repository-2 "main" "participant-two")
-          (%dtx-write! repository-3 "main" "participant-three"))
-        (is (eql 105 (%dtx-read repository-1 "main")))
-        (is (equal "participant-two" (%dtx-read repository-2 "main")))
-        (is (equal "participant-three" (%dtx-read repository-3 "main")))))))
+                (dntx-current-value))
+              (is (eql 105 (dntx-current-value)))
+              (dntx-current-value)))
+          (dtx-write! repository-2 "main" "participant-two")
+          (dtx-write! repository-3 "main" "participant-three"))
+        (is (eql 105 (dtx-read repository-1 "main")))
+        (is (equal "participant-two" (dtx-read repository-2 "main")))
+        (is (equal "participant-three" (dtx-read repository-3 "main")))))))
 
 (test independent-nested-single-repository-composition-in-two-separate-participants-at-once
   "Both participants of a two-repository distributed transaction
@@ -116,21 +116,21 @@ with a sibling participant's own nested composition, before both are
 committed together via one real 2PC round trip."
   (with-temporary-git-repository (repository-1)
     (with-temporary-git-repository (repository-2)
-      (%dtx-write! repository-1 "main" 10)
-      (%dtx-write! repository-2 "main" 7)
+      (dtx-write! repository-1 "main" 10)
+      (dtx-write! repository-2 "main" 7)
       (with-githack-transaction ()
         (with-repository (repo1) (repository-1 :branch "main" :author +dtx-author+ :committer +dtx-author+
                                                  :message "dntx" :mode :read-write)
           (with-transaction (v) (repo1 :read-write)
             (with-transaction (a) (repo1 :read-write) (+ a 10))
-            (%dntx-current-value)))
+            (dntx-current-value)))
         (with-repository (repo2) (repository-2 :branch "main" :author +dtx-author+ :committer +dtx-author+
                                                  :message "dntx" :mode :read-write)
           (with-transaction (v) (repo2 :read-write)
             (with-transaction (b) (repo2 :read-write) (* b 3))
-            (%dntx-current-value))))
-      (is (eql 20 (%dtx-read repository-1 "main")))
-      (is (eql 21 (%dtx-read repository-2 "main"))))))
+            (dntx-current-value))))
+      (is (eql 20 (dtx-read repository-1 "main")))
+      (is (eql 21 (dtx-read repository-2 "main"))))))
 
 (test nested-transaction-abort-in-one-participant-does-not-prevent-the-distributed-transaction-from-committing
   "An explicit ABORT-GIT-TRANSACTION on a nested transaction inside
@@ -141,7 +141,7 @@ both REPOSITORY-1 and REPOSITORY-2 still end up committed via one
 successful 2PC round trip."
   (with-temporary-git-repository (repository-1)
     (with-temporary-git-repository (repository-2)
-      (%dtx-write! repository-1 "main" "unchanged")
+      (dtx-write! repository-1 "main" "unchanged")
       (with-githack-transaction ()
         (with-repository (repo1) (repository-1 :branch "main" :author +dtx-author+ :committer +dtx-author+
                                                  :message "dntx" :mode :read-write)
@@ -150,9 +150,9 @@ successful 2PC round trip."
               (declare (ignore a))
               (abort-git-transaction *transaction*))
             v))
-        (%dtx-write! repository-2 "main" "committed-fine"))
-      (is (equal "unchanged" (%dtx-read repository-1 "main")))
-      (is (equal "committed-fine" (%dtx-read repository-2 "main")))
+        (dtx-write! repository-2 "main" "committed-fine"))
+      (is (equal "unchanged" (dtx-read repository-1 "main")))
+      (is (equal "committed-fine" (dtx-read repository-2 "main")))
       (is (null (%git-for-each-ref repository-1 "refs/githack/prepare/")))
       (is (null (%git-for-each-ref repository-2 "refs/githack/prepare/"))))))
 
@@ -168,7 +168,7 @@ written to (and successfully enlisted) before the error."
     (with-temporary-git-repository (repository-2)
       (signals simple-error
         (with-githack-transaction ()
-          (%dtx-write! repository-2 "main" "should-not-stick")
+          (dtx-write! repository-2 "main" "should-not-stick")
           (with-repository (repo1) (repository-1 :branch "main" :author +dtx-author+ :committer +dtx-author+
                                                    :message "dntx" :mode :read-write)
             (with-transaction (v) (repo1 :read-write)
@@ -186,7 +186,7 @@ written to (and successfully enlisted) before the error."
   "Two separate, sequential (NOT nested -- each its own top-level
 WITH-REPOSITORY/WITH-TRANSACTION call) writes against the very same
 REPOSITORY-1/\"main\" within one distributed transaction coalesce, per
-%ENLIST-TRANSACTION-WRITE!'s own documented simplification, into a
+ENLIST-TRANSACTION-WRITE!'s own documented simplification, into a
 single PENDING-WRITE: only the LATEST NEW-COMMIT-SHA survives, but
 OLD-SHA is preserved from the very FIRST write's own original branch
 head (not the first write's own -- never ref-visible -- new SHA), so
@@ -197,7 +197,7 @@ write (it resolves its own starting value from the branch's real,
 unmoved ref, so it sees the ORIGINAL value, not the first call's
 result)."
   (with-temporary-git-repository (repository-1)
-    (%dtx-write! repository-1 "main" "original")
+    (dtx-write! repository-1 "main" "original")
     (let ((original-sha (git-show-ref-sha repository-1 "main")))
       (with-githack-transaction ()
         (with-repository (repo1) (repository-1 :branch "main" :author +dtx-author+ :committer +dtx-author+
@@ -215,7 +215,7 @@ result)."
         (let ((pending (%githack-transaction-pending-writes *current-transaction*)))
           (is (= 1 (length pending)))
           (is (equal original-sha (pending-write-old-sha (first pending))))))
-      (is (equal "second-write" (%dtx-read repository-1 "main"))))))
+      (is (equal "second-write" (dtx-read repository-1 "main"))))))
 
 (test nested-githack-transaction-commits-independently-of-its-own-enclosing-transactions-later-outcome
   "A WITH-GITHACK-TRANSACTION nested directly inside another WITH-
@@ -239,17 +239,17 @@ returned) is left uncommitted."
             ;; complete 2PC round trip across repository-1/
             ;; repository-2 runs to completion right here.
             (with-githack-transaction ()
-              (%dtx-write! repository-1 "main" "inner-one")
-              (%dtx-write! repository-2 "main" "inner-two"))
+              (dtx-write! repository-1 "main" "inner-one")
+              (dtx-write! repository-2 "main" "inner-two"))
             ;; Back in the OUTER transaction: write to a third,
             ;; disjoint repository, then blow up before the outer's
             ;; own %FINISH-GITHACK-TRANSACTION! is ever reached.
-            (%dtx-write! repository-3 "main" "outer-should-not-stick")
+            (dtx-write! repository-3 "main" "outer-should-not-stick")
             (error "simulated failure in the outer transaction, after the inner one already committed")))
         ;; The inner transaction's own two participants are
         ;; permanently committed, regardless of the outer's own fate.
-        (is (equal "inner-one" (%dtx-read repository-1 "main")))
-        (is (equal "inner-two" (%dtx-read repository-2 "main")))
+        (is (equal "inner-one" (dtx-read repository-1 "main")))
+        (is (equal "inner-two" (dtx-read repository-2 "main")))
         ;; The outer transaction's own sole participant never committed.
         (is (null (git-show-ref-sha repository-3 "main")))
         (is (null (%git-for-each-ref repository-3 "refs/githack/")))))))

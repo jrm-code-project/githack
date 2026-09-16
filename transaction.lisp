@@ -32,7 +32,7 @@
 ;;; %ENSURE-TREE-ENTRIES-LOADED/%ENSURE-COMMIT-LOADED, so that
 ;;; PERSISTENT-VECTOR's own lazy accessor can share it too.
 
-(defun %transaction-read-value (head-commit)
+(defun transaction-read-value (head-commit)
   "Return the plain Lisp value CALL-WITH-TRANSACTION's RECEIVER
 should see for HEAD-COMMIT: NIL if HEAD-COMMIT is itself NIL (an
 empty branch, awaiting its initial commit); the decoded atom held in
@@ -46,7 +46,7 @@ PERSISTENT-CONS, or other persistent proxy), unchanged."
              (get-payload (%ensure-blob-loaded root))
              root))))
 
-(defun %transaction-write-value (repository value)
+(defun transaction-write-value (repository value)
   "Coerce VALUE -- the plain Lisp value CALL-WITH-TRANSACTION's
 RECEIVER returned -- into a GIT-OBJECT suitable to hand back to
 CALL-WITH-GIT-TRANSACTION as its new commit root: VALUE unchanged if
@@ -89,12 +89,12 @@ transaction against REPOSITORY (a GIT-REPOSITORY) exactly as
 CALL-WITH-GIT-TRANSACTION does, cascading BRANCH/AUTHOR/COMMITTER/
 MESSAGE/PARENTS/CONFLICT-RESOLUTION/REBASE-FALLBACK the same way,
 but invokes (FUNCALL RECEIVER VALUE) with a single plain Lisp value
-in place of a raw GIT-COMMIT -- see %TRANSACTION-READ-VALUE -- with
+in place of a raw GIT-COMMIT -- see TRANSACTION-READ-VALUE -- with
 *TRANSACTION* dynamically bound to the GIT-TRANSACTION for the
 duration of that call, and expects RECEIVER to return a single plain
 Lisp value in turn, representing the new desired root state, which
 is automatically coerced back into a GIT-OBJECT and persisted -- see
-%TRANSACTION-WRITE-VALUE. RECEIVER must never touch SHAs, GIT-BLOBs,
+TRANSACTION-WRITE-VALUE. RECEIVER must never touch SHAs, GIT-BLOBs,
 GIT-TREEs, or GIT-COMMITs directly.
 
 As with CALL-WITH-GIT-TRANSACTION, RECEIVER may instead signal an
@@ -139,9 +139,9 @@ does."
    :rebase-fallback rebase-fallback
    :receiver (lambda (transaction head-commit)
                (let ((*transaction* transaction))
-                 (%transaction-write-value
+                 (transaction-write-value
                   (get-pathname repository)
-                  (funcall receiver (%transaction-read-value head-commit)))))))
+                  (funcall receiver (transaction-read-value head-commit)))))))
 
 (defmacro with-transaction ((value-var) (repository mode &key branch author committer message parents
                                                      (conflict-resolution :error) (rebase-fallback :error))

@@ -81,7 +81,7 @@ repository (e.g. `git mktag` rejects a malformed tag, or a
 `refs/githack/prepare/<tx-id>/<branch-name>` ref already
 unexpectedly exists) -- as opposed to CONCURRENT-MODIFICATION-ERROR,
 which means a single repository's own ordinary branch
-compare-and-swap failed. Also signaled by RUN-GITHACK-EXORCIST if a
+compare-and-swap failed. Also signaled by RUN-GITHACK-EXORCIST! if a
 stranded PREPARE ref's own annotated tag cannot be parsed back into
 a Transaction Manifest, or names a Ledger repository that cannot
 itself be reached."))
@@ -142,10 +142,27 @@ MERGE-CONFLICT-ERROR) transaction was attempting to replay its own
 candidate commit onto when GIT-MERGE-TREE reported a genuine,
 unresolvable content conflict.")
 
+(define-condition garbage-collection-error (githack-error)
+  ((repository :initarg :repository :reader get-repository)
+   (detail :initarg :detail :initform nil :reader get-detail))
+  (:report
+   (lambda (condition stream)
+     (format stream "`git gc` failed against repository ~A.~@[~%~A~]"
+             (get-repository condition) (get-detail condition))))
+  (:documentation
+   "Signaled by RUN-GITHACK-GC! when the underlying `git gc` shell-out
+against REPOSITORY exits with a non-zero status (e.g. a corrupt
+object the pack-objects/reflog machinery refuses to touch, or a
+concurrent `git gc` already running against the same repository).
+Signaled only for the final repacking step -- failures encountered
+while sweeping stranded `refs/githack/prepare/...` refs still
+propagate as DISTRIBUTED-TRANSACTION-ERROR, exactly as
+RUN-GITHACK-EXORCIST! itself signals them."))
+
 (define-condition git-not-found-error (githack-error)
   ()
   (:documentation
-   "Signaled by %ENSURE-GIT-AVAILABLE (called by CALL-WITH-REPOSITORY)
+   "Signaled by ENSURE-GIT-AVAILABLE (called by CALL-WITH-REPOSITORY)
 when no working `git` executable can be found and run on PATH --
 e.g. because `git` is not installed, PATH is misconfigured, or an
 unusual shell environment prevents subprocess creation entirely --

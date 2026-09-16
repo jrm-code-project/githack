@@ -45,7 +45,7 @@ standard four tree entries in sorted order."
         (is (eq cdr-object (persistent-cdr cons)))
         (is (typep cdr-object 'git-blob))
         (is (null (get-payload cdr-object)))
-        (is (string= (%fake-sha-for "blob" (serialize-atom nil)) (sha cdr-object)))))))
+        (is (string= (fake-sha-for "blob" (serialize-atom nil)) (sha cdr-object)))))))
 
 (test serialize-persistent-cons-dotted-pair
   "Serializing a cons whose PERSISTENT-CDR is an ordinary,
@@ -132,7 +132,7 @@ SHAs."
            (readme-entry (cdr (assoc "README.md" (get-entries original) :test #'string=)))
            (cdr-entry (cdr (assoc "cdr" (get-entries original) :test #'string=)))
            (meta-octets (third (find (sha meta-entry) calls
-                                      :key (lambda (call) (%fake-sha-for (second call) (third call)))
+                                      :key (lambda (call) (fake-sha-for (second call) (third call)))
                                       :test #'string=)))
            (hollow (make-instance 'persistent-cons :repository :dummy-repo :sha (sha original))))
       (is (not (null meta-octets)))
@@ -167,7 +167,7 @@ series."
 (test scan-persistent-list-collects-decoded-car-elements
   "SCAN-PERSISTENT-LIST of an in-memory, already-loaded chain of
 PERSISTENT-CONS cells produces a series of their PERSISTENT-CAR
-values, each decoded via %PERSISTENT-CONS-DECODE (a GIT-BLOB's own
+values, each decoded via PERSISTENT-CONS-DECODE (a GIT-BLOB's own
 PAYLOAD, here plain integers)."
   (let* ((c3 (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
                              :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload 3 :loaded? t)
@@ -264,7 +264,7 @@ other hand-built PERSISTENT-CONS chain."
     (is (= 3 (persistent-cons-length head)))
     (is (eq t (persistent-cons-proper head)))))
 
-(defun %make-persistent-alist-pair (key value)
+(defun make-persistent-alist-pair (key value)
   "Helper for the SCAN-PERSISTENT-ALIST tests below: build a single,
 in-memory, already GET-LOADED? PERSISTENT-CONS pair whose
 PERSISTENT-CAR is KEY and PERSISTENT-CDR is VALUE, wrapping each in
@@ -277,11 +277,11 @@ uses for its own bucket chains."
                                    :persistent-cdr (if (typep value 'git-object) value
                                                         (make-instance 'git-blob :repository :dummy-repo :payload value :loaded? t))))
 
-(defun %make-persistent-alist-spine (pairs)
+(defun make-persistent-alist-spine (pairs)
   "Helper for the SCAN-PERSISTENT-ALIST tests below: build an
 in-memory, already GET-LOADED? PERSISTENT-CONS spine chaining the
 given PAIRS (each already a PERSISTENT-CONS, e.g. as returned by
-%MAKE-PERSISTENT-ALIST-PAIR) in order, terminated by NIL."
+MAKE-PERSISTENT-ALIST-PAIR) in order, terminated by NIL."
   (reduce (lambda (pair tail)
             (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
                                              :persistent-car pair
@@ -300,12 +300,12 @@ series, for keys and values respectively."
 (test scan-persistent-alist-collects-decoded-key-value-pairs
   "SCAN-PERSISTENT-ALIST of an in-memory, already-loaded spine of
 PERSISTENT-CONS pairs produces two series -- keys and, respectively,
-values -- each decoded via %PERSISTENT-CONS-DECODE (a GIT-BLOB's own
+values -- each decoded via PERSISTENT-CONS-DECODE (a GIT-BLOB's own
 PAYLOAD, here plain keywords/integers), in the spine's own order."
-  (let ((spine (%make-persistent-alist-spine
-                (list (%make-persistent-alist-pair :a 1)
-                      (%make-persistent-alist-pair :b 2)
-                      (%make-persistent-alist-pair :c 3)))))
+  (let ((spine (make-persistent-alist-spine
+                (list (make-persistent-alist-pair :a 1)
+                      (make-persistent-alist-pair :b 2)
+                      (make-persistent-alist-pair :c 3)))))
     (multiple-value-bind (keys values) (scan-persistent-alist spine)
       (is (equal '(:a :b :c) (series:collect keys)))
       (is (equal '(1 2 3) (series:collect values))))))
@@ -313,11 +313,11 @@ PAYLOAD, here plain keywords/integers), in the spine's own order."
 (test scan-persistent-alist-passes-through-compound-values-unchanged
   "SCAN-PERSISTENT-ALIST leaves an already-compound GIT-OBJECT value
 (a nested PERSISTENT-CONS, here) unwrapped, exactly as
-%PERSISTENT-CONS-DECODE always does for any non-GIT-BLOB element."
+PERSISTENT-CONS-DECODE always does for any non-GIT-BLOB element."
   (let* ((nested (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
                                  :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload :inner :loaded? t)
                                  :persistent-cdr nil))
-         (spine (%make-persistent-alist-spine (list (%make-persistent-alist-pair :a nested)))))
+         (spine (make-persistent-alist-spine (list (make-persistent-alist-pair :a nested)))))
     (multiple-value-bind (keys values) (scan-persistent-alist spine)
       (is (equal '(:a) (series:collect keys)))
       (is (eq nested (first (series:collect values)))))))
@@ -346,7 +346,7 @@ keys/values as the original in-memory alist."
         (is (equal '(:a :b) (series:collect keys)))
         (is (equal '(1 2) (series:collect values)))))))
 
-(defun %make-persistent-plist-spine (plist)
+(defun make-persistent-plist-spine (plist)
   "Helper for the SCAN-PERSISTENT-PLIST tests below: build an
 in-memory, already GET-LOADED? PERSISTENT-CONS spine holding the
 successive elements of PLIST (an ordinary Lisp plist -- a flat list
@@ -372,9 +372,9 @@ series, for indicators and values respectively."
   "SCAN-PERSISTENT-PLIST of an in-memory, already-loaded flat spine
 of alternating indicator/value elements produces two series --
 indicators and, respectively, values -- each decoded via
-%PERSISTENT-CONS-DECODE (a GIT-BLOB's own PAYLOAD, here plain
+PERSISTENT-CONS-DECODE (a GIT-BLOB's own PAYLOAD, here plain
 keywords/integers), in the spine's own order."
-  (let ((spine (%make-persistent-plist-spine (list :a 1 :b 2 :c 3))))
+  (let ((spine (make-persistent-plist-spine (list :a 1 :b 2 :c 3))))
     (multiple-value-bind (indicators values) (scan-persistent-plist spine)
       (is (equal '(:a :b :c) (series:collect indicators)))
       (is (equal '(1 2 3) (series:collect values))))))
@@ -382,11 +382,11 @@ keywords/integers), in the spine's own order."
 (test scan-persistent-plist-passes-through-compound-values-unchanged
   "SCAN-PERSISTENT-PLIST leaves an already-compound GIT-OBJECT value
 (a nested PERSISTENT-CONS, here) unwrapped, exactly as
-%PERSISTENT-CONS-DECODE always does for any non-GIT-BLOB element."
+PERSISTENT-CONS-DECODE always does for any non-GIT-BLOB element."
   (let* ((nested (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
                                  :persistent-car (make-instance 'git-blob :repository :dummy-repo :payload :inner :loaded? t)
                                  :persistent-cdr nil))
-         (spine (%make-persistent-plist-spine (list :a nested))))
+         (spine (make-persistent-plist-spine (list :a nested))))
     (multiple-value-bind (indicators values) (scan-persistent-plist spine)
       (is (equal '(:a) (series:collect indicators)))
       (is (eq nested (first (series:collect values)))))))

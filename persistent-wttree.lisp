@@ -27,7 +27,7 @@
 ;;; PERSISTENT-VECTOR's own LENGTH is -- without ever fetching that
 ;;; node's KEY, VALUE, or either child's own contents. Every Adams
 ;;; rebalancing operation (WT-ADD, WT-DELETE, and their shared %WT-
-;;; JOIN/%WT-CONCAT internals) queries only WT-WEIGHT while deciding
+;;; JOIN/WT-CONCAT internals) queries only WT-WEIGHT while deciding
 ;;; *whether* to rotate, so a whole rotation-free traversal path
 ;;; never forces a single extra Git fetch beyond each visited node's
 ;;; own ".meta" blob; a child's KEY/VALUE/further children are only
@@ -109,25 +109,25 @@ instance. See SERIALIZE-PERSISTENT-WTTREE-NODE and DESERIALIZE-
 PERSISTENT-WTTREE-NODE for the on-disk representation, and WT-ADD/
 WT-DELETE/WT-LOOKUP/WT-FOLD for the public Adams-tree operations."))
 
-(defun %serialize-persistent-wttree-meta (weight)
+(defun serialize-persistent-wttree-meta (weight)
   "Encode the small property list (:TAG :WTTREE :WEIGHT WEIGHT) as
-a UTF-8 octet vector, via %SERIALIZE-PLIST: the exact raw content of
+a UTF-8 octet vector, via SERIALIZE-PLIST: the exact raw content of
 a persistent wttree node's \".meta\" blob."
-  (%serialize-plist (list :tag :wttree :weight weight)))
+  (serialize-plist (list :tag :wttree :weight weight)))
 
-(defun %deserialize-persistent-wttree-meta (octets)
-  "Inverse of %SERIALIZE-PERSISTENT-WTTREE-META: parse OCTETS -- the
+(defun deserialize-persistent-wttree-meta (octets)
+  "Inverse of SERIALIZE-PERSISTENT-WTTREE-META: parse OCTETS -- the
 raw content of a persistent wttree node's \".meta\" blob -- via
-%DESERIALIZE-PLIST, and return its :WEIGHT. Signals an error if
+DESERIALIZE-PLIST, and return its :WEIGHT. Signals an error if
 OCTETS is not a plist whose :TAG is :WTTREE."
-  (let ((plist (%deserialize-plist octets)))
+  (let ((plist (deserialize-plist octets)))
     (unless (eq (getf plist :tag) :wttree)
       (error 'malformed-git-object-error
              :format-control "Malformed persistent wttree .meta blob: ~S."
              :format-arguments (list plist)))
     (getf plist :weight)))
 
-(defun %wt-decode (git-object)
+(defun wt-decode (git-object)
   "Return the real Lisp value GIT-OBJECT represents: its decoded
 PAYLOAD, if GIT-OBJECT is a GIT-BLOB (fetching it from the
 repository first via %ENSURE-BLOB-LOADED, if not yet loaded); or
@@ -137,7 +137,7 @@ proxy."
       (get-payload (%ensure-blob-loaded git-object))
       git-object))
 
-(defun %wt-wrap (repository value)
+(defun wt-wrap (repository value)
   "Return VALUE unchanged if it is already a GIT-OBJECT proxy;
 otherwise, return a fresh, already-loaded GIT-BLOB, associated with
 REPOSITORY, wrapping VALUE as a serializable atom."
@@ -158,19 +158,27 @@ it via DESERIALIZE-PERSISTENT-WTTREE-NODE. This is the *only* I/O
 this function ever performs: NODE's own KEY/VALUE/LEFT/RIGHT remain
 hollow, unfetched proxies, so querying NODE's own WEIGHT (or
 retyping/loading it in the first place) never cascades into a
-fetch of its children's own contents. Returns NODE."
-  (unless (typep node 'persistent-wttree)
-    (change-class node 'persistent-wttree))
-  (unless (get-loaded? node)
-    (let* ((repository (get-repository node))
-           (tree-octets (git-cat-file repository (sha node)))
-           (entries (deserialize-tree repository tree-octets))
-           (meta-entry (assoc ".meta" entries :test #'string=)))
-      (unless meta-entry
-        (error 'malformed-git-object-error
-               :format-control "Malformed persistent wttree node: missing \".meta\" entry."))
-      (deserialize-persistent-wttree-node
-       node tree-octets (git-cat-file repository (sha (cdr meta-entry))))))
+fetch of its children's own contents. Returns NODE.
+
+Thread-safe: mirrors %ENSURE-PERSISTENT-CONS-LOADED's own commentary
+-- the common case (NODE already retyped and loaded) takes no lock at
+all; only a possible CL:CHANGE-CLASS retyping is serialized, via
+WITH-OBJECT-LOAD-LOCK's own stripe mutex, with the already-
+loaded/retyped condition rechecked once the lock is held."
+  (unless (and (typep node 'persistent-wttree) (get-loaded? node))
+    (with-object-load-lock (node)
+      (unless (typep node 'persistent-wttree)
+        (change-class node 'persistent-wttree))
+      (unless (get-loaded? node)
+        (let* ((repository (get-repository node))
+               (tree-octets (git-cat-file repository (sha node)))
+               (entries (deserialize-tree repository tree-octets))
+               (meta-entry (assoc ".meta" entries :test #'string=)))
+          (unless meta-entry
+            (error 'malformed-git-object-error
+                   :format-control "Malformed persistent wttree node: missing \".meta\" entry."))
+          (deserialize-persistent-wttree-node
+           node tree-octets (git-cat-file repository (sha (cdr meta-entry))))))))
   node)
 
 (defun wt-weight (node)
@@ -188,14 +196,14 @@ contents. Every Adams rebalancing decision queries only this."
 
 (defun wt-node-key (node)
   "Return the real Lisp key held by NODE (a non-NIL PERSISTENT-
-WTTREE or not-yet-retyped GIT-TREE), decoded via %WT-DECODE, forcing
+WTTREE or not-yet-retyped GIT-TREE), decoded via WT-DECODE, forcing
 NODE itself (but not either child) to be loaded first."
-  (%wt-decode (%wt-raw-key (%ensure-persistent-wttree-node-loaded node))))
+  (wt-decode (%wt-raw-key (%ensure-persistent-wttree-node-loaded node))))
 
 (defun wt-node-value (node)
-  "Return the real Lisp value held by NODE, decoded via %WT-DECODE,
+  "Return the real Lisp value held by NODE, decoded via WT-DECODE,
 forcing NODE itself (but not either child) to be loaded first."
-  (%wt-decode (%wt-raw-value (%ensure-persistent-wttree-node-loaded node))))
+  (wt-decode (%wt-raw-value (%ensure-persistent-wttree-node-loaded node))))
 
 (defun wt-node-left (node)
   "Return NODE's left child: NIL for an empty left subtree, or a
@@ -209,79 +217,79 @@ GIT-OBJECT proxy (not yet forced loaded) otherwise. Forces NODE
 itself to be loaded first."
   (%wt-raw-right (%ensure-persistent-wttree-node-loaded node)))
 
-(defun %wt-log2-less-p (left right)
+(defun wt-log2-less-p (left right)
   "Return true if LEFT and RIGHT (both non-negative integer subtree
 weights) differ enough, in Adams' balance criterion, that LEFT is
 considered strictly smaller on a base-2 logarithmic scale."
   (and (< left right)
        (< (ash (logand left right) 1) right)))
 
-(defun %wt-weight-too-small-p (small large)
-  "Return true if SMALL is too small relative to LARGE for %WT-JOIN
+(defun wt-weight-too-small-p (small large)
+  "Return true if SMALL is too small relative to LARGE for WT-JOIN
 to leave them combined without rebalancing, per Adams' criterion."
-  (%wt-log2-less-p small (ash large -1)))
+  (wt-log2-less-p small (ash large -1)))
 
-(defun %wt-single-rotation-p (inner outer)
+(defun wt-single-rotation-p (inner outer)
   "Return true if a single (as opposed to double) rotation suffices
 to rebalance a node whose heavy child's own INNER/OUTER grandchild
 weights are as given."
-  (not (%wt-log2-less-p outer inner)))
+  (not (wt-log2-less-p outer inner)))
 
-(defun %wt-make-node (repository key value left right)
+(defun wt-make-node (repository key value left right)
   "Construct and return a fresh, already-loaded PERSISTENT-WTTREE
 node (with a WEIGHT of one more than LEFT's and RIGHT's own WT-WEIGHT,
-computed immediately) for KEY/VALUE (wrapped via %WT-WRAP if not
+computed immediately) for KEY/VALUE (wrapped via WT-WRAP if not
 already GIT-OBJECT proxies) and children LEFT/RIGHT (each NIL or an
 existing/fresh node). Performs no I/O of its own; see SERIALIZE-
 PERSISTENT-WTTREE-NODE for that."
   (make-instance 'persistent-wttree
                  :repository repository
                  :loaded? t
-                 :key (%wt-wrap repository key)
-                 :value (%wt-wrap repository value)
+                 :key (wt-wrap repository key)
+                 :value (wt-wrap repository value)
                  :left left
                  :right right
                  :weight (+ 1 (wt-weight left) (wt-weight right))))
 
-(defun %wt-join (repository key value left right)
+(defun wt-join (repository key value left right)
   "Combine KEY/VALUE with children LEFT/RIGHT into a single,
 correctly rebalanced PERSISTENT-WTTREE node, applying at most one
 Adams single or double rotation (querying only WT-WEIGHT to decide
 whether, and which, rotation is needed) if LEFT and RIGHT differ too
-much in weight; otherwise simply %WT-MAKE-NODE's them together
+much in weight; otherwise simply WT-MAKE-NODE's them together
 directly. The classic 'join' step every Adams-tree operation (WT-ADD,
-WT-DELETE, %WT-CONCAT) is built from."
+WT-DELETE, WT-CONCAT) is built from."
   (let ((left-weight (wt-weight left))
         (right-weight (wt-weight right)))
     (cond
-      ((%wt-weight-too-small-p left-weight right-weight)
+      ((wt-weight-too-small-p left-weight right-weight)
        (let ((inner (wt-node-left right))
              (outer (wt-node-right right)))
-         (if (%wt-single-rotation-p (wt-weight inner) (wt-weight outer))
-             (%wt-make-node repository (wt-node-key right) (wt-node-value right)
-                            (%wt-make-node repository key value left inner)
+         (if (wt-single-rotation-p (wt-weight inner) (wt-weight outer))
+             (wt-make-node repository (wt-node-key right) (wt-node-value right)
+                            (wt-make-node repository key value left inner)
                             outer)
-             (%wt-make-node repository (wt-node-key inner) (wt-node-value inner)
-                            (%wt-make-node repository key value left (wt-node-left inner))
-                            (%wt-make-node repository (wt-node-key right) (wt-node-value right)
+             (wt-make-node repository (wt-node-key inner) (wt-node-value inner)
+                            (wt-make-node repository key value left (wt-node-left inner))
+                            (wt-make-node repository (wt-node-key right) (wt-node-value right)
                                            (wt-node-right inner) outer)))))
-      ((%wt-weight-too-small-p right-weight left-weight)
+      ((wt-weight-too-small-p right-weight left-weight)
        (let ((outer (wt-node-left left))
              (inner (wt-node-right left)))
-         (if (%wt-single-rotation-p (wt-weight inner) (wt-weight outer))
-             (%wt-make-node repository (wt-node-key left) (wt-node-value left)
+         (if (wt-single-rotation-p (wt-weight inner) (wt-weight outer))
+             (wt-make-node repository (wt-node-key left) (wt-node-value left)
                             outer
-                            (%wt-make-node repository key value inner right))
-             (%wt-make-node repository (wt-node-key inner) (wt-node-value inner)
-                            (%wt-make-node repository (wt-node-key left) (wt-node-value left)
+                            (wt-make-node repository key value inner right))
+             (wt-make-node repository (wt-node-key inner) (wt-node-value inner)
+                            (wt-make-node repository (wt-node-key left) (wt-node-value left)
                                            outer (wt-node-left inner))
-                            (%wt-make-node repository key value (wt-node-right inner) right)))))
-      (t (%wt-make-node repository key value left right)))))
+                            (wt-make-node repository key value (wt-node-right inner) right)))))
+      (t (wt-make-node repository key value left right)))))
 
 (defun wt-singleton (repository key value)
   "Return a fresh PERSISTENT-WTTREE node of weight 1 holding exactly
 the single association KEY/VALUE."
-  (%wt-make-node repository key value nil nil))
+  (wt-make-node repository key value nil nil))
 
 (defun wt-add (repository key-less-p node key value)
   "Return a new Adams tree, structurally sharing with NODE (a
@@ -289,21 +297,21 @@ PERSISTENT-WTTREE, a not-yet-retyped GIT-TREE, or NIL for the empty
 tree) wherever KEY's own path is unaffected, associating KEY with
 VALUE. KEY-LESS-P is a strict order predicate on keys. NODE itself
 is left completely unmodified. REPOSITORY is used only to construct
-any brand-new nodes/blobs (via %WT-WRAP); it need not equal any
+any brand-new nodes/blobs (via WT-WRAP); it need not equal any
 existing node's own GET-REPOSITORY."
   (if (null node)
       (wt-singleton repository key value)
       (let ((node-key (wt-node-key node)))
         (cond
           ((funcall key-less-p key node-key)
-           (%wt-join repository node-key (wt-node-value node)
+           (wt-join repository node-key (wt-node-value node)
                      (wt-add repository key-less-p (wt-node-left node) key value)
                      (wt-node-right node)))
           ((funcall key-less-p node-key key)
-           (%wt-join repository node-key (wt-node-value node)
+           (wt-join repository node-key (wt-node-value node)
                      (wt-node-left node)
                      (wt-add repository key-less-p (wt-node-right node) key value)))
-          (t (%wt-make-node repository node-key value (wt-node-left node) (wt-node-right node)))))))
+          (t (wt-make-node repository node-key value (wt-node-left node) (wt-node-right node)))))))
 
 (defun wt-lookup (key-less-p node key &optional default)
   "Return two values: the value associated with KEY in NODE (a
@@ -320,7 +328,7 @@ single root-to-KEY search path, forcing each node visited along it
                (t (return-from wt-lookup (values (wt-node-value node) t))))))
   (values default nil))
 
-(defun %wt-extreme (node direction)
+(defun wt-extreme (node direction)
   "Return the leftmost (DIRECTION :LEFT) or rightmost (DIRECTION
 :RIGHT) node of the non-empty Adams tree rooted at NODE. Signals an
 error if NODE is NIL (the empty tree)."
@@ -337,19 +345,19 @@ error if NODE is NIL (the empty tree)."
   "Return two values, the smallest key in the non-empty Adams tree
 rooted at NODE and its associated value. Signals an error if NODE is
 NIL."
-  (let ((extreme (%wt-extreme node :left)))
+  (let ((extreme (wt-extreme node :left)))
     (values (wt-node-key extreme) (wt-node-value extreme))))
 
 (defun wt-max (node)
   "Return two values, the largest key in the non-empty Adams tree
 rooted at NODE and its associated value. Signals an error if NODE is
 NIL."
-  (let ((extreme (%wt-extreme node :right)))
+  (let ((extreme (wt-extreme node :right)))
     (values (wt-node-key extreme) (wt-node-value extreme))))
 
-(defun %wt-remove-extreme (repository node direction)
+(defun wt-remove-extreme (repository node direction)
   "Return a new Adams tree equal to NODE (non-NIL) with its own
-%WT-EXTREME (in DIRECTION) removed, rebalancing via %WT-JOIN as
+WT-EXTREME (in DIRECTION) removed, rebalancing via WT-JOIN as
 necessary."
   (when (null node)
     (error 'invalid-argument-error
@@ -359,21 +367,21 @@ necessary."
          (next (if (eq direction :left) left right)))
     (if (null next)
         (if (eq direction :left) right left)
-        (%wt-join repository (wt-node-key node) (wt-node-value node)
-                  (if (eq direction :left) (%wt-remove-extreme repository left direction) left)
-                  (if (eq direction :right) (%wt-remove-extreme repository right direction) right)))))
+        (wt-join repository (wt-node-key node) (wt-node-value node)
+                  (if (eq direction :left) (wt-remove-extreme repository left direction) left)
+                  (if (eq direction :right) (wt-remove-extreme repository right direction) right)))))
 
-(defun %wt-concat (repository left right)
+(defun wt-concat (repository left right)
   "Return a new Adams tree holding exactly the union of LEFT's and
 RIGHT's own associations, assuming every key in LEFT is strictly
 less than every key in RIGHT (the shape WT-DELETE always concats in).
-Rebalances via %WT-JOIN, exactly like every other node-combining
+Rebalances via WT-JOIN, exactly like every other node-combining
 operation here."
   (cond
     ((null left) right)
     ((null right) left)
     (t (multiple-value-bind (key value) (wt-min right)
-         (%wt-join repository key value left (%wt-remove-extreme repository right :left))))))
+         (wt-join repository key value left (wt-remove-extreme repository right :left))))))
 
 (defun wt-delete (repository key-less-p node key)
   "Return a new Adams tree, structurally sharing with NODE wherever
@@ -385,14 +393,14 @@ never present). NODE itself is left completely unmodified."
       (let ((node-key (wt-node-key node)))
         (cond
           ((funcall key-less-p key node-key)
-           (%wt-join repository node-key (wt-node-value node)
+           (wt-join repository node-key (wt-node-value node)
                      (wt-delete repository key-less-p (wt-node-left node) key)
                      (wt-node-right node)))
           ((funcall key-less-p node-key key)
-           (%wt-join repository node-key (wt-node-value node)
+           (wt-join repository node-key (wt-node-value node)
                      (wt-node-left node)
                      (wt-delete repository key-less-p (wt-node-right node) key)))
-          (t (%wt-concat repository (wt-node-left node) (wt-node-right node)))))))
+          (t (wt-concat repository (wt-node-left node) (wt-node-right node)))))))
 
 (defun wt-fold (procedure initial node)
   "Fold PROCEDURE (a function of three arguments: an accumulator, a
@@ -421,46 +429,46 @@ NODE, in ascending key order."
 Adams tree rooted at NODE, in ascending key order."
   (nreverse (wt-fold (lambda (alist key value) (acons key value alist)) nil node)))
 
-(defgeneric %persist-wttree-component-by-type (git-object)
+(defgeneric persist-wttree-component-by-type (git-object)
   (:documentation
    "Persist GIT-OBJECT (which is known not to have a SHA yet) to
 Git's object database according to its concrete type, and return the
-resulting SHA. Broken out of %WT-PERSIST-COMPONENT so this dispatch
+resulting SHA. Broken out of WT-PERSIST-COMPONENT so this dispatch
 is its own generic function, with one DEFMETHOD per concrete type in
 place of an ETYPECASE clause."))
 
-(defmethod %persist-wttree-component-by-type ((git-object persistent-wttree))
+(defmethod persist-wttree-component-by-type ((git-object persistent-wttree))
   (serialize-persistent-wttree-node git-object))
 
-(defmethod %persist-wttree-component-by-type ((git-object persistent-cons))
+(defmethod persist-wttree-component-by-type ((git-object persistent-cons))
   (serialize-persistent-cons git-object))
 
-(defmethod %persist-wttree-component-by-type ((git-object persistent-vector))
+(defmethod persist-wttree-component-by-type ((git-object persistent-vector))
   (serialize-persistent-vector git-object))
 
-(defmethod %persist-wttree-component-by-type ((git-object git-tree))
+(defmethod persist-wttree-component-by-type ((git-object git-tree))
   (setf (sha git-object)
         (git-hash-object (get-repository git-object) "tree" (serialize-tree git-object))))
 
-(defmethod %persist-wttree-component-by-type ((git-object git-blob))
+(defmethod persist-wttree-component-by-type ((git-object git-blob))
   (setf (sha git-object)
         (git-hash-object (get-repository git-object) "blob"
                           (serialize-atom (get-payload git-object)))))
 
-(defmethod %persist-cons-component-by-type ((git-object persistent-wttree))
+(defmethod persist-cons-component-by-type ((git-object persistent-wttree))
   (serialize-persistent-wttree-node git-object))
 
-(defmethod %persist-vector-component-by-type ((git-object persistent-wttree))
+(defmethod persist-vector-component-by-type ((git-object persistent-wttree))
   (serialize-persistent-wttree-node git-object))
 
-(defun %wt-persist-component (git-object)
+(defun wt-persist-component (git-object)
   "Ensure GIT-OBJECT (a GIT-BLOB, a plain GIT-TREE, a PERSISTENT-CONS,
 a PERSISTENT-VECTOR, or a nested PERSISTENT-WTTREE) has a SHA,
 persisting it if it does not already. Returns GIT-OBJECT's SHA."
   (or (sha git-object)
-      (%persist-wttree-component-by-type git-object)))
+      (persist-wttree-component-by-type git-object)))
 
-(defun %wt-persist-child (node)
+(defun wt-persist-child (node)
   "Persist NODE (a possibly-NIL PERSISTENT-WTTREE child of some
 other node currently being serialized), preserving structural
 sharing: NIL is returned unchanged (an empty child stays absent); an
@@ -477,10 +485,10 @@ persisted, if it was not already)."
 
 (defun serialize-persistent-wttree-node (node)
   "Compute NODE's own WEIGHT (one more than its LEFT's and RIGHT's
-own WT-WEIGHT -- ordinarily already known, since %WT-MAKE-NODE
+own WT-WEIGHT -- ordinarily already known, since WT-MAKE-NODE
 always computes it at construction time), create and persist its
 standard \".meta\" and \"README.md\" blobs, recursively persist its
-KEY, VALUE, LEFT, and RIGHT (via %WT-PERSIST-COMPONENT/%WT-PERSIST-
+KEY, VALUE, LEFT, and RIGHT (via WT-PERSIST-COMPONENT/%WT-PERSIST-
 CHILD -- the latter perfectly preserving structural sharing for any
 untouched child reused from an earlier tree), and finally write
 NODE's own Git tree object, omitting its \"left\"/\"right\" entries
@@ -492,13 +500,13 @@ further if NODE already has one."
       (let* ((repository (get-repository node))
              (key-object (%wt-raw-key node))
              (value-object (%wt-raw-value node))
-             (left (%wt-persist-child (%wt-raw-left node)))
-             (right (%wt-persist-child (%wt-raw-right node)))
+             (left (wt-persist-child (%wt-raw-left node)))
+             (right (wt-persist-child (%wt-raw-right node)))
              (weight (or (%wt-raw-weight node) (+ 1 (wt-weight left) (wt-weight right))))
              (meta-blob (make-instance 'git-blob :repository repository
                                                   :sha (git-hash-object
                                                         repository "blob"
-                                                        (%serialize-persistent-wttree-meta weight))))
+                                                        (serialize-persistent-wttree-meta weight))))
              (readme-blob (make-instance 'git-blob :repository repository
                                                     :sha (git-hash-object
                                                           repository "blob"
@@ -508,8 +516,8 @@ further if NODE already has one."
         (unless key-object
           (error 'unpersisted-object-error
                  :format-control "Cannot serialize persistent wttree node: its KEY has not been set."))
-        (%wt-persist-component key-object)
-        (%wt-persist-component value-object)
+        (wt-persist-component key-object)
+        (wt-persist-component value-object)
         (setf (%wt-raw-left node) left)
         (setf (%wt-raw-right node) right)
         (setf (%wt-raw-weight node) weight)
@@ -556,12 +564,12 @@ and returns it."
     (unless value-entry
       (error 'malformed-git-object-error
              :format-control "Malformed persistent wttree node: missing \"value\" entry."))
-    (let ((weight (%deserialize-persistent-wttree-meta meta-octets)))
+    (let ((weight (deserialize-persistent-wttree-meta meta-octets)))
       (setf (get-entries node) entries)
       (setf (%wt-raw-key node) (cdr key-entry))
       (setf (%wt-raw-value node) (cdr value-entry))
       (setf (%wt-raw-left node) (and left-entry (cdr left-entry)))
       (setf (%wt-raw-right node) (and right-entry (cdr right-entry)))
       (setf (%wt-raw-weight node) weight)
-      (setf (get-loaded? node) t)
+      (%publish-loaded! node)
       node)))

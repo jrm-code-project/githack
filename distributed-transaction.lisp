@@ -17,9 +17,9 @@
 ;;; such single-repository transaction still runs its full, ordinary
 ;;; commit logic -- persisting its own root, wrapping it, building
 ;;; and persisting its own GIT-COMMIT -- except that
-;;; %COMMIT-GIT-TRANSACTION-NOW (git-transaction.lisp), on noticing
+;;; COMMIT-GIT-TRANSACTION-NOW! (git-transaction.lisp), on noticing
 ;;; *CURRENT-TRANSACTION* is bound, stops just short of actually
-;;; advancing its branch: it instead calls %ENLIST-TRANSACTION-WRITE!,
+;;; advancing its branch: it instead calls ENLIST-TRANSACTION-WRITE!,
 ;;; which records a PENDING-WRITE (repository, branch, old SHA, new
 ;;; commit SHA) onto *CURRENT-TRANSACTION*'s own PENDING-WRITES list.
 ;;;
@@ -76,7 +76,7 @@
 ;;; between Phase 1 and Phase 2 (or partway through Phase 2's own
 ;;; roll-forward loop), some participants are left with a stranded
 ;;; `refs/githack/prepare/<tx-id>/...` ref and no corresponding real
-;;; branch update. RUN-GITHACK-EXORCIST, run against any single
+;;; branch update. RUN-GITHACK-EXORCIST!, run against any single
 ;;; repository (on boot, or lazily on first access), finds every such
 ;;; stranded ref, reads its own annotated tag's Manifest back out to
 ;;; find the Ledger, and asks the Ledger directly whether
@@ -96,7 +96,7 @@
 
 ;;; ------------------------------------------------------------------
 ;;; Low-level, generic Git ref/tag plumbing, beyond GIT-BRANCH.LISP's
-;;; own refs/heads-specific GIT-SHOW-REF-SHA/GIT-UPDATE-REF: arbitrary
+;;; own refs/heads-specific GIT-SHOW-REF-SHA/GIT-UPDATE-REF!: arbitrary
 ;;; ref paths, a batched atomic `update-ref --stdin` transaction,
 ;;; annotated tag objects via `mktag`, ref enumeration via
 ;;; `for-each-ref`, and ref-to-commit resolution via `rev-parse`.
@@ -125,10 +125,10 @@ does not exist."
     (declare (ignore error-output))
     (and (zerop exit-code) (string-trim '(#\Space #\Newline #\Return) output))))
 
-(defun %git-raw-update-ref (repository ref-path sha &key (expected-sha :unconditional))
-  "Like GIT-UPDATE-REF, but against an arbitrary REF-PATH rather
+(defun %git-raw-update-ref! (repository ref-path sha &key (expected-sha :unconditional))
+  "Like GIT-UPDATE-REF!, but against an arbitrary REF-PATH rather
 than being hardwired to \"refs/heads/<name>\". EXPECTED-SHA has the
-same meaning as GIT-UPDATE-REF's own argument of the same name.
+same meaning as GIT-UPDATE-REF!'s own argument of the same name.
 Signals CONCURRENT-MODIFICATION-ERROR (naming REF-PATH) if Git's own
 compare-and-swap check fails. Returns SHA on success."
   (let ((args (append (list "update-ref" ref-path sha)
@@ -143,7 +143,7 @@ compare-and-swap check fails. Returns SHA on success."
                :new-sha sha :detail error-output))
       sha)))
 
-(defun %git-raw-delete-ref (repository ref-path)
+(defun %git-raw-delete-ref! (repository ref-path)
   "Best-effort, idempotent deletion of REF-PATH in REPOSITORY: does
 not signal if REF-PATH does not exist (or has already been deleted
 by someone else). Returns T if REF-PATH existed and was deleted, NIL
@@ -154,7 +154,7 @@ to distinguish \"already gone\" from \"just deleted\"."
     (declare (ignore output error-output))
     (zerop exit-code)))
 
-(defun %git-update-ref-stdin (repository commands)
+(defun %git-update-ref-stdin! (repository commands)
   "Execute COMMANDS -- a list of (:UPDATE REF NEW-SHA OLD-SHA) or
 (:DELETE REF) entries, OLD-SHA being NIL to require REF not already
 exist -- as a single atomic batch of Git ref updates against
@@ -184,7 +184,7 @@ otherwise."
 (defun %git-mktag (repository content)
   "Shell out to `git mktag` against REPOSITORY, feeding it CONTENT
 \(the exact plain-text payload of a Git annotated-tag object -- see
-%FORMAT-ANNOTATED-TAG-CONTENT) on its standard input, and return the
+FORMAT-ANNOTATED-TAG-CONTENT) on its standard input, and return the
 resulting 40-character hexadecimal tag SHA. Unlike a bare
 `hash-object -t tag -w`, `mktag` runs a strict `git fsck` check
 first and refuses to write anything malformed (e.g. missing a
@@ -198,7 +198,7 @@ DISTRIBUTED-TRANSACTION-ERROR if `git mktag` rejects CONTENT."
              :format-arguments (list repository error-output)))
     (string-trim '(#\Space #\Newline #\Return) output)))
 
-(defun %split-lines (string)
+(defun split-lines (string)
   "Return a list of STRING's own lines, split on #\\Newline, with no
 trailing empty line for a STRING that itself ends in a newline."
   (loop with start = 0
@@ -218,7 +218,7 @@ all yet)."
       (%git-run repository (list "for-each-ref" "--format=%(objectname) %(objecttype) %(refname)" pattern))
     (declare (ignore error-output))
     (if (zerop exit-code)
-        (loop for line in (%split-lines output)
+        (loop for line in (split-lines output)
               unless (zerop (length line))
                 collect (let* ((sp1 (position #\Space line))
                                (sp2 (position #\Space line :start (1+ sp1))))
@@ -239,26 +239,26 @@ in fact point at a commit, directly or transitively)."
 ;;; Transaction Manifests and annotated-tag content.
 ;;; ------------------------------------------------------------------
 
-(defun %prepare-ref-path (tx-id branch-name)
+(defun prepare-ref-path (tx-id branch-name)
   "Return the Git ref path GitHack's own Two-Phase-Commit Phase 1
 uses to track TX-ID's own prepared-but-uncommitted write against
 BRANCH-NAME: \"refs/githack/prepare/<tx-id>/<branch-name>\"."
   (format nil "refs/githack/prepare/~A/~A" tx-id branch-name))
 
-(defun %ledger-ref-path (tx-id)
+(defun ledger-ref-path (tx-id)
   "Return the Git ref path GitHack's own Two-Phase-Commit Phase 2
 uses as TX-ID's Point of No Return marker in its elected Ledger
 repository: \"refs/githack/ledger/<tx-id>\"."
   (format nil "refs/githack/ledger/~A" tx-id))
 
-(defun %build-transaction-manifest (tx-id pending-writes ledger-git-repository)
+(defun build-transaction-manifest (tx-id pending-writes ledger-git-repository)
   "Return TX-ID's own Transaction Manifest: an s-expression plist
 recording TX-ID itself, the elected Ledger repository's own
 pathname, and, for every participant in PENDING-WRITES (a list of
 PENDING-WRITE), its own repository pathname, branch name, and
 branch OLD-SHA (the CAS baseline every participant's own Phase 2/
 crash-recovery roll-forward is checked against). Every path is
-recorded via UIOP:NATIVE-NAMESTRING, so RUN-GITHACK-EXORCIST can
+recorded via UIOP:NATIVE-NAMESTRING, so RUN-GITHACK-EXORCIST! can
 later reconstitute a real pathname via UIOP:PARSE-NATIVE-NAMESTRING."
   (list :tx-id tx-id
         :ledger (uiop:native-namestring (get-pathname ledger-git-repository))
@@ -269,34 +269,34 @@ later reconstitute a real pathname via UIOP:PARSE-NATIVE-NAMESTRING."
                         :old-sha (pending-write-old-sha pw)))
                 pending-writes)))
 
-(defun %format-transaction-manifest (manifest)
+(defun format-transaction-manifest (manifest)
   "Return MANIFEST (a plist, as built by %BUILD-TRANSACTION-
 MANIFEST) printed as a READable Lisp s-expression string, suitable
 for use as a Git annotated tag's own message."
   (let ((*print-pretty* nil) (*print-readably* nil) (*print-circle* nil))
     (prin1-to-string manifest)))
 
-(defun %parse-transaction-manifest (text)
-  "Inverse of %FORMAT-TRANSACTION-MANIFEST: READ TEXT back into its
+(defun parse-transaction-manifest (text)
+  "Inverse of FORMAT-TRANSACTION-MANIFEST: READ TEXT back into its
 original Transaction Manifest plist. *READ-EVAL* is bound to NIL for
 the duration, since TEXT ultimately comes from a Git object's own
 stored content, which this process should never blindly EVAL."
   (let ((*read-eval* nil))
     (read-from-string text)))
 
-(defun %sanitize-tag-name-component (string)
+(defun sanitize-tag-name-component (string)
   "Return STRING with every #\\/ replaced by #\\-, so it is safe to
 embed in a Git tag object's own \"tag <name>\" header line (which,
 unlike a ref path, is not expected to contain path separators)."
   (substitute #\- #\/ string))
 
-(defun %format-annotated-tag-content (commit-sha tag-name tagger-signature manifest-text)
+(defun format-annotated-tag-content (commit-sha tag-name tagger-signature manifest-text)
   "Return the exact plain-text payload of a Git annotated-tag object
 targeting COMMIT-SHA (a commit): an \"object\"/\"type\"/\"tag\"/
 \"tagger\" header, a blank line, and finally MANIFEST-TEXT as the
 tag's own message -- suitable input for %GIT-MKTAG."
   (format nil "object ~A~%type commit~%tag ~A~%tagger ~A ~D ~A~%~%~A~%"
-          commit-sha tag-name tagger-signature (%unix-time-now) +default-commit-timezone-offset+ manifest-text))
+          commit-sha tag-name tagger-signature (unix-time-now) +default-commit-timezone-offset+ manifest-text))
 
 ;;; ------------------------------------------------------------------
 ;;; Phase 1 (PREPARE) and its rollback.
@@ -308,18 +308,18 @@ annotated tag (via %GIT-MKTAG) targeting PW's own already-persisted
 NEW-COMMIT-SHA, with MANIFEST-TEXT as its message, then point
 `refs/githack/prepare/<tx-id>/<branch-name>` at it (requiring that
 ref not already exist -- a collision would mean TX-ID was somehow
-reused, which %GENERATE-TRANSACTION-ID's 128 bits of randomness makes
+reused, which GENERATE-TRANSACTION-ID's 128 bits of randomness makes
 astronomically unlikely). Records the new prepare ref's path in PW's
 own PREPARE-REF slot. Returns PW."
   (let* ((git-repository (pending-write-git-repository pw))
          (repository (get-pathname git-repository))
          (branch-name (pending-write-branch-name pw))
-         (tag-name (format nil "githack-prepare-~A-~A" tx-id (%sanitize-tag-name-component branch-name)))
+         (tag-name (format nil "githack-prepare-~A-~A" tx-id (sanitize-tag-name-component branch-name)))
          (tagger (or (get-committer git-repository) (get-author git-repository) "GitHack 2PC <githack@localhost>"))
-         (tag-content (%format-annotated-tag-content (pending-write-new-commit-sha pw) tag-name tagger manifest-text))
+         (tag-content (format-annotated-tag-content (pending-write-new-commit-sha pw) tag-name tagger manifest-text))
          (tag-sha (%git-mktag repository tag-content))
-         (ref-path (%prepare-ref-path tx-id branch-name)))
-    (%git-raw-update-ref repository ref-path tag-sha :expected-sha nil)
+         (ref-path (prepare-ref-path tx-id branch-name)))
+    (%git-raw-update-ref! repository ref-path tag-sha :expected-sha nil)
     (setf (pending-write-prepare-ref pw) ref-path)
     pw))
 
@@ -329,9 +329,9 @@ already succeeded: best-effort delete its own prepare ref (if any),
 leaving its already-persisted commit object as harmless, unreachable
 Git garbage. Used only when some LATER participant's own Phase 1
 step fails, to avoid leaving earlier participants' prepare refs
-stranded for RUN-GITHACK-EXORCIST to have to clean up later."
+stranded for RUN-GITHACK-EXORCIST! to have to clean up later."
   (when (pending-write-prepare-ref pw)
-    (%git-raw-delete-ref (get-pathname (pending-write-git-repository pw)) (pending-write-prepare-ref pw))
+    (%git-raw-delete-ref! (get-pathname (pending-write-git-repository pw)) (pending-write-prepare-ref pw))
     (setf (pending-write-prepare-ref pw) nil)))
 
 ;;; ------------------------------------------------------------------
@@ -346,12 +346,12 @@ at) hashed into LEDGER-GIT-REPOSITORY's object database, and
 `refs/githack/ledger/<tx-id>` pointed at it (requiring that ref not
 already exist). The instant this ref exists, TX-ID's distributed
 transaction is permanently committed, no matter what happens to this
-Lisp process next -- see RUN-GITHACK-EXORCIST. Returns the blob's
+Lisp process next -- see RUN-GITHACK-EXORCIST!. Returns the blob's
 SHA."
   (let* ((repository (get-pathname ledger-git-repository))
          (blob-sha (git-hash-object repository "blob" (sb-ext:string-to-octets tx-id :external-format :utf-8)))
-         (ref-path (%ledger-ref-path tx-id)))
-    (%git-raw-update-ref repository ref-path blob-sha :expected-sha nil)
+         (ref-path (ledger-ref-path tx-id)))
+    (%git-raw-update-ref! repository ref-path blob-sha :expected-sha nil)
     blob-sha))
 
 (defun %roll-forward-participant! (pw)
@@ -365,7 +365,7 @@ delete its own prepare ref, both via one single atomic
 PW's branch newly advanced while its prepare ref still lingers, or
 vice versa."
   (let ((repository (get-pathname (pending-write-git-repository pw))))
-    (%git-update-ref-stdin repository
+    (%git-update-ref-stdin! repository
                             (list (list :update (format nil "refs/heads/~A" (pending-write-branch-name pw))
                                         (pending-write-new-commit-sha pw) (pending-write-old-sha pw))
                                   (list :delete (pending-write-prepare-ref pw))))))
@@ -379,11 +379,11 @@ vice versa."
 its GITHACK-TRANSACTION, so no 2PC coordination is needed at all --
 just advance its branch straight to its own prepared commit, via one
 single atomic `git update-ref --stdin` call (rather than plain
-GIT-UPDATE-REF, purely so this path, too, honours the architecture
+GIT-UPDATE-REF!, purely so this path, too, honours the architecture
 spec's own requirement to use `update-ref --stdin`; the two are
 equally atomic for a single ref)."
   (let ((repository (get-pathname (pending-write-git-repository pw))))
-    (%git-update-ref-stdin repository
+    (%git-update-ref-stdin! repository
                             (list (list :update (format nil "refs/heads/~A" (pending-write-branch-name pw))
                                         (pending-write-new-commit-sha pw) (pending-write-old-sha pw))))))
 
@@ -397,8 +397,8 @@ TRANSACTION-ERROR if any one Prepare step fails), write the Ledger's
 own commit-point ref (the Point of No Return), and finally roll every
 participant forward. Returns TX-ID."
   (let* ((ledger-git-repository (pending-write-git-repository (first pending-writes)))
-         (manifest-text (%format-transaction-manifest
-                          (%build-transaction-manifest tx-id pending-writes ledger-git-repository)))
+         (manifest-text (format-transaction-manifest
+                          (build-transaction-manifest tx-id pending-writes ledger-git-repository)))
          (prepared '()))
     (handler-case
         (dolist (pw pending-writes)
@@ -449,7 +449,7 @@ no-op/Fast-Path/Two-Phase-Commit dispatch (%FINISH-GITHACK-
 TRANSACTION!). If THUNK signals an error, nothing further happens --
 every already-persisted-but-not-yet-ref-visible participant commit
 is simply left as harmless Git garbage. Returns THUNK's own values."
-  (let ((txn (%make-githack-transaction (%generate-transaction-id))))
+  (let ((txn (%make-githack-transaction (generate-transaction-id))))
     (let ((*current-transaction* txn))
       (multiple-value-prog1
           (funcall thunk)
@@ -487,29 +487,29 @@ Ledger repository cannot itself be reached."
          (branch-name (subseq suffix (1+ slash))))
     (handler-case
         (let* ((tag-content (sb-ext:octets-to-string (git-cat-file repository tag-sha) :external-format :utf-8))
-               (manifest-text (nth-value 1 (%split-commit-header-and-message tag-content)))
-               (manifest (%parse-transaction-manifest manifest-text))
+               (manifest-text (nth-value 1 (split-commit-header-and-message tag-content)))
+               (manifest (parse-transaction-manifest manifest-text))
                (ledger-repository (uiop:parse-native-namestring (getf manifest :ledger)))
                (participant (find branch-name (getf manifest :participants)
                                    :key (lambda (p) (getf p :branch)) :test #'string=))
                (old-sha (and participant (getf participant :old-sha))))
-          (if (%git-raw-show-ref ledger-repository (%ledger-ref-path tx-id))
+          (if (%git-raw-show-ref ledger-repository (ledger-ref-path tx-id))
               (let ((target-commit-sha (%git-rev-parse repository (format nil "~A^{commit}" ref-path))))
-                (%git-update-ref-stdin repository
+                (%git-update-ref-stdin! repository
                                        (list (list :update (format nil "refs/heads/~A" branch-name)
                                                    target-commit-sha old-sha)
                                              (list :delete ref-path)))
                 (values tx-id branch-name :committed))
               (progn
-                (%git-raw-delete-ref repository ref-path)
+                (%git-raw-delete-ref! repository ref-path)
                 (values tx-id branch-name :rolled-back))))
       (distributed-transaction-error (condition) (error condition))
       (error (condition)
         (error 'distributed-transaction-error
-               :format-control "RUN-GITHACK-EXORCIST could not resolve stranded ref ~S in ~A: ~A"
+               :format-control "RUN-GITHACK-EXORCIST! could not resolve stranded ref ~S in ~A: ~A"
                :format-arguments (list ref-path repository condition))))))
 
-(defun run-githack-exorcist (repository)
+(defun run-githack-exorcist! (repository)
   "Scan REPOSITORY (a pathname naming a Git directory) for stranded
 `refs/githack/prepare/<tx-id>/<branch-name>` refs -- left behind by a
 WITH-GITHACK-TRANSACTION whose Lisp process crashed somewhere between
@@ -524,7 +524,7 @@ resolved, in the order found."
   (loop for (tag-sha object-type ref-path) in (%git-for-each-ref repository "refs/githack/prepare/")
         unless (string= object-type "tag")
           do (error 'distributed-transaction-error
-                     :format-control "RUN-GITHACK-EXORCIST found a stranded ref ~S in ~A that is not an annotated tag (its object type is ~S) -- GitHack's own Two-Phase-Commit machinery never creates one any other way, so this ref was not created by GitHack."
+                     :format-control "RUN-GITHACK-EXORCIST! found a stranded ref ~S in ~A that is not an annotated tag (its object type is ~S) -- GitHack's own Two-Phase-Commit machinery never creates one any other way, so this ref was not created by GitHack."
                      :format-arguments (list ref-path repository object-type))
         collect (multiple-value-bind (tx-id branch-name action) (%exorcise-stranded-ref! repository tag-sha ref-path)
                   (list tx-id branch-name action))))

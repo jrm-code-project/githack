@@ -4,7 +4,7 @@
 
 (def-suite git-branch-suite
   :in githack-suite
-  :description "Tests for the GIT-BRANCH proxy, RESOLVE-BRANCH, and UPDATE-BRANCH.")
+  :description "Tests for the GIT-BRANCH proxy, RESOLVE-BRANCH, and UPDATE-BRANCH!.")
 
 (in-suite git-branch-suite)
 
@@ -41,22 +41,22 @@ SHA for the requested branch name."
     (signals error (resolve-branch :dummy-repo "no-such-branch"))))
 
 (test update-branch-forwards-target-sha-to-git-update-ref
-  "UPDATE-BRANCH calls GIT-UPDATE-REF with BRANCH's repository, name,
+  "UPDATE-BRANCH! calls GIT-UPDATE-REF! with BRANCH's repository, name,
 and its TARGET commit's SHA, and returns BRANCH itself."
   (let* ((commit (make-instance 'git-commit :sha +commit-sha+ :repository :dummy-repo))
          (branch (make-instance 'git-branch :repository :dummy-repo :name "main" :target commit))
          (calls '()))
     (with-recording-git-update-ref (calls)
-      (let ((result (update-branch branch)))
+      (let ((result (update-branch! branch)))
         (is (eq branch result))
         (is (equal (list (list :dummy-repo "main" +commit-sha+)) calls))))))
 
 (test update-branch-signals-error-for-unpersisted-target
-  "UPDATE-BRANCH cannot advance a branch whose TARGET commit has no
+  "UPDATE-BRANCH! cannot advance a branch whose TARGET commit has no
 SHA yet."
   (let* ((unsaved-commit (make-instance 'git-commit :repository :dummy-repo))
          (branch (make-instance 'git-branch :repository :dummy-repo :name "main" :target unsaved-commit))
          (calls '()))
     (with-recording-git-update-ref (calls)
-      (signals error (update-branch branch))
+      (signals error (update-branch! branch))
       (is (null calls)))))

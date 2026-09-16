@@ -151,7 +151,7 @@ and omits \"left\"/\"right\" entries entirely for an empty child."
 
 (test serialize-persistent-wttree-node-caches-weight-in-meta
   "SERIALIZE-PERSISTENT-WTTREE-NODE writes a \".meta\" blob whose
-content, once parsed back via %DESERIALIZE-PERSISTENT-WTTREE-META,
+content, once parsed back via DESERIALIZE-PERSISTENT-WTTREE-META,
 reports the node's own WEIGHT."
   (let* ((calls '())
          (tree nil))
@@ -161,9 +161,9 @@ reports the node's own WEIGHT."
       (serialize-persistent-wttree-node tree))
     (let* ((meta-entry (cdr (assoc ".meta" (get-entries tree) :test #'string=)))
            (meta-octets (third (find (sha meta-entry) calls
-                                      :key (lambda (call) (%fake-sha-for (second call) (third call)))
+                                      :key (lambda (call) (fake-sha-for (second call) (third call)))
                                       :test #'string=))))
-      (is (= 3 (%deserialize-persistent-wttree-meta meta-octets))))))
+      (is (= 3 (deserialize-persistent-wttree-meta meta-octets))))))
 
 (test wt-add-serialize-deserialize-and-lookup-round-trip
   "Building a tree via WT-ADD, persisting it via SERIALIZE-
@@ -202,7 +202,7 @@ confirming WT-WEIGHT of each immediate child still succeeds."
       (serialize-persistent-wttree-node tree))
     (flet ((octets-for (sha)
              (third (find sha calls
-                          :key (lambda (call) (%fake-sha-for (second call) (third call)))
+                          :key (lambda (call) (fake-sha-for (second call) (third call)))
                           :test #'string=))))
       (let* ((root-sha (sha tree))
              (left (%wt-raw-left tree))
@@ -215,7 +215,7 @@ confirming WT-WEIGHT of each immediate child still succeeds."
           (let ((meta-sha (sha (cdr (assoc ".meta" (get-entries node) :test #'string=)))))
             (push (cons meta-sha (octets-for meta-sha)) mapping)))
         (let ((type-map (mapcar (lambda (call)
-                                   (cons (%fake-sha-for (second call) (third call)) (second call)))
+                                   (cons (fake-sha-for (second call) (third call)) (second call)))
                                  calls)))
           (with-fake-git-type (type-map)
             (with-fake-git-cat-file (mapping)
