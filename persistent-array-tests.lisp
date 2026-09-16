@@ -4,7 +4,7 @@
 
 (def-suite persistent-array-suite
   :in githack-suite
-  :description "Tests for the PERSISTENT-ARRAY proxy, SERIALIZE-PERSISTENT-ARRAY, DESERIALIZE-PERSISTENT-ARRAY, and PERSISTENT-ARRAY-REF.")
+  :description "Tests for the PERSISTENT-ARRAY proxy, SERIALIZE-PERSISTENT-ARRAY, DESERIALIZE-PERSISTENT-ARRAY!, and PERSISTENT-ARRAY-REF.")
 
 (in-suite persistent-array-suite)
 
@@ -86,7 +86,7 @@ existing SHA) for an array that has already been persisted."
   "SERIALIZE-PERSISTENT-ARRAY writes the exact, fixed README.md
 markdown content as raw (non-atom-envelope) UTF-8 bytes. (Its
 \".meta\" blob's content is verified indirectly, by the round-trip
-test below via the exported DESERIALIZE-PERSISTENT-ARRAY.)"
+test below via the exported DESERIALIZE-PERSISTENT-ARRAY!.)"
   (let* ((calls '())
          (data (make-persistent-vector-of 1))
          (array (make-instance 'persistent-array :repository :dummy-repo
@@ -97,7 +97,7 @@ test below via the exported DESERIALIZE-PERSISTENT-ARRAY.)"
     (is (find (sb-ext:string-to-octets +persistent-array-readme+ :external-format :utf-8)
               calls :key #'third :test #'equalp))))
 
-(test deserialize-persistent-array-round-trips-with-serialize
+(test deserialize-persistent-array!-round-trips-with-serialize
   "Deserializing the tree bytes and .meta bytes produced by
 SERIALIZE-PERSISTENT-ARRAY reconstructs an equivalent
 PERSISTENT-ARRAY with the same DIMENSIONS/ELEMENT-TYPE, and a hollow
@@ -122,15 +122,15 @@ SHA."
       (with-fake-git-type ((list (cons data-sha "tree")
                                   (cons (sha meta-entry) "blob")
                                   (cons (sha readme-entry) "blob")))
-        (deserialize-persistent-array hollow tree-octets meta-octets))
+        (deserialize-persistent-array! hollow tree-octets meta-octets))
       (is (equal '(2 2) (persistent-array-dimensions hollow)))
       (is (eq t (persistent-array-element-type hollow)))
       (is (get-loaded? hollow))
       (is (typep (%persistent-array-data hollow) 'persistent-vector))
       (is (string= data-sha (sha (%persistent-array-data hollow)))))))
 
-(test deserialize-persistent-array-signals-error-for-missing-entries
-  "DESERIALIZE-PERSISTENT-ARRAY signals an error if the underlying
+(test deserialize-persistent-array!-signals-error-for-missing-entries
+  "DESERIALIZE-PERSISTENT-ARRAY! signals an error if the underlying
 tree is missing its \".meta\", \"README.md\", or \"data\" entry."
   (let* ((blob-sha "6666666666666666666666666666666666666666")
          (blob (make-instance 'git-blob :repository :dummy-repo :sha blob-sha))
@@ -139,7 +139,7 @@ tree is missing its \".meta\", \"README.md\", or \"data\" entry."
          (tree-octets (serialize-tree incomplete-tree))
          (hollow (make-instance 'persistent-array :repository :dummy-repo)))
     (with-fake-git-type ((list (cons blob-sha "blob")))
-      (signals error (deserialize-persistent-array hollow tree-octets #())))))
+      (signals error (deserialize-persistent-array! hollow tree-octets #())))))
 
 (test persistent-array-ref-computes-row-major-index-and-delegates
   "PERSISTENT-ARRAY-REF, called against a hollow proxy for a 2x3

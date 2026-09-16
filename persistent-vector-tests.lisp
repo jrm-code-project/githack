@@ -4,7 +4,7 @@
 
 (def-suite persistent-vector-suite
   :in githack-suite
-  :description "Tests for the PERSISTENT-VECTOR proxy, SERIALIZE-PERSISTENT-VECTOR, DESERIALIZE-PERSISTENT-VECTOR, and PERSISTENT-VECTOR-REF.")
+  :description "Tests for the PERSISTENT-VECTOR proxy, SERIALIZE-PERSISTENT-VECTOR, DESERIALIZE-PERSISTENT-VECTOR!, and PERSISTENT-VECTOR-REF.")
 
 (in-suite persistent-vector-suite)
 
@@ -92,7 +92,7 @@ existing SHA) for a vector that has already been persisted."
   "SERIALIZE-PERSISTENT-VECTOR writes the exact, fixed README.md
 markdown content as raw (non-atom-envelope) UTF-8 bytes. (Its
 \".meta\" blob's content is verified indirectly, by the round-trip
-test below via the exported DESERIALIZE-PERSISTENT-VECTOR.)"
+test below via the exported DESERIALIZE-PERSISTENT-VECTOR!.)"
   (let* ((calls '())
          (e0 (make-instance 'git-blob :repository :dummy-repo :payload 0))
          (vector (make-instance 'persistent-vector :repository :dummy-repo
@@ -102,7 +102,7 @@ test below via the exported DESERIALIZE-PERSISTENT-VECTOR.)"
     (is (find (sb-ext:string-to-octets +persistent-vector-readme+ :external-format :utf-8)
               calls :key #'third :test #'equalp))))
 
-(test deserialize-persistent-vector-round-trips-with-serialize
+(test deserialize-persistent-vector!-round-trips-with-serialize
   "Deserializing the tree bytes and .meta bytes produced by
 SERIALIZE-PERSISTENT-VECTOR reconstructs an equivalent
 PERSISTENT-VECTOR with the same LENGTH/ELEMENT-TYPE and hollow
@@ -129,15 +129,15 @@ element proxies for the same SHAs."
                                   (cons e1-sha "blob")
                                   (cons (sha meta-entry) "blob")
                                   (cons (sha readme-entry) "blob")))
-        (deserialize-persistent-vector hollow tree-octets meta-octets))
+        (deserialize-persistent-vector! hollow tree-octets meta-octets))
       (is (= 2 (persistent-vector-length hollow)))
       (is (eq t (persistent-vector-element-type hollow)))
       (is (get-loaded? hollow))
       (is (string= e0-sha (sha (cdr (assoc "0" (get-entries hollow) :test #'string=)))))
       (is (string= e1-sha (sha (cdr (assoc "1" (get-entries hollow) :test #'string=))))))))
 
-(test deserialize-persistent-vector-signals-error-for-missing-entries
-  "DESERIALIZE-PERSISTENT-VECTOR signals an error if the underlying
+(test deserialize-persistent-vector!-signals-error-for-missing-entries
+  "DESERIALIZE-PERSISTENT-VECTOR! signals an error if the underlying
 tree is missing its \".meta\" or \"README.md\" entry."
   (let* ((blob-sha "5555555555555555555555555555555555555555")
          (blob (make-instance 'git-blob :repository :dummy-repo :sha blob-sha))
@@ -146,12 +146,12 @@ tree is missing its \".meta\" or \"README.md\" entry."
          (tree-octets (serialize-tree incomplete-tree))
          (hollow (make-instance 'persistent-vector :repository :dummy-repo)))
     (with-fake-git-type ((list (cons blob-sha "blob")))
-      (signals error (deserialize-persistent-vector hollow tree-octets #())))))
+      (signals error (deserialize-persistent-vector! hollow tree-octets #())))))
 
 (test persistent-vector-ref-fetches-decodes-and-caches
   "PERSISTENT-VECTOR-REF, called against a hollow proxy whose tree
 has not yet been fetched, parses the tree exactly once (via
-%ENSURE-TREE-ENTRIES-LOADED), fetches and decodes each requested
+%ENSURE-TREE-ENTRIES-LOADED!), fetches and decodes each requested
 element's own GIT-BLOB content independently, and caches every
 result so a second call for the same index performs no further
 Git I/O."

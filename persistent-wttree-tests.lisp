@@ -4,7 +4,7 @@
 
 (def-suite persistent-wttree-suite
   :in githack-suite
-  :description "Tests for the PERSISTENT-WTTREE proxy, SERIALIZE-PERSISTENT-WTTREE-NODE, DESERIALIZE-PERSISTENT-WTTREE-NODE, and the WT-* Adams-tree operations.")
+  :description "Tests for the PERSISTENT-WTTREE proxy, SERIALIZE-PERSISTENT-WTTREE-NODE, DESERIALIZE-PERSISTENT-WTTREE-NODE!, and the WT-* Adams-tree operations.")
 
 (in-suite persistent-wttree-suite)
 
@@ -170,7 +170,7 @@ reports the node's own WEIGHT."
 PERSISTENT-WTTREE-NODE, then reloading it from a hollow proxy of the
 same SHA reconstructs a tree that WT-LOOKUP/WT-KEYS/WT-VALUES report
 identically to the original -- exercising the full write-then-read-
-back path through DESERIALIZE-PERSISTENT-WTTREE-NODE and
+back path through DESERIALIZE-PERSISTENT-WTTREE-NODE! and
 INFLATE-GIT-PROXY's lazy CHANGE-CLASS retyping of nested children."
   (with-fake-git-repository ()
     (let ((tree nil))
@@ -229,7 +229,7 @@ confirming WT-WEIGHT of each immediate child still succeeds."
                                                                             :sha (sha right)))))))))))))
 
 (test deserialize-persistent-wttree-node-signals-error-for-missing-entries
-  "DESERIALIZE-PERSISTENT-WTTREE-NODE signals an error if the
+  "DESERIALIZE-PERSISTENT-WTTREE-NODE! signals an error if the
 underlying tree is missing any of the required \".meta\", \"README.md\",
 \"key\", or \"value\" entries."
   (let* ((blob-sha "3333333333333333333333333333333333333333")
@@ -239,4 +239,4 @@ underlying tree is missing any of the required \".meta\", \"README.md\",
          (tree-octets (serialize-tree incomplete-tree))
          (hollow (make-instance 'persistent-wttree :repository :dummy-repo)))
     (with-fake-git-type ((list (cons blob-sha "blob")))
-      (signals error (deserialize-persistent-wttree-node hollow tree-octets #())))))
+      (signals error (deserialize-persistent-wttree-node! hollow tree-octets #())))))

@@ -40,21 +40,21 @@
 ;;; instance (or anything reachable from one, e.g. via a GIT-BRANCH's
 ;;; TARGET) across multiple threads is also safe, for reading and
 ;;; navigating it concurrently: every lazy-load path in this codebase
-;;; -- %ENSURE-TREE-ENTRIES-LOADED, %ENSURE-BLOB-LOADED, and
-;;; %ENSURE-COMMIT-LOADED in atomic-wrapper.lisp; %ENSURE-PERSISTENT-
-;;; CONS-LOADED and %ENSURE-PERSISTENT-WTTREE-NODE-LOADED in
+;;; -- %ENSURE-TREE-ENTRIES-LOADED!, %ENSURE-BLOB-LOADED!, and
+;;; %ENSURE-COMMIT-LOADED! in atomic-wrapper.lisp; %ENSURE-PERSISTENT-
+;;; CONS-LOADED and %ENSURE-PERSISTENT-WTTREE-NODE-LOADED! in
 ;;; persistent-cons.lisp/persistent-wttree.lisp; %ENSURE-PERSISTENT-
-;;; VECTOR-LOADED and %ENSURE-PERSISTENT-ARRAY-LOADED, together with
+;;; VECTOR-LOADED and %ENSURE-PERSISTENT-ARRAY-LOADED!, together with
 ;;; PERSISTENT-VECTOR-REF's own per-index element cache, in
 ;;; persistent-vector.lisp/persistent-array.lisp -- now uses git-
 ;;; object.lisp's own small set of lightweight, mostly lock-free
-;;; synchronization primitives (%PUBLISH-LOADED!, %CAS-INSTALL-ONCE,
+;;; synchronization primitives (%PUBLISH-LOADED!, %CAS-INSTALL-ONCE!,
 ;;; and WITH-OBJECT-LOAD-LOCK) rather than plain, unsynchronized
 ;;; SETF. Two threads racing to lazily load the *same* proxy instance
 ;;; may still harmlessly redo idempotent work (re-fetch and re-decode
 ;;; the same immutable Git object twice), but can no longer observe
 ;;; or produce a partially-populated object: %PUBLISH-LOADED!'s and
-;;; %CAS-INSTALL-ONCE's own SB-EXT:COMPARE-AND-SWAP calls are full
+;;; %CAS-INSTALL-ONCE!'s own SB-EXT:COMPARE-AND-SWAP calls are full
 ;;; memory barriers, so a slot flag becoming visible as "loaded"/
 ;;; "installed" on one thread guarantees every other slot value it
 ;;; depends on is visible too on any other thread; and the sole two

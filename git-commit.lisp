@@ -100,7 +100,7 @@ discarding the trailing timezone offset."
     (values (subseq remainder 0 timestamp-space)
             (parse-integer remainder :start (1+ timestamp-space) :end timezone-space))))
 
-(defun deserialize-commit (commit text)
+(defun deserialize-commit! (commit text)
   "Parse TEXT -- the raw text of a Git commit object -- and populate
 COMMIT's TREE, PARENTS, AUTHOR, COMMITTER, TIMESTAMP, and MESSAGE
 slots from it, using INFLATE-GIT-PROXY (bound to COMMIT's own

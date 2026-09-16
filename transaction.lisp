@@ -28,8 +28,8 @@
 ;;; ATOMIC-WRAPPER-TREE as needed), creates the new commit, and
 ;;; advances the branch -- exactly as it would for any other caller.
 
-;;; %ENSURE-BLOB-LOADED now lives in atomic-wrapper.lisp, alongside
-;;; %ENSURE-TREE-ENTRIES-LOADED/%ENSURE-COMMIT-LOADED, so that
+;;; %ENSURE-BLOB-LOADED! now lives in atomic-wrapper.lisp, alongside
+;;; %ENSURE-TREE-ENTRIES-LOADED!/%ENSURE-COMMIT-LOADED!, so that
 ;;; PERSISTENT-VECTOR's own lazy accessor can share it too.
 
 (defun transaction-read-value (head-commit)
@@ -37,13 +37,13 @@
 should see for HEAD-COMMIT: NIL if HEAD-COMMIT is itself NIL (an
 empty branch, awaiting its initial commit); the decoded atom held in
 its root GIT-BLOB, if RESOLVE-COMMIT-ROOT's root is a bare atom
-(loading it first via %ENSURE-BLOB-LOADED if necessary); or
+(loading it first via %ENSURE-BLOB-LOADED! if necessary); or
 otherwise RESOLVE-COMMIT-ROOT's root GIT-OBJECT itself (a GIT-TREE,
 PERSISTENT-CONS, or other persistent proxy), unchanged."
   (and head-commit
        (let ((root (resolve-commit-root head-commit)))
          (if (typep root 'git-blob)
-             (get-payload (%ensure-blob-loaded root))
+             (get-payload (%ensure-blob-loaded! root))
              root))))
 
 (defun transaction-write-value (repository value)

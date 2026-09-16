@@ -26,7 +26,7 @@
   "Return, as two values, the raw Git tree bytes for SHA and the raw
 bytes of its own \".meta\" entry, fetched via GIT-CAT-FILE/
 DESERIALIZE-TREE against the real REPOSITORY -- exactly the two
-byte-vectors DESERIALIZE-PERSISTENT-CONS/-VECTOR/-ARRAY each require
+byte-vectors DESERIALIZE-PERSISTENT-CONS!/-VECTOR/-ARRAY each require
 of their own caller."
   (let* ((tree-octets (git-cat-file repository sha))
          (entries (deserialize-tree repository tree-octets))
@@ -40,13 +40,13 @@ of their own caller."
 real from REPOSITORY."
   (let ((cons (make-instance 'persistent-cons :repository repository :sha sha)))
     (multiple-value-bind (tree-octets meta-octets) (e2e-fetch-tree-and-meta-octets repository sha)
-      (deserialize-persistent-cons cons tree-octets meta-octets))))
+      (deserialize-persistent-cons! cons tree-octets meta-octets))))
 
 (defun e2e-decode-blob (git-object)
   "Decode GIT-OBJECT (a GIT-BLOB, fetched for real via
-%ENSURE-BLOB-LOADED if not already loaded) into its real Lisp
+%ENSURE-BLOB-LOADED! if not already loaded) into its real Lisp
 PAYLOAD."
-  (get-payload (%ensure-blob-loaded git-object)))
+  (get-payload (%ensure-blob-loaded! git-object)))
 
 (defun e2e-hijack-branch! (repository-path branch-name payload)
   "Simulate a genuine concurrent external writer racing an in-flight
@@ -285,7 +285,7 @@ independent transaction, exercising the entire real fetch stack
                                                                                :payload (* i i) :loaded? t)))))
        (with-transaction (value) (repository :read-write)
          (let ((vector (make-instance 'persistent-vector :repository repository-path :sha (sha value))))
-           (is (= 5 (persistent-vector-length (%ensure-persistent-vector-loaded vector))))
+           (is (= 5 (persistent-vector-length (%ensure-persistent-vector-loaded! vector))))
            (dotimes (i 5)
              (is (= (* i i) (persistent-vector-ref vector i)))))
          value)))))

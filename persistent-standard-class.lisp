@@ -454,7 +454,7 @@ at all."
   "Return the correctly, specifically typed proxy for TREE (a plain,
 not-yet-more-specifically-typed GIT-TREE, with its own ENTRIES
 already loaded): a freshly DESERIALIZE-PERSISTENT-OBJECT'd CLOS
-instance, DESERIALIZE-PERSISTENT-CONS'd/-VECTOR'd/-ARRAY'd hollow
+instance, DESERIALIZE-PERSISTENT-CONS!'d/-VECTOR'd/-ARRAY'd hollow
 proxy, if TREE's own \".meta\" entry reveals (via %PERSISTENT-TREE-
 TAG) that it actually holds one of those compound types; or TREE
 itself, unchanged, if it has no \".meta\" entry at all (an ordinary,
@@ -481,17 +481,17 @@ BUCKETS slot) whose stored value is one of these compound types."
                                         (:wttree 'persistent-wttree))
                                       :repository repository :sha sha)))
          (ecase tag
-           (:cons (deserialize-persistent-cons hollow tree-octets meta-octets))
-           (:vector (deserialize-persistent-vector hollow tree-octets meta-octets))
-           (:array (deserialize-persistent-array hollow tree-octets meta-octets))
-           (:wttree (deserialize-persistent-wttree-node hollow tree-octets meta-octets)))))
+           (:cons (deserialize-persistent-cons! hollow tree-octets meta-octets))
+           (:vector (deserialize-persistent-vector! hollow tree-octets meta-octets))
+           (:array (deserialize-persistent-array! hollow tree-octets meta-octets))
+           (:wttree (deserialize-persistent-wttree-node! hollow tree-octets meta-octets)))))
       (t tree))))
 
 (defun resolve-persistent-slot-value (value)
   "Return the real Lisp data VALUE (a slot's raw stored value)
 represents: unchanged, if VALUE is not a GIT-OBJECT proxy at all;
 its decoded PAYLOAD, ensuring VALUE is first loaded via
-%ENSURE-BLOB-LOADED, if VALUE is a GIT-BLOB; the result of
+%ENSURE-BLOB-LOADED!, if VALUE is a GIT-BLOB; the result of
 REDISPATCH-PERSISTENT-TREE, if VALUE is a plain (not yet more
 specifically typed) GIT-TREE proxy (retyped into a PERSISTENT-CONS/
 -VECTOR/-ARRAY/-OBJECT if its own \".meta\" entry says so, or left
@@ -500,12 +500,12 @@ of GIT-OBJECT (PERSISTENT-CONS, PERSISTENT-VECTOR, PERSISTENT-ARRAY,
 or already-typed PERSISTENT-OBJECT), since those already are the
 correct, lazily self-loading proxy for their own compound data."
   (cond
-    ((typep value 'git-blob) (get-payload (%ensure-blob-loaded value)))
+    ((typep value 'git-blob) (get-payload (%ensure-blob-loaded! value)))
     ((and (typep value 'git-tree)
           (not (typep value '(or persistent-cons persistent-vector persistent-array
                                persistent-wttree persistent-object))))
      (let ((repository (get-repository value)))
-       (%ensure-tree-entries-loaded repository value))
+       (%ensure-tree-entries-loaded! repository value))
      (redispatch-persistent-tree value))
     (t value)))
 

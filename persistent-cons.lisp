@@ -80,7 +80,7 @@ PERSISTENT-CONS-METADATA."))
    "Proxy for a single, immutable Lisp cons cell, stored as a Git
 tree with exactly four entries: \".meta\", \"README.md\", \"car\",
 and \"cdr\". See SERIALIZE-PERSISTENT-CONS and
-DESERIALIZE-PERSISTENT-CONS for the on-disk representation."))
+DESERIALIZE-PERSISTENT-CONS! for the on-disk representation."))
 
 (setf (documentation 'persistent-car 'function)
       "Return CONS's (a PERSISTENT-CONS) GIT-OBJECT proxy held in
@@ -213,14 +213,14 @@ CONS's own SHA, doing nothing further if CONS already has one."
           (setf (get-loaded? cons) t)
           (sha cons)))))
 
-(defun deserialize-persistent-cons (cons tree-octets meta-octets)
+(defun deserialize-persistent-cons! (cons tree-octets meta-octets)
   "Parse TREE-OCTETS -- the raw byte-vector of CONS's own underlying
 Git tree object -- together with META-OCTETS -- the raw byte-vector
 of that tree's \".meta\" blob -- and populate CONS's ENTRIES,
 PERSISTENT-CAR, PERSISTENT-CDR, LENGTH, and PROPER slots.
 PERSISTENT-CAR and PERSISTENT-CDR are set to hollow (unloaded)
 GIT-OBJECT proxies via INFLATE-GIT-PROXY, exactly as
-DESERIALIZE-TREE/DESERIALIZE-COMMIT already do for their own nested
+DESERIALIZE-TREE/DESERIALIZE-COMMIT! already do for their own nested
 SHA references -- so the CAR's/CDR's own content, including whether
 either is itself a further-nested PERSISTENT-CONS, is only ever
 fetched later, on demand, never eagerly by this function. Signals an
@@ -251,7 +251,7 @@ error if TREE-OCTETS' entries do not include \".meta\", \"README.md\",
       (%publish-loaded! cons)
       cons)))
 
-(defun %ensure-persistent-cons-loaded (cons)
+(defun %ensure-persistent-cons-loaded! (cons)
   "Ensure CONS's PERSISTENT-CAR/PERSISTENT-CDR (and LENGTH/PROPER)
 slots are populated: first, if CONS is merely a plain, not-yet-more-
 specifically-typed GIT-TREE (as returned by PERSISTENT-VECTOR-REF or
@@ -260,7 +260,7 @@ neither DESERIALIZE-TREE nor INFLATE-GIT-PROXY ever distinguish a
 nested PERSISTENT-CONS from an ordinary GIT-TREE), retype it in place
 into a PERSISTENT-CONS via CHANGE-CLASS; then, if CONS is not yet
 loaded, fetch its raw tree bytes and its own \".meta\" blob via
-GIT-CAT-FILE, and populate it via DESERIALIZE-PERSISTENT-CONS.
+GIT-CAT-FILE, and populate it via DESERIALIZE-PERSISTENT-CONS!.
 Returns CONS.
 
 Thread-safe: the common case -- CONS already retyped and loaded --
@@ -280,22 +280,22 @@ this one was waiting for the lock."
                (entries (deserialize-tree repository tree-octets))
                (meta-entry (assoc ".meta" entries :test #'string=))
                (meta-octets (git-cat-file repository (sha (cdr meta-entry)))))
-          (deserialize-persistent-cons cons tree-octets meta-octets)))))
+          (deserialize-persistent-cons! cons tree-octets meta-octets)))))
   cons)
 
 (defun persistent-cons-decode (git-object)
   "Return the real Lisp value GIT-OBJECT represents: its decoded
 PAYLOAD, if GIT-OBJECT is a GIT-BLOB (fetching it from the
-repository first via %ENSURE-BLOB-LOADED, if not yet loaded); or
+repository first via %ENSURE-BLOB-LOADED!, if not yet loaded); or
 GIT-OBJECT itself, unchanged, for any other (compound) GIT-OBJECT
 proxy."
   (if (typep git-object 'git-blob)
-      (get-payload (%ensure-blob-loaded git-object))
+      (get-payload (%ensure-blob-loaded! git-object))
       git-object))
 
 (defun persistent-cons-tail-p (tail)
   "Return true if TAIL (a raw PERSISTENT-CDR value, possibly not yet
-retyped by %ENSURE-PERSISTENT-CONS-LOADED) represents a further cons
+retyped by %ENSURE-PERSISTENT-CONS-LOADED!) represents a further cons
 cell continuing the list, as opposed to NIL (a proper list's own
 terminator) or a GIT-BLOB (the sentinel SERIALIZE-PERSISTENT-CONS
 always uses to encode either a proper list's terminal NIL or a
@@ -311,7 +311,7 @@ bucket chains."
 for the empty list), each decoded via PERSISTENT-CONS-DECODE (a
 GIT-BLOB element's own PAYLOAD, or any other, compound GIT-OBJECT
 proxy left unchanged), fetching each successive cons cell via
-%ENSURE-PERSISTENT-CONS-LOADED one at a time as the underlying
+%ENSURE-PERSISTENT-CONS-LOADED! one at a time as the underlying
 SCAN-FN/MAP-FN series is advanced. Terminates -- producing a finite
 series -- at the first tail for which PERSISTENT-CONS-TAIL-P is
 false: NIL (a proper list's own terminator) or a GIT-BLOB (a dotted
@@ -331,11 +331,11 @@ the resulting series is later consumed."
   (declare (optimizable-series-function))
   (let ((tails (scan-fn t
                         (lambda () list)
-                        (lambda (tail) (persistent-cdr (%ensure-persistent-cons-loaded tail)))
+                        (lambda (tail) (persistent-cdr (%ensure-persistent-cons-loaded! tail)))
                         (lambda (tail) (not (persistent-cons-tail-p tail))))))
     (map-fn t
             (lambda (tail)
-              (persistent-cons-decode (persistent-car (%ensure-persistent-cons-loaded tail))))
+              (persistent-cons-decode (persistent-car (%ensure-persistent-cons-loaded! tail))))
             tails)))
 
 (defun scan-persistent-alist (list)
@@ -374,12 +374,12 @@ one shared, single underlying (key . value) Lisp cons series."
   (declare (optimizable-series-function 2))
   (let* ((tails (scan-fn t
                          (lambda () list)
-                         (lambda (tail) (persistent-cdr (%ensure-persistent-cons-loaded tail)))
+                         (lambda (tail) (persistent-cdr (%ensure-persistent-cons-loaded! tail)))
                          (lambda (tail) (not (persistent-cons-tail-p tail)))))
          (pairs (map-fn t
                         (lambda (tail)
-                          (let ((pair (%ensure-persistent-cons-loaded
-                                       (persistent-cons-decode (persistent-car (%ensure-persistent-cons-loaded tail))))))
+                          (let ((pair (%ensure-persistent-cons-loaded!
+                                       (persistent-cons-decode (persistent-car (%ensure-persistent-cons-loaded! tail))))))
                             (cons (persistent-cons-decode (persistent-car pair))
                                   (persistent-cons-decode (persistent-cdr pair)))))
                         tails)))
@@ -426,13 +426,13 @@ indicator-position tail is not re-fetched when later decoded."
   (let* ((tails (scan-fn t
                          (lambda () list)
                          (lambda (tail)
-                           (persistent-cdr (%ensure-persistent-cons-loaded
-                                             (persistent-cdr (%ensure-persistent-cons-loaded tail)))))
+                           (persistent-cdr (%ensure-persistent-cons-loaded!
+                                             (persistent-cdr (%ensure-persistent-cons-loaded! tail)))))
                          (lambda (tail) (not (persistent-cons-tail-p tail)))))
          (pairs (map-fn t
                         (lambda (tail)
-                          (let* ((indicator-cons (%ensure-persistent-cons-loaded tail))
-                                 (value-cons (%ensure-persistent-cons-loaded (persistent-cdr indicator-cons))))
+                          (let* ((indicator-cons (%ensure-persistent-cons-loaded! tail))
+                                 (value-cons (%ensure-persistent-cons-loaded! (persistent-cdr indicator-cons))))
                             (cons (persistent-cons-decode (persistent-car indicator-cons))
                                   (persistent-cons-decode (persistent-car value-cons)))))
                         tails)))

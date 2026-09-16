@@ -80,7 +80,7 @@ Lisp value.")
     :documentation
     "This node's left child: NIL for an empty left subtree, or a
 GIT-OBJECT proxy (a PERSISTENT-WTTREE, or a plain GIT-TREE not yet
-retyped by %ENSURE-PERSISTENT-WTTREE-NODE-LOADED) otherwise. See
+retyped by %ENSURE-PERSISTENT-WTTREE-NODE-LOADED!) otherwise. See
 WT-NODE-LEFT.")
    (right
     :initarg :right
@@ -130,11 +130,11 @@ OCTETS is not a plist whose :TAG is :WTTREE."
 (defun wt-decode (git-object)
   "Return the real Lisp value GIT-OBJECT represents: its decoded
 PAYLOAD, if GIT-OBJECT is a GIT-BLOB (fetching it from the
-repository first via %ENSURE-BLOB-LOADED, if not yet loaded); or
+repository first via %ENSURE-BLOB-LOADED!, if not yet loaded); or
 GIT-OBJECT itself, unchanged, for any other (compound) GIT-OBJECT
 proxy."
   (if (typep git-object 'git-blob)
-      (get-payload (%ensure-blob-loaded git-object))
+      (get-payload (%ensure-blob-loaded! git-object))
       git-object))
 
 (defun wt-wrap (repository value)
@@ -145,7 +145,7 @@ REPOSITORY, wrapping VALUE as a serializable atom."
       value
       (make-instance 'git-blob :repository repository :payload value :loaded? t)))
 
-(defun %ensure-persistent-wttree-node-loaded (node)
+(defun %ensure-persistent-wttree-node-loaded! (node)
   "Ensure NODE's KEY/VALUE/LEFT/RIGHT/WEIGHT slots are populated:
 first, if NODE is merely a plain, not-yet-more-specifically-typed
 GIT-TREE (as returned by WT-NODE-LEFT/WT-NODE-RIGHT for a child
@@ -154,13 +154,13 @@ INFLATE-GIT-PROXY ever distinguish a nested PERSISTENT-WTTREE from
 an ordinary GIT-TREE), retype it in place into a PERSISTENT-WTTREE
 via CHANGE-CLASS; then, if NODE is not yet loaded, fetch its raw
 tree bytes and its own \".meta\" blob via GIT-CAT-FILE and populate
-it via DESERIALIZE-PERSISTENT-WTTREE-NODE. This is the *only* I/O
+it via DESERIALIZE-PERSISTENT-WTTREE-NODE!. This is the *only* I/O
 this function ever performs: NODE's own KEY/VALUE/LEFT/RIGHT remain
 hollow, unfetched proxies, so querying NODE's own WEIGHT (or
 retyping/loading it in the first place) never cascades into a
 fetch of its children's own contents. Returns NODE.
 
-Thread-safe: mirrors %ENSURE-PERSISTENT-CONS-LOADED's own commentary
+Thread-safe: mirrors %ENSURE-PERSISTENT-CONS-LOADED!'s own commentary
 -- the common case (NODE already retyped and loaded) takes no lock at
 all; only a possible CL:CHANGE-CLASS retyping is serialized, via
 WITH-OBJECT-LOAD-LOCK's own stripe mutex, with the already-
@@ -177,7 +177,7 @@ loaded/retyped condition rechecked once the lock is held."
           (unless meta-entry
             (error 'malformed-git-object-error
                    :format-control "Malformed persistent wttree node: missing \".meta\" entry."))
-          (deserialize-persistent-wttree-node
+          (deserialize-persistent-wttree-node!
            node tree-octets (git-cat-file repository (sha (cdr meta-entry))))))))
   node)
 
@@ -188,7 +188,7 @@ otherwise its own WEIGHT, forcing at most a shallow load of NODE's
 own tree and \".meta\" blobs (via %ENSURE-PERSISTENT-WTTREE-NODE-
 LOADED) -- never a fetch of NODE's KEY, VALUE, or either child's own
 contents. Every Adams rebalancing decision queries only this."
-  (if (null node) 0 (%wt-raw-weight (%ensure-persistent-wttree-node-loaded node))))
+  (if (null node) 0 (%wt-raw-weight (%ensure-persistent-wttree-node-loaded! node))))
 
 (defun wt-empty-p (node)
   "Return true if NODE is the empty tree (NIL)."
@@ -198,24 +198,24 @@ contents. Every Adams rebalancing decision queries only this."
   "Return the real Lisp key held by NODE (a non-NIL PERSISTENT-
 WTTREE or not-yet-retyped GIT-TREE), decoded via WT-DECODE, forcing
 NODE itself (but not either child) to be loaded first."
-  (wt-decode (%wt-raw-key (%ensure-persistent-wttree-node-loaded node))))
+  (wt-decode (%wt-raw-key (%ensure-persistent-wttree-node-loaded! node))))
 
 (defun wt-node-value (node)
   "Return the real Lisp value held by NODE, decoded via WT-DECODE,
 forcing NODE itself (but not either child) to be loaded first."
-  (wt-decode (%wt-raw-value (%ensure-persistent-wttree-node-loaded node))))
+  (wt-decode (%wt-raw-value (%ensure-persistent-wttree-node-loaded! node))))
 
 (defun wt-node-left (node)
   "Return NODE's left child: NIL for an empty left subtree, or a
 GIT-OBJECT proxy (not yet forced loaded) otherwise. Forces NODE
 itself to be loaded first."
-  (%wt-raw-left (%ensure-persistent-wttree-node-loaded node)))
+  (%wt-raw-left (%ensure-persistent-wttree-node-loaded! node)))
 
 (defun wt-node-right (node)
   "Return NODE's right child: NIL for an empty right subtree, or a
 GIT-OBJECT proxy (not yet forced loaded) otherwise. Forces NODE
 itself to be loaded first."
-  (%wt-raw-right (%ensure-persistent-wttree-node-loaded node)))
+  (%wt-raw-right (%ensure-persistent-wttree-node-loaded! node)))
 
 (defun wt-log2-less-p (left right)
   "Return true if LEFT and RIGHT (both non-negative integer subtree
@@ -532,7 +532,7 @@ further if NODE already has one."
         (setf (get-loaded? node) t)
         (sha node))))
 
-(defun deserialize-persistent-wttree-node (node tree-octets meta-octets)
+(defun deserialize-persistent-wttree-node! (node tree-octets meta-octets)
   "Parse TREE-OCTETS -- the raw byte-vector of NODE's own underlying
 Git tree object -- together with META-OCTETS -- the raw byte-vector
 of that tree's \".meta\" blob -- and populate NODE's ENTRIES, KEY,

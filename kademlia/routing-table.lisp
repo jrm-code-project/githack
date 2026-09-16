@@ -14,7 +14,7 @@
 ;;; performing an iterative lookup (see node.lisp) can both be mutating
 ;;; the same ROUTING-TABLE concurrently, so every mutating operation
 ;;; here takes ROUTING-TABLE's own lock; per this project's established
-;;; thread-safety convention (see git-object.lisp's %CAS-INSTALL-ONCE/
+;;; thread-safety convention (see git-object.lisp's %CAS-INSTALL-ONCE!/
 ;;; WITH-OBJECT-LOAD-LOCK work), the lock is held only while touching
 ;;; the bucket vector itself, never across a network call (see
 ;;; ROUTING-TABLE-INSERT!'s PING-FN handling below) -- holding it across

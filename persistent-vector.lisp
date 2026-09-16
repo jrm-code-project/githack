@@ -78,7 +78,7 @@ decoded value PERSISTENT-VECTOR-REF fetches for that index."))
 stored as a Git tree with a \".meta\" entry, a \"README.md\" entry,
 and one further entry per index, named with its zero-based decimal
 index. See SERIALIZE-PERSISTENT-VECTOR and
-DESERIALIZE-PERSISTENT-VECTOR for the on-disk representation, and
+DESERIALIZE-PERSISTENT-VECTOR! for the on-disk representation, and
 PERSISTENT-VECTOR-REF for lazily fetching individual elements."))
 
 (setf (documentation 'persistent-vector-length 'function)
@@ -193,7 +193,7 @@ doing nothing further if VECTOR already has one."
         (setf (get-loaded? vector) t)
         (sha vector))))
 
-(defun deserialize-persistent-vector (vector tree-octets meta-octets)
+(defun deserialize-persistent-vector! (vector tree-octets meta-octets)
   "Parse TREE-OCTETS -- the raw byte-vector of VECTOR's own
 underlying Git tree object -- together with META-OCTETS -- the raw
 byte-vector of that tree's \".meta\" blob -- and populate VECTOR's
@@ -219,27 +219,27 @@ Marks VECTOR loaded and returns it."
       (%publish-loaded! vector)
       vector)))
 
-(defun %ensure-persistent-vector-loaded (vector)
+(defun %ensure-persistent-vector-loaded! (vector)
   "Ensure VECTOR's ENTRIES and LENGTH/ELEMENT-TYPE slots are all
 populated: parse VECTOR's underlying Git tree object (via
-%ENSURE-TREE-ENTRIES-LOADED, a no-op if already done), then, if
+%ENSURE-TREE-ENTRIES-LOADED!, a no-op if already done), then, if
 LENGTH is still unknown, fetch and decode its \".meta\" entry's raw
 bytes via GIT-CAT-FILE and DESERIALIZE-PERSISTENT-VECTOR-META.
 Mirrors ATOMIC-WRAPPER-TREE-P's own direct GIT-CAT-FILE lookup of a
 tree's \".meta\" entry, rather than routing it through
-%ENSURE-BLOB-LOADED, since a persistent vector's own PAYLOAD-less
+%ENSURE-BLOB-LOADED!, since a persistent vector's own PAYLOAD-less
 GIT-BLOB proxy for \".meta\" is never otherwise needed. Returns
 VECTOR.
 
 Thread-safe: no lock is taken. ELEMENT-TYPE is SETF first, then
-LENGTH is installed last via %CAS-INSTALL-ONCE (from NIL), whose own
+LENGTH is installed last via %CAS-INSTALL-ONCE! (from NIL), whose own
 SB-EXT:COMPARE-AND-SWAP full memory barrier guarantees any other
 thread that subsequently observes a non-NIL LENGTH also sees that
 same ELEMENT-TYPE. Two threads racing here may each harmlessly
 redo this identical fetch/decode work; at most one's LENGTH actually
 gets installed, and both computed the same value regardless."
   (let ((repository (get-repository vector)))
-    (%ensure-tree-entries-loaded repository vector)
+    (%ensure-tree-entries-loaded! repository vector)
     (unless (persistent-vector-length vector)
       (let ((meta-entry (assoc ".meta" (get-entries vector) :test #'string=)))
         (unless meta-entry
@@ -248,7 +248,7 @@ gets installed, and both computed the same value regardless."
         (multiple-value-bind (length element-type)
             (deserialize-persistent-vector-meta (git-cat-file repository (sha (cdr meta-entry))))
           (setf (persistent-vector-element-type vector) element-type)
-          (%cas-install-once (slot-value vector 'length) nil length)))))
+          (%cas-install-once! (slot-value vector 'length) nil length)))))
   vector)
 
 (defun scan-persistent-vector (vector)
@@ -259,7 +259,7 @@ GIT-BLOB element, or the GIT-OBJECT proxy itself -- a GIT-TREE,
 PERSISTENT-CONS, or nested PERSISTENT-VECTOR -- for any other,
 compound element). VECTOR's underlying Git tree (and, if necessary,
 its \".meta\" entry) is parsed at most once, via the same
-%ENSURE-PERSISTENT-VECTOR-LOADED/PERSISTENT-VECTOR-REF machinery
+%ENSURE-PERSISTENT-VECTOR-LOADED!/PERSISTENT-VECTOR-REF machinery
 used for direct random-access indexing, so LENGTH need not already
 be known when this function is called; each individual element is
 then fetched and decoded, and its result cached in VECTOR's own
@@ -273,7 +273,7 @@ are ever fetched from Git; a bare, unoptimized call instead produces
 its result eagerly, fetching every element up front, exactly like
 SCAN-PERSISTENT-LIST."
   (declare (optimizable-series-function))
-  (%ensure-persistent-vector-loaded vector)
+  (%ensure-persistent-vector-loaded! vector)
   (map-fn t
           (lambda (index) (persistent-vector-ref vector index))
           (scan-range :below (persistent-vector-length vector))))
@@ -285,7 +285,7 @@ atom, if the GIT-OBJECT proxy at that index is a GIT-BLOB, or that
 GIT-OBJECT proxy itself (a GIT-TREE, PERSISTENT-CONS, or nested
 PERSISTENT-VECTOR) otherwise. VECTOR's underlying Git tree (and, if
 necessary, its \".meta\" entry) is parsed (via
-%ENSURE-PERSISTENT-VECTOR-LOADED) at most once, no matter how many
+%ENSURE-PERSISTENT-VECTOR-LOADED!) at most once, no matter how many
 distinct indices are eventually requested across multiple calls,
 or even if LENGTH was not yet known when this function was first
 called for VECTOR; each individual index's own GIT-OBJECT is then
@@ -295,22 +295,22 @@ Lisp error for an out-of-bounds INDEX -- but only after VECTOR's
 LENGTH has been established, since an unloaded proxy cannot know its
 own bounds without first consulting Git.
 
-Thread-safe: %ENSURE-PERSISTENT-VECTOR-LOADED is itself thread-safe
+Thread-safe: %ENSURE-PERSISTENT-VECTOR-LOADED! is itself thread-safe
 (see its own commentary), and this function's per-index cache array
-is installed, and each of its slots filled, via %CAS-INSTALL-ONCE
+is installed, and each of its slots filled, via %CAS-INSTALL-ONCE!
 rather than a plain SETF: two threads racing to fetch/decode the
 same INDEX for the first time may each harmlessly redo that work
 (the result is a pure function of INDEX's own GIT-OBJECT SHA), but
 only one CACHE array, and only one final VALUE per INDEX, is ever
 actually installed and visible to every thread from then on."
-  (%ensure-persistent-vector-loaded vector)
+  (%ensure-persistent-vector-loaded! vector)
   (let ((length (persistent-vector-length vector)))
     (unless (and (integerp index) (<= 0 index) (< index length))
       (error 'invalid-argument-error
              :format-control "Index ~S out of bounds for persistent vector of length ~S."
              :format-arguments (list index length)))
     (let ((cache (or (%persistent-vector-cache vector)
-                      (%cas-install-once (slot-value vector 'cache) nil
+                      (%cas-install-once! (slot-value vector 'cache) nil
                                           (make-array length :initial-element +persistent-vector-unloaded+)))))
       (let ((cached (svref cache index)))
         (if (not (eq cached +persistent-vector-unloaded+))
@@ -323,9 +323,9 @@ actually installed and visible to every thread from then on."
                        :format-arguments (list index)))
               (let* ((object (cdr entry))
                      (value (if (typep object 'git-blob)
-                                (get-payload (%ensure-blob-loaded object))
+                                (get-payload (%ensure-blob-loaded! object))
                                 object)))
-                (%cas-install-once (svref cache index) +persistent-vector-unloaded+ value))))))))
+                (%cas-install-once! (svref cache index) +persistent-vector-unloaded+ value))))))))
 
 (defun persistent-vector-encode (repository value)
   "Inverse of PERSISTENT-VECTOR-REF's own per-element decoding: return

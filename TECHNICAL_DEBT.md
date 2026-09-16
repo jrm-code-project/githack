@@ -198,7 +198,7 @@ against the same repository, across threads or OS processes, are supported
 at the Git-ref level via `CONFLICT-RESOLUTION` (`:ERROR`/`:RETRY`/`:LOCK`);
 but (b) sharing a single in-memory proxy instance (or anything reachable
 from one) across threads is not safe, since none of the lazy-load caches
-(`%ensure-tree-entries-loaded`/`%ensure-blob-loaded`/`%ensure-commit-loaded`
+(`%ensure-tree-entries-loaded!`/`%ensure-blob-loaded!`/`%ensure-commit-loaded!`
 in `atomic-wrapper.lisp`, or `persistent-vector-ref`/`persistent-array-ref`'s
 per-index caches) are synchronized. Each of those five functions also gets
 a short "Not thread-safe" docstring note pointing back at this policy, so

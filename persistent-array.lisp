@@ -70,7 +70,7 @@ PERSISTENT-ARRAY-REF)."))
 as a Git tree with a \".meta\" entry, a \"README.md\" entry, and a
 \"data\" entry pointing at a single PERSISTENT-VECTOR holding this
 array's data flattened into row-major order. See
-SERIALIZE-PERSISTENT-ARRAY and DESERIALIZE-PERSISTENT-ARRAY for the
+SERIALIZE-PERSISTENT-ARRAY and DESERIALIZE-PERSISTENT-ARRAY! for the
 on-disk representation, and PERSISTENT-ARRAY-REF for lazily fetching
 individual elements by their N-dimensional subscripts."))
 
@@ -186,7 +186,7 @@ already has one."
             (setf (get-loaded? array) t)
             (sha array))))))
 
-(defun deserialize-persistent-array (array tree-octets meta-octets)
+(defun deserialize-persistent-array! (array tree-octets meta-octets)
   "Parse TREE-OCTETS -- the raw byte-vector of ARRAY's own underlying
 Git tree object -- together with META-OCTETS -- the raw byte-vector
 of that tree's \".meta\" blob -- and populate ARRAY's ENTRIES,
@@ -219,10 +219,10 @@ ARRAY loaded and returns it."
       (setf (get-loaded? array) t)
       array)))
 
-(defun %ensure-persistent-array-loaded (array)
+(defun %ensure-persistent-array-loaded! (array)
   "Ensure ARRAY's own Git tree entries, DIMENSIONS/ELEMENT-TYPE, and
 DATA are all populated, fetching and parsing whatever raw Git bytes
-are needed -- via %ENSURE-TREE-ENTRIES-LOADED for ARRAY's own tree,
+are needed -- via %ENSURE-TREE-ENTRIES-LOADED! for ARRAY's own tree,
 then GIT-CAT-FILE plus DESERIALIZE-PERSISTENT-ARRAY-META for its
 \".meta\" entry -- for whichever of DIMENSIONS or DATA is not already
 set. Mirrors PERSISTENT-VECTOR's own %ENSURE-PERSISTENT-VECTOR-
@@ -231,16 +231,16 @@ itself; that remains entirely PERSISTENT-VECTOR-REF's own
 responsibility. Returns ARRAY.
 
 Thread-safe: no lock is taken. ELEMENT-TYPE is SETF first, then
-DIMENSIONS is installed last via %CAS-INSTALL-ONCE (from NIL); DATA
-is likewise installed via %CAS-INSTALL-ONCE. Each of %CAS-INSTALL-
-ONCE's own SB-EXT:COMPARE-AND-SWAP calls is a full memory barrier,
+DIMENSIONS is installed last via %CAS-INSTALL-ONCE! (from NIL); DATA
+is likewise installed via %CAS-INSTALL-ONCE!. Each of %CAS-INSTALL-
+ONCE!'s own SB-EXT:COMPARE-AND-SWAP calls is a full memory barrier,
 so any other thread that subsequently observes a non-NIL DIMENSIONS
 also sees that same ELEMENT-TYPE. Two threads racing here may each
 harmlessly redo this identical fetch/decode work; at most one's
 DIMENSIONS, and at most one's DATA, is ever actually installed, and
 every racing thread computes the same value regardless."
   (let ((repository (get-repository array)))
-    (%ensure-tree-entries-loaded repository array)
+    (%ensure-tree-entries-loaded! repository array)
     (unless (persistent-array-dimensions array)
       (let ((meta-entry (assoc ".meta" (get-entries array) :test #'string=)))
         (unless meta-entry
@@ -249,13 +249,13 @@ every racing thread computes the same value regardless."
         (multiple-value-bind (dimensions element-type)
             (deserialize-persistent-array-meta (git-cat-file repository (sha (cdr meta-entry))))
           (setf (persistent-array-element-type array) element-type)
-          (%cas-install-once (slot-value array 'dimensions) nil dimensions))))
+          (%cas-install-once! (slot-value array 'dimensions) nil dimensions))))
     (unless (%persistent-array-data array)
       (let ((data-entry (assoc "data" (get-entries array) :test #'string=)))
         (unless data-entry
           (error 'malformed-git-object-error
                  :format-control "Malformed persistent array tree: missing \"data\" entry."))
-        (%cas-install-once (slot-value array 'data) nil
+        (%cas-install-once! (slot-value array 'data) nil
                             (make-instance 'persistent-vector :repository repository :sha (sha (cdr data-entry)))))))
   array)
 
@@ -265,7 +265,7 @@ index per dimension of ARRAY, in row-major/CL:AREF order) in ARRAY:
 exactly (PERSISTENT-VECTOR-REF DATA (%PERSISTENT-ARRAY-ROW-MAJOR-
 INDEX DIMENSIONS SUBSCRIPTS)), where DATA is ARRAY's own underlying,
 flattened PERSISTENT-VECTOR. ARRAY's own Git tree and \".meta\" are
-parsed (via %ENSURE-PERSISTENT-ARRAY-LOADED) at most once; the
+parsed (via %ENSURE-PERSISTENT-ARRAY-LOADED!) at most once; the
 underlying DATA vector's own further laziness -- one full parse of
 its own tree, then independent per-index fetch/decode/cache -- is
 then entirely PERSISTENT-VECTOR-REF's responsibility. Signals an
@@ -274,9 +274,9 @@ out-of-bounds subscript, but only once ARRAY's own DIMENSIONS have
 been established.
 
 Not thread-safe: see git-transaction.lisp's CONCURRENCY POLICY
-comment. %ENSURE-PERSISTENT-ARRAY-LOADED is not synchronized, on top
+comment. %ENSURE-PERSISTENT-ARRAY-LOADED! is not synchronized, on top
 of PERSISTENT-VECTOR-REF's own unsynchronized per-index cache."
-  (%ensure-persistent-array-loaded array)
+  (%ensure-persistent-array-loaded! array)
   (let* ((dimensions (persistent-array-dimensions array))
          (index (persistent-array-row-major-index dimensions subscripts)))
     (persistent-vector-ref (%persistent-array-data array) index)))

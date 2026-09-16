@@ -148,9 +148,9 @@ delete it."
 
 (defun %demo-decode-blob (git-object)
   "Decode GIT-OBJECT (a GIT-BLOB, fetched for real via
-GITHACK::%ENSURE-BLOB-LOADED if not already loaded) into its real
+GITHACK::%ENSURE-BLOB-LOADED! if not already loaded) into its real
 Lisp PAYLOAD."
-  (githack:get-payload (githack::%ensure-blob-loaded git-object)))
+  (githack:get-payload (githack::%ensure-blob-loaded! git-object)))
 
 (defun %demo-hijack-orphan! (repository-path branch-name payload)
   "Simulate a genuine concurrent external writer: build and persist a
@@ -218,7 +218,7 @@ single new real GIT-TREE built from all of ENTRIES."
 (defun %demo-tree-entry-payload (repository-path tree filename)
   "Return the decoded PAYLOAD of TREE's own FILENAME entry, loading
 TREE's ENTRIES first if necessary."
-  (%demo-decode-blob (cdr (assoc filename (githack::get-entries (githack::%ensure-tree-entries-loaded repository-path tree))
+  (%demo-decode-blob (cdr (assoc filename (githack::get-entries (githack::%ensure-tree-entries-loaded! repository-path tree))
                                  :test #'string=))))
 
 ;;; ------------------------------------------------------------------

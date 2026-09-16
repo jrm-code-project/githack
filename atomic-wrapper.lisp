@@ -54,7 +54,7 @@ no SHA (is not yet persisted)."
     (setf (get-loaded? tree) t)
     tree))
 
-(defun %ensure-tree-entries-loaded (repository tree)
+(defun %ensure-tree-entries-loaded! (repository tree)
   "Ensure TREE's ENTRIES are populated, fetching and parsing its raw
 Git tree bytes via GIT-CAT-FILE and DESERIALIZE-TREE if TREE is not
 already loaded. Returns TREE.
@@ -72,12 +72,12 @@ winning ENTRIES value, never a half-populated TREE."
     (%publish-loaded! tree))
   tree)
 
-(defun %ensure-blob-loaded (blob)
+(defun %ensure-blob-loaded! (blob)
   "Ensure BLOB's PAYLOAD slot is populated, fetching and decoding its
 raw Git blob bytes via GIT-CAT-FILE and DESERIALIZE-ATOM if BLOB is
 not already loaded. Returns BLOB.
 
-Thread-safe: see %ENSURE-TREE-ENTRIES-LOADED's own commentary --
+Thread-safe: see %ENSURE-TREE-ENTRIES-LOADED!'s own commentary --
 identical reasoning applies here, substituting PAYLOAD for ENTRIES."
   (unless (get-loaded? blob)
     (setf (get-payload blob)
@@ -96,19 +96,19 @@ ordinary tree with no \".meta\" entry at all."
          (eq (getf (deserialize-plist (git-cat-file repository (sha (cdr meta-entry)))) :tag)
              :atomic-wrapper))))
 
-(defun %ensure-commit-loaded (commit)
+(defun %ensure-commit-loaded! (commit)
   "Ensure COMMIT's TREE/PARENTS/AUTHOR/COMMITTER/TIMESTAMP/MESSAGE
 slots are populated, fetching and parsing its raw Git commit text
-via GIT-CAT-FILE and DESERIALIZE-COMMIT if COMMIT is not already
+via GIT-CAT-FILE and DESERIALIZE-COMMIT! if COMMIT is not already
 loaded (as is the case for a freshly INFLATE-GIT-PROXY'd commit,
 e.g. a GIT-BRANCH's TARGET). Returns COMMIT.
 
-Thread-safe: see %ENSURE-TREE-ENTRIES-LOADED's own commentary --
-identical reasoning applies here, substituting DESERIALIZE-COMMIT's
-own several slots for ENTRIES; DESERIALIZE-COMMIT itself calls
+Thread-safe: see %ENSURE-TREE-ENTRIES-LOADED!'s own commentary --
+identical reasoning applies here, substituting DESERIALIZE-COMMIT!'s
+own several slots for ENTRIES; DESERIALIZE-COMMIT! itself calls
 %PUBLISH-LOADED! as its own very last step."
   (unless (get-loaded? commit)
-    (deserialize-commit commit
+    (deserialize-commit! commit
                          (sb-ext:octets-to-string
                           (git-cat-file (get-repository commit) (sha commit))
                           :external-format :utf-8)))
@@ -122,11 +122,11 @@ entry if that tree turns out to be an ATOMIC-WRAPPER-TREE (as
 created by WRAP-ATOMIC-COMMIT-ROOT). The wrapper is thus entirely
 invisible to callers: they receive back whatever kind of GIT-OBJECT
 was originally committed as the root, tree or atom alike. COMMIT
-itself is loaded first (via %ENSURE-COMMIT-LOADED) if necessary, so
+itself is loaded first (via %ENSURE-COMMIT-LOADED!) if necessary, so
 this works equally well on a freshly INFLATE-GIT-PROXY'd commit."
-  (%ensure-commit-loaded commit)
+  (%ensure-commit-loaded! commit)
   (let* ((repository (get-repository commit))
-         (tree (%ensure-tree-entries-loaded repository (get-tree commit))))
+         (tree (%ensure-tree-entries-loaded! repository (get-tree commit))))
     (if (atomic-wrapper-tree-p repository tree)
         (cdr (assoc "value" (get-entries tree) :test #'string=))
         tree)))

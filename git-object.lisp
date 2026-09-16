@@ -148,7 +148,7 @@ and committer signatures), or NIL if not yet loaded/decoded.")
   (:documentation
    "Proxy for a Git commit: a history anchor pointing to a root
 GIT-TREE snapshot and zero or more parent GIT-COMMIT proxies. See
-SERIALIZE-COMMIT and DESERIALIZE-COMMIT for the on-disk
+SERIALIZE-COMMIT and DESERIALIZE-COMMIT! for the on-disk
 representation."))
 
 (setf (documentation 'get-tree 'function)
@@ -212,7 +212,7 @@ object type as reported by GIT-TYPE."
 ;;; persistent-cons.lisp, persistent-vector.lisp, persistent-
 ;;; array.lisp, persistent-wttree.lisp) and every per-element cache
 ;;; (chief among them, PERSISTENT-VECTOR-REF's own index cache): see
-;;; %PUBLISH-LOADED!, %CAS-INSTALL-ONCE, and WITH-OBJECT-LOAD-LOCK.
+;;; %PUBLISH-LOADED!, %CAS-INSTALL-ONCE!, and WITH-OBJECT-LOAD-LOCK.
 ;;; Concurrent WRITERS (distinct GIT-TRANSACTIONs producing brand-new
 ;;; proxy instances) were already safe, by construction, since
 ;;; GitHack's persistent data model never mutates an already-
@@ -238,8 +238,8 @@ own contention is shared.")
   "A small, fixed pool of SB-THREAD:MUTEX objects, indexed via
 %LOAD-STRIPE-MUTEX, used by WITH-OBJECT-LOAD-LOCK to serialize only
 the rare event of two threads racing to perform a *retyping* lazy
-load (CL:CHANGE-CLASS, as %ENSURE-PERSISTENT-CONS-LOADED and
-%ENSURE-PERSISTENT-WTTREE-NODE-LOADED both perform) of the exact same
+load (CL:CHANGE-CLASS, as %ENSURE-PERSISTENT-CONS-LOADED! and
+%ENSURE-PERSISTENT-WTTREE-NODE-LOADED! both perform) of the exact same
 GIT-OBJECT instance at once -- CHANGE-CLASS is not documented safe to
 invoke concurrently on one instance from two threads, unlike this
 file's other, plain-data lazy loads (which merely redo idempotent,
@@ -263,7 +263,7 @@ CL:CHANGE-CLASS) OBJECT itself, or any other object that happens to
 hash to the same stripe. Callers should still check GET-LOADED? (or
 their own analogous already-loaded condition) *before* entering this
 macro at all, so the common, already-loaded case never even attempts
-to acquire a lock -- see, e.g., %ENSURE-PERSISTENT-CONS-LOADED's own
+to acquire a lock -- see, e.g., %ENSURE-PERSISTENT-CONS-LOADED!'s own
 outer (UNLESS (AND (TYPEP CONS 'PERSISTENT-CONS) (GET-LOADED? CONS))
 ...) guard."
   `(sb-thread:with-mutex ((%load-stripe-mutex ,object))
@@ -287,7 +287,7 @@ thread already won this same race first. Always returns OBJECT."
   (sb-ext:compare-and-swap (slot-value object 'loaded?) nil t)
   object)
 
-(defmacro %cas-install-once (place old new)
+(defmacro %cas-install-once! (place old new)
   "Attempt to atomically install NEW into PLACE (any SETF-able,
 SB-EXT:COMPARE-AND-SWAP-capable place, e.g. a SLOT-VALUE or SVREF
 form) via SB-EXT:COMPARE-AND-SWAP, expecting to find OLD (compared

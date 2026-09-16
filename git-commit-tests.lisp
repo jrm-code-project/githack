@@ -4,7 +4,7 @@
 
 (def-suite git-commit-suite
   :in githack-suite
-  :description "Tests for the GIT-COMMIT proxy, SERIALIZE-COMMIT, and DESERIALIZE-COMMIT.")
+  :description "Tests for the GIT-COMMIT proxy, SERIALIZE-COMMIT, and DESERIALIZE-COMMIT!.")
 
 (in-suite git-commit-suite)
 
@@ -62,15 +62,15 @@ in order, between the \"tree\" line and the \"author\" line."
                          +root-tree-sha+ +parent-1-sha+ +parent-2-sha+)
                  (serialize-commit commit)))))
 
-(test deserialize-commit-populates-slots-with-no-parents
-  "DESERIALIZE-COMMIT parses a root commit's text and populates a
+(test deserialize-commit!-populates-slots-with-no-parents
+  "DESERIALIZE-COMMIT! parses a root commit's text and populates a
 GIT-COMMIT's TREE, AUTHOR, COMMITTER, TIMESTAMP, and MESSAGE slots,
 leaving PARENTS empty."
   (let* ((text (format nil "tree ~A~%author The Boss <boss@githack.local> 1700000000 +0000~%committer The Boss <boss@githack.local> 1700000000 +0000~%~%first commit"
                        +root-tree-sha+))
          (commit (make-instance 'git-commit :repository :dummy-repo)))
     (with-fake-git-type ((list (cons +root-tree-sha+ "tree")))
-      (let ((result (deserialize-commit commit text)))
+      (let ((result (deserialize-commit! commit text)))
         (is (eq commit result))
         (is (eq t (get-loaded? commit)))
         (is (typep (get-tree commit) 'git-tree))
@@ -81,8 +81,8 @@ leaving PARENTS empty."
         (is (= 1700000000 (get-timestamp commit)))
         (is (string= "first commit" (get-message commit)))))))
 
-(test deserialize-commit-populates-parents-in-order
-  "DESERIALIZE-COMMIT collects multiple \"parent\" header lines, in
+(test deserialize-commit!-populates-parents-in-order
+  "DESERIALIZE-COMMIT! collects multiple \"parent\" header lines, in
 the order they appear, as lazily-loaded GIT-COMMIT proxies."
   (let* ((text (format nil "tree ~A~%parent ~A~%parent ~A~%author The Boss <boss@githack.local> 1700000000 +0000~%committer The Boss <boss@githack.local> 1700000000 +0000~%~%merge commit"
                        +root-tree-sha+ +parent-1-sha+ +parent-2-sha+))
@@ -90,7 +90,7 @@ the order they appear, as lazily-loaded GIT-COMMIT proxies."
     (with-fake-git-type ((list (cons +root-tree-sha+ "tree")
                                (cons +parent-1-sha+ "commit")
                                (cons +parent-2-sha+ "commit")))
-      (deserialize-commit commit text)
+      (deserialize-commit! commit text)
       (is (= 2 (length (get-parents commit))))
       (destructuring-bind (first-parent second-parent) (get-parents commit)
         (is (typep first-parent 'git-commit))
@@ -98,17 +98,17 @@ the order they appear, as lazily-loaded GIT-COMMIT proxies."
         (is (typep second-parent 'git-commit))
         (is (string= +parent-2-sha+ (sha second-parent)))))))
 
-(test deserialize-commit-preserves-multiline-message
-  "DESERIALIZE-COMMIT's MESSAGE includes everything after the blank
+(test deserialize-commit!-preserves-multiline-message
+  "DESERIALIZE-COMMIT!'s MESSAGE includes everything after the blank
 line separating headers from message, including embedded newlines."
   (let* ((text (format nil "tree ~A~%author The Boss <boss@githack.local> 1700000000 +0000~%committer The Boss <boss@githack.local> 1700000000 +0000~%~%Summary line~%~%Body paragraph."
                        +root-tree-sha+))
          (commit (make-instance 'git-commit :repository :dummy-repo)))
     (with-fake-git-type ((list (cons +root-tree-sha+ "tree")))
-      (deserialize-commit commit text)
+      (deserialize-commit! commit text)
       (is (string= (format nil "Summary line~%~%Body paragraph.") (get-message commit))))))
 
-(test serialize-deserialize-commit-round-trips
+(test serialize-deserialize-commit!-round-trips
   "Serializing a GIT-COMMIT and then deserializing the resulting text
 into a fresh GIT-COMMIT reconstructs equivalent slot values."
   (let* ((tree (make-instance 'git-tree :sha +root-tree-sha+ :repository :dummy-repo))
@@ -118,7 +118,7 @@ into a fresh GIT-COMMIT reconstructs equivalent slot values."
          (reloaded (make-instance 'git-commit :repository :dummy-repo)))
     (with-fake-git-type ((list (cons +root-tree-sha+ "tree")
                                (cons +parent-1-sha+ "commit")))
-      (deserialize-commit reloaded text)
+      (deserialize-commit! reloaded text)
       (is (string= +root-tree-sha+ (sha (get-tree reloaded))))
       (is (= 1 (length (get-parents reloaded))))
       (is (string= +parent-1-sha+ (sha (first (get-parents reloaded)))))

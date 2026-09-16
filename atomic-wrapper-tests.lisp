@@ -74,7 +74,7 @@ WRAP-ATOMIC-COMMIT-ROOT and a real (fake) Git tree/commit."
   "RESOLVE-COMMIT-ROOT works on a genuinely unloaded GIT-COMMIT proxy
 -- as INFLATE-GIT-PROXY would produce for a GIT-BRANCH's TARGET --
 fetching and parsing its raw commit text via GIT-CAT-FILE and
-DESERIALIZE-COMMIT before inspecting its tree, exactly as it would
+DESERIALIZE-COMMIT! before inspecting its tree, exactly as it would
 for an already fully in-memory commit."
   (let* ((blob-sha "9999999999999999999999999999999999999999")
          (blob (make-instance 'git-blob :repository :dummy-repo :payload 7 :sha blob-sha)))

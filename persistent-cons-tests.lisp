@@ -4,7 +4,7 @@
 
 (def-suite persistent-cons-suite
   :in githack-suite
-  :description "Tests for the PERSISTENT-CONS proxy, SERIALIZE-PERSISTENT-CONS, and DESERIALIZE-PERSISTENT-CONS.")
+  :description "Tests for the PERSISTENT-CONS proxy, SERIALIZE-PERSISTENT-CONS, and DESERIALIZE-PERSISTENT-CONS!.")
 
 (in-suite persistent-cons-suite)
 
@@ -103,7 +103,7 @@ existing SHA) for a cons that has already been persisted."
   "SERIALIZE-PERSISTENT-CONS writes the exact, fixed README.md
 markdown content as raw (non-atom-envelope) UTF-8 bytes. (Its
 \".meta\" blob's content is verified indirectly, by the round-trip
-test below via the exported DESERIALIZE-PERSISTENT-CONS.)"
+test below via the exported DESERIALIZE-PERSISTENT-CONS!.)"
   (let* ((calls '())
          (car-blob (make-instance 'git-blob :repository :dummy-repo :payload 1))
          (cons (make-instance 'persistent-cons :repository :dummy-repo
@@ -114,7 +114,7 @@ test below via the exported DESERIALIZE-PERSISTENT-CONS.)"
     (is (find (sb-ext:string-to-octets +persistent-cons-readme+ :external-format :utf-8)
               calls :key #'third :test #'equalp))))
 
-(test deserialize-persistent-cons-round-trips-with-serialize
+(test deserialize-persistent-cons!-round-trips-with-serialize
   "Deserializing the tree bytes and .meta bytes produced by
 SERIALIZE-PERSISTENT-CONS reconstructs an equivalent PERSISTENT-CONS
 with the same LENGTH/PROPER and hollow CAR/CDR proxies for the same
@@ -140,15 +140,15 @@ SHAs."
                                   (cons (sha cdr-entry) "blob")
                                   (cons (sha meta-entry) "blob")
                                   (cons (sha readme-entry) "blob")))
-        (deserialize-persistent-cons hollow tree-octets meta-octets))
+        (deserialize-persistent-cons! hollow tree-octets meta-octets))
       (is (= (persistent-cons-length original) (persistent-cons-length hollow)))
       (is (eq (persistent-cons-proper original) (persistent-cons-proper hollow)))
       (is (get-loaded? hollow))
       (is (string= car-blob-sha (sha (persistent-car hollow))))
       (is (string= (sha cdr-entry) (sha (persistent-cdr hollow)))))))
 
-(test deserialize-persistent-cons-signals-error-for-missing-entries
-  "DESERIALIZE-PERSISTENT-CONS signals an error if the underlying
+(test deserialize-persistent-cons!-signals-error-for-missing-entries
+  "DESERIALIZE-PERSISTENT-CONS! signals an error if the underlying
 tree is missing any of the four required entries."
   (let* ((blob-sha "2222222222222222222222222222222222222222")
          (blob (make-instance 'git-blob :repository :dummy-repo :sha blob-sha))
@@ -157,7 +157,7 @@ tree is missing any of the four required entries."
          (tree-octets (serialize-tree incomplete-tree))
          (hollow (make-instance 'persistent-cons :repository :dummy-repo)))
     (with-fake-git-type ((list (cons blob-sha "blob")))
-      (signals error (deserialize-persistent-cons hollow tree-octets #())))))
+      (signals error (deserialize-persistent-cons! hollow tree-octets #())))))
 
 (test scan-persistent-list-of-nil-is-empty
   "SCAN-PERSISTENT-LIST of NIL (the empty list) produces an empty

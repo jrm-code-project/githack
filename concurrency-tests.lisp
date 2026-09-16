@@ -32,20 +32,20 @@ is a CONDITION."
   (notany (lambda (r) (typep r 'condition)) results))
 
 (test concurrent-ensure-blob-loaded-installs-a-consistent-payload
-  "Many threads calling %ENSURE-BLOB-LOADED on the very same, shared,
+  "Many threads calling %ENSURE-BLOB-LOADED! on the very same, shared,
 initially-hollow GIT-BLOB instance all observe the same, correctly
 decoded PAYLOAD, none signals an error, and the blob ends up marked
 loaded."
   (with-fake-git-repository ()
     (let* ((sha (git-hash-object :dummy-repo "blob" (serialize-atom 424242)))
            (blob (make-instance 'git-blob :repository :dummy-repo :sha sha))
-           (results (run-concurrently 24 (lambda () (get-payload (%ensure-blob-loaded blob))))))
+           (results (run-concurrently 24 (lambda () (get-payload (%ensure-blob-loaded! blob))))))
       (is (no-errors-p results))
       (is (every (lambda (r) (eql r 424242)) results))
       (is (get-loaded? blob)))))
 
 (test concurrent-ensure-tree-entries-loaded-installs-consistent-entries
-  "Many threads calling %ENSURE-TREE-ENTRIES-LOADED on the very same,
+  "Many threads calling %ENSURE-TREE-ENTRIES-LOADED! on the very same,
 shared, initially-hollow GIT-TREE instance all observe the same
 correctly decoded ENTRIES, and none signals an error."
   (with-fake-git-repository ()
@@ -58,14 +58,14 @@ correctly decoded ENTRIES, and none signals an error."
            (results (run-concurrently
                      24
                      (lambda ()
-                       (%ensure-tree-entries-loaded :dummy-repo tree)
-                       (get-payload (%ensure-blob-loaded (cdr (assoc "greeting" (get-entries tree) :test #'string=))))))))
+                       (%ensure-tree-entries-loaded! :dummy-repo tree)
+                       (get-payload (%ensure-blob-loaded! (cdr (assoc "greeting" (get-entries tree) :test #'string=))))))))
       (is (no-errors-p results))
       (is (every (lambda (r) (string= r "hello")) results))
       (is (get-loaded? tree)))))
 
 (test concurrent-ensure-persistent-cons-loaded-retypes-and-loads-safely
-  "Many threads calling %ENSURE-PERSISTENT-CONS-LOADED on the very
+  "Many threads calling %ENSURE-PERSISTENT-CONS-LOADED! on the very
 same, shared GIT-TREE instance (deliberately not yet retyped into a
 PERSISTENT-CONS) all end up observing a single, fully and correctly
 loaded PERSISTENT-CONS -- exercising WITH-OBJECT-LOAD-LOCK's own
@@ -82,17 +82,17 @@ safe to race directly."
            (results (run-concurrently
                      24
                      (lambda ()
-                       (let ((loaded (%ensure-persistent-cons-loaded hollow)))
+                       (let ((loaded (%ensure-persistent-cons-loaded! hollow)))
                          (list (typep loaded 'persistent-cons)
-                               (get-payload (%ensure-blob-loaded (persistent-car loaded)))
-                               (get-payload (%ensure-blob-loaded (persistent-cdr loaded)))))))))
+                               (get-payload (%ensure-blob-loaded! (persistent-car loaded)))
+                               (get-payload (%ensure-blob-loaded! (persistent-cdr loaded)))))))))
       (is (no-errors-p results))
       (is (every (lambda (r) (equal r (list t :the-car :the-cdr))) results))
       (is (typep hollow 'persistent-cons))
       (is (get-loaded? hollow)))))
 
 (test concurrent-ensure-persistent-wttree-node-loaded-retypes-and-loads-safely
-  "Many threads calling %ENSURE-PERSISTENT-WTTREE-NODE-LOADED on the
+  "Many threads calling %ENSURE-PERSISTENT-WTTREE-NODE-LOADED! on the
 very same, shared GIT-TREE instance (deliberately not yet retyped
 into a PERSISTENT-WTTREE) all end up observing a single, fully and
 correctly loaded PERSISTENT-WTTREE node."
@@ -103,7 +103,7 @@ correctly loaded PERSISTENT-WTTREE node."
            (results (run-concurrently
                      24
                      (lambda ()
-                       (let ((loaded (%ensure-persistent-wttree-node-loaded hollow)))
+                       (let ((loaded (%ensure-persistent-wttree-node-loaded! hollow)))
                          (list (typep loaded 'persistent-wttree)
                                (wt-node-key loaded)
                                (wt-node-value loaded)))))))
@@ -130,13 +130,13 @@ exactly the original elements, and none signals an error."
       (is (every (lambda (r) (equal r original-values)) results)))))
 
 (test cas-install-once-installs-only-the-first-racing-value
-  "%CAS-INSTALL-ONCE returns NEW (and installs it) when PLACE still
+  "%CAS-INSTALL-ONCE! returns NEW (and installs it) when PLACE still
 holds OLD, or the already-installed value from a prior winning call
 when it does not, and every subsequent call, regardless of which NEW
 it was itself passed, converges on that same single winning value."
   (let ((holder (make-instance 'git-blob :repository :dummy-repo :payload nil)))
-    (is (eql :first (%cas-install-once (slot-value holder 'githack::payload) nil :first)))
-    (is (eql :first (%cas-install-once (slot-value holder 'githack::payload) nil :second)))
+    (is (eql :first (%cas-install-once! (slot-value holder 'githack::payload) nil :first)))
+    (is (eql :first (%cas-install-once! (slot-value holder 'githack::payload) nil :second)))
     (is (eql :first (get-payload holder)))))
 
 (test publish-loaded-is-idempotent-and-only-ever-transitions-nil-to-t
