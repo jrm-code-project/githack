@@ -64,7 +64,7 @@ stranded in either repository afterward."
             ;; Nested B: attempts +1000 but explicitly aborts instead
             ;; of returning -- must leave the percolated state
             ;; completely untouched (still 110, not 1110).
-            (with-transaction (b) (repo1 :read-write) (abort-git-transaction *transaction*))
+            (with-transaction (b) (repo1 :read-write) (declare (ignore b)) (abort-git-transaction *transaction*))
             (is (eql 110 (dntx-current-value)))
             (dntx-current-value)))
         (dtx-write! repository-2 "main" "solo-participant"))
@@ -122,11 +122,13 @@ committed together via one real 2PC round trip."
         (with-repository (repo1) (repository-1 :branch "main" :author +dtx-author+ :committer +dtx-author+
                                                  :message "dntx" :mode :read-write)
           (with-transaction (v) (repo1 :read-write)
+            (declare (ignore v))
             (with-transaction (a) (repo1 :read-write) (+ a 10))
             (dntx-current-value)))
         (with-repository (repo2) (repository-2 :branch "main" :author +dtx-author+ :committer +dtx-author+
                                                  :message "dntx" :mode :read-write)
           (with-transaction (v) (repo2 :read-write)
+            (declare (ignore v))
             (with-transaction (b) (repo2 :read-write) (* b 3))
             (dntx-current-value))))
       (is (eql 20 (dtx-read repository-1 "main")))
