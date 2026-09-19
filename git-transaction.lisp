@@ -497,7 +497,7 @@ COMMIT-GIT-TRANSACTION-NOW! does. Returns that commit."
           ;; instead of giving up, retrying against an ever-fresher
           ;; HEAD for as long as the branch keeps moving out from
           ;; under us.
-          (loop
+          (let next ()
             (let ((current-head-sha (git-show-ref-sha repository branch-name)))
               (multiple-value-bind (merged-tree-sha conflict-detail)
                   (git-merge-tree repository (sha candidate-commit) current-head-sha)
@@ -518,8 +518,9 @@ COMMIT-GIT-TRANSACTION-NOW! does. Returns that commit."
                       (handler-case
                           (git-update-ref! repository branch-name (sha rebased-commit) :expected-sha current-head-sha)
                         (concurrent-modification-error () (setf raced-again t)))
-                      (unless raced-again
-                        (return (finish rebased-commit))))
+                      (if raced-again
+                          (next)
+                          (finish rebased-commit)))
                     (ecase (get-rebase-fallback transaction)
                       (:retry (error 'concurrent-modification-error
                                      :repository repository :name branch-name
@@ -869,16 +870,14 @@ Returns TRANSACTION."
               parents receiver conflict-resolution rebase-fallback)))
       (ecase conflict-resolution
         (:error (attempt))
-        (:retry (loop
-                  (handler-case
-                      (return (attempt))
-                    (concurrent-modification-error () nil))))
+        (:retry (let next ()
+                  (handler-case (attempt)
+                    (concurrent-modification-error () (next)))))
         (:lock (with-repository-transaction-lock ((get-pathname repository))
                  (attempt)))
-        (:rebase (loop
-                   (handler-case
-                       (return (attempt))
-                     (concurrent-modification-error () nil))))))))
+        (:rebase (let next ()
+                   (handler-case (attempt)
+                     (concurrent-modification-error () (next)))))))))
 
 (defmacro with-git-transaction ((transaction-var head-commit-var) (repository mode &key branch author committer message parents (conflict-resolution :error) (rebase-fallback :error)) &body body)
   "Macro wrapper around CALL-WITH-GIT-TRANSACTION: expands into a

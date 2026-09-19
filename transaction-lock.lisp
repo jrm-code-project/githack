@@ -55,16 +55,18 @@ else after +TRANSACTION-LOCK-TIMEOUT+ seconds."
   (let ((lock-pathname (transaction-lock-pathname git-dir-pathname))
         (deadline (+ (get-internal-real-time)
                      (round (* +transaction-lock-timeout+ internal-time-units-per-second)))))
-    (loop
+    (let next ()
       (let ((stream (open lock-pathname
                            :direction :output
                            :if-exists nil
                            :if-does-not-exist :create)))
-        (when stream
-          (return stream)))
-      (when (> (get-internal-real-time) deadline)
-        (error 'transaction-lock-timeout-error :pathname lock-pathname))
-      (sleep +transaction-lock-poll-interval+))))
+        (if stream
+            stream
+            (progn
+              (when (> (get-internal-real-time) deadline)
+                (error 'transaction-lock-timeout-error :pathname lock-pathname))
+              (sleep +transaction-lock-poll-interval+)
+              (next)))))))
 
 (defun %release-repository-transaction-lock (stream git-dir-pathname)
   "Release a lock previously acquired by

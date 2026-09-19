@@ -120,9 +120,13 @@ must call this before deleting a repository's directory, since a
 live session's pipes silently outlive the directory they were
 opened against otherwise, leaking OS processes."
   (let ((native (and repository (uiop:native-namestring repository))))
-    (loop for key being the hash-keys of *git-io-sessions*
-          when (or (null native) (equal native (second key)))
-            do (%discard-git-io-session key))))
+    (let ((matching-keys '()))
+      (maphash (lambda (key process)
+                 (declare (ignore process))
+                 (when (or (null native) (equal native (second key)))
+                   (push key matching-keys)))
+               *git-io-sessions*)
+      (mapc #'%discard-git-io-session matching-keys))))
 
 (defun %git-io-read-line-of-octets (stream)
   "Read octets from STREAM (an (UNSIGNED-BYTE 8) stream) up to and
@@ -131,12 +135,13 @@ the resulting string, or NIL if STREAM is already at end of file
 with no bytes read (signaling that the subprocess on the other end
 has exited)."
   (let ((bytes (make-array 0 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0)))
-    (loop for byte = (read-byte stream nil :eof)
-          do (cond
-               ((eq byte :eof) (return (and (plusp (fill-pointer bytes))
-                                             (sb-ext:octets-to-string bytes :external-format :utf-8))))
-               ((= byte 10) (return (sb-ext:octets-to-string bytes :external-format :utf-8)))
-               (t (vector-push-extend byte bytes))))))
+    (let next ()
+      (let ((byte (read-byte stream nil :eof)))
+        (cond
+          ((eq byte :eof) (and (plusp (fill-pointer bytes))
+                                (sb-ext:octets-to-string bytes :external-format :utf-8)))
+          ((= byte 10) (sb-ext:octets-to-string bytes :external-format :utf-8))
+          (t (vector-push-extend byte bytes) (next)))))))
 
 (defun %git-io-write-line-of-octets (stream string)
   "Write STRING to STREAM (an (UNSIGNED-BYTE 8) stream) as UTF-8

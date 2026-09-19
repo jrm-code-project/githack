@@ -137,7 +137,7 @@ it captures subprocess output through a temporary file rather than a
 Lisp string."
   (with-temporary-git-repository (repository)
     (let* ((octets (make-array 256 :element-type '(unsigned-byte 8)
-                                    :initial-contents (loop for i below 256 collect i)))
+                                    :initial-contents (iota 256)))
            (sha (git-hash-object repository "blob" octets)))
       (is (equalp octets (git-cat-file repository sha))))))
 

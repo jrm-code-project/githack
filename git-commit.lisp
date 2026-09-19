@@ -68,13 +68,11 @@ TEXT following that blank line's own trailing newline."
                (let ((newline (position #\Newline text :start start)))
                  (values (subseq text start newline)
                          (if newline (1+ newline) length)))))
-      (loop with start = 0
-            with lines = '()
-            do (multiple-value-bind (line next) (next-line start)
-                 (when (string= line "")
-                   (return (values (nreverse lines) (subseq text next))))
-                 (push line lines)
-                 (setf start next))))))
+      (let next ((start 0) (lines '()))
+        (multiple-value-bind (line next-start) (next-line start)
+          (if (string= line "")
+              (values (nreverse lines) (subseq text next-start))
+              (next next-start (cons line lines))))))))
 
 (defun parse-commit-header-line (prefix line)
   "If LINE begins with PREFIX followed by a single space, return the

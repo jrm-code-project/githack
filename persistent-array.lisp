@@ -129,15 +129,13 @@ if any individual subscript is out of bounds for its own dimension."
     (error 'invalid-argument-error
            :format-control "Wrong number of subscripts ~S for persistent array of dimensions ~S."
            :format-arguments (list subscripts dimensions)))
-  (let ((index 0))
-    (loop for dimension in dimensions
-          for subscript in subscripts
-          do (unless (and (integerp subscript) (<= 0 subscript) (< subscript dimension))
-               (error 'invalid-argument-error
-                      :format-control "Subscript ~S out of bounds for dimension size ~S."
-                      :format-arguments (list subscript dimension)))
-             (setf index (+ (* index dimension) subscript)))
-    index))
+  (fold-left (lambda (index dimension subscript)
+               (unless (and (integerp subscript) (<= 0 subscript) (< subscript dimension))
+                 (error 'invalid-argument-error
+                        :format-control "Subscript ~S out of bounds for dimension size ~S."
+                        :format-arguments (list subscript dimension)))
+               (+ (* index dimension) subscript))
+             0 dimensions subscripts))
 
 (defun serialize-persistent-array (array)
   "Compute ARRAY's total volume from its own DIMENSIONS, serialize

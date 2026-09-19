@@ -213,10 +213,14 @@ filtered to drop :VERSION (recorded separately, directly in
 \".meta\") and every INITARG mapping to a TRANSIENT slot (per
 PERSISTENT-OBJECT-INITARG-TRANSIENT-P): exactly the entries
 SERIALIZE-PERSISTENT-OBJECT writes to Git."
-  (loop for (initarg value) on (%persistent-object-initializer-payload instance) by #'cddr
-        unless (or (eq initarg :version)
-                   (persistent-object-initarg-transient-p instance initarg))
-          collect (cons initarg value)))
+  (let next ((plist (%persistent-object-initializer-payload instance)))
+    (if (null plist)
+        nil
+        (destructuring-bind (initarg value &rest rest) plist
+          (if (or (eq initarg :version)
+                  (persistent-object-initarg-transient-p instance initarg))
+              (next rest)
+              (cons (cons initarg value) (next rest)))))))
 
 (defgeneric persist-object-component-by-type (value)
   (:documentation
@@ -429,9 +433,10 @@ or if its \".meta\" blob's :TAG is not :CLOS."
       (let* ((class-name (intern (getf meta :class) (getf meta :package)))
              (version (getf meta :version))
              (initargs
-               (loop for entry in entries
-                     unless (member (car entry) '(".meta" "README.md") :test #'string=)
-                       append (list (persistent-object-filename-initarg (car entry)) (cdr entry))))
+               (mapcan (lambda (entry)
+                         (unless (member (car entry) '(".meta" "README.md") :test #'string=)
+                           (list (persistent-object-filename-initarg (car entry)) (cdr entry))))
+                       entries))
              (instance (apply #'make-instance class-name :version version :repository repository initargs)))
         (setf (sha instance) (sha tree))
         (setf (get-entries instance) entries)

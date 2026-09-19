@@ -232,9 +232,8 @@ never affects correctness, only how widely that already-rare event's
 own contention is shared.")
 
 (defparameter +load-stripe-mutexes+
-  (coerce (loop repeat +load-stripe-mutex-count+
-                collect (sb-thread:make-mutex :name "githack-object-load-stripe"))
-          'simple-vector)
+  (map-into (make-array +load-stripe-mutex-count+)
+            (lambda () (sb-thread:make-mutex :name "githack-object-load-stripe")))
   "A small, fixed pool of SB-THREAD:MUTEX objects, indexed via
 %LOAD-STRIPE-MUTEX, used by WITH-OBJECT-LOAD-LOCK to serialize only
 the rare event of two threads racing to perform a *retyping* lazy

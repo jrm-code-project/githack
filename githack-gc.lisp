@@ -52,8 +52,8 @@ REF-PATH is not shaped like one."
 (defun tx-ids-with-ledger-refs (repository)
   "Return a fresh list of every TX-ID string REPOSITORY currently
 holds a `refs/githack/ledger/<tx-id>` ref for."
-  (loop for (sha object-type ref-path) in (%git-for-each-ref repository "refs/githack/ledger/")
-        collect (progn sha object-type (ledger-tx-id-from-ref ref-path))))
+  (mapcar (lambda (entry) (ledger-tx-id-from-ref (third entry)))
+          (%git-for-each-ref repository "refs/githack/ledger/")))
 
 (defun tx-ids-with-stranded-prepare-refs (repositories)
   "Return a fresh, duplicate-free list of every TX-ID string any
@@ -61,9 +61,10 @@ repository in REPOSITORIES (a list of Git directory pathnames)
 currently still holds at least one `refs/githack/prepare/<tx-id>/
 <branch-name>` ref for."
   (delete-duplicates
-   (loop for repository in repositories
-         append (loop for (sha object-type ref-path) in (%git-for-each-ref repository "refs/githack/prepare/")
-                      collect (progn sha object-type (prepare-tx-id-from-ref ref-path))))
+   (mapcan (lambda (repository)
+             (mapcar (lambda (entry) (prepare-tx-id-from-ref (third entry)))
+                     (%git-for-each-ref repository "refs/githack/prepare/")))
+           repositories)
    :test #'string=))
 
 (defun sweep-stranded-prepare-refs! (participant-repositories)

@@ -22,7 +22,7 @@ others nor this function's own JOIN-THREAD calls."
              (sb-thread:wait-on-semaphore start)
              (handler-case (funcall thunk)
                (error (c) c))))
-      (let ((threads (loop repeat thread-count collect (sb-thread:make-thread #'run-one))))
+      (let ((threads (map-into (make-list thread-count) (lambda () (sb-thread:make-thread #'run-one)))))
         (sb-thread:signal-semaphore start thread-count)
         (mapcar #'sb-thread:join-thread threads)))))
 
@@ -118,14 +118,14 @@ the very same, shared, initially-hollow PERSISTENT-VECTOR instance
 (in an interleaved, cache-array-allocating order), all observe
 exactly the original elements, and none signals an error."
   (with-fake-git-repository ()
-    (let* ((original-values (loop for i from 0 below 30 collect (* i i)))
+    (let* ((original-values (mapcar (lambda (i) (* i i)) (iota 30)))
            (vector-sha (let ((original (collect-persistent-vector :dummy-repo original-values)))
                          (serialize-persistent-vector original)))
            (vector (make-instance 'persistent-vector :repository :dummy-repo :sha vector-sha))
            (results (run-concurrently
                      24
                      (lambda ()
-                       (loop for i from 0 below 30 collect (persistent-vector-ref vector i))))))
+                       (mapcar (lambda (i) (persistent-vector-ref vector i)) (iota 30))))))
       (is (no-errors-p results))
       (is (every (lambda (r) (equal r original-values)) results)))))
 

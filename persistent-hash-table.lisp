@@ -118,8 +118,8 @@ real ENTRIES alist (each index wrapped via PHASH-WRAP, so an empty
 bucket becomes a GIT-BLOB with a NIL payload) are populated, so this
 vector serializes correctly via SERIALIZE-PERSISTENT-VECTOR, which
 reads ENTRIES exclusively -- not the cache."
-  (let* ((entries (loop for i from 0 below n
-                         collect (cons (princ-to-string i) (phash-wrap repository nil))))
+  (let* ((entries (mapcar (lambda (i) (cons (princ-to-string i) (phash-wrap repository nil)))
+                          (iota n)))
          (vector (make-instance 'persistent-vector
                                  :repository repository
                                  :length n
@@ -179,12 +179,13 @@ chain."
 within BUCKET (a PERSISTENT-CONS chain, or NIL for an empty bucket),
 comparing each node's own key against KEY via TEST, or NIL if KEY is
 not present."
-  (loop for node = bucket then (persistent-cdr (%ensure-persistent-cons-loaded! node))
-        while (phash-bucket-node-p node)
-        do (let* ((pair (persistent-car (%ensure-persistent-cons-loaded! node)))
-                  (existing-key (phash-decode (persistent-car (%ensure-persistent-cons-loaded! pair)))))
-             (when (funcall test existing-key key)
-               (return pair)))))
+  (let next ((node bucket))
+    (when (phash-bucket-node-p node)
+      (let* ((pair (persistent-car (%ensure-persistent-cons-loaded! node)))
+             (existing-key (phash-decode (persistent-car (%ensure-persistent-cons-loaded! pair)))))
+        (if (funcall test existing-key key)
+            pair
+            (next (persistent-cdr (%ensure-persistent-cons-loaded! node))))))))
 
 (defun phash-bucket-put (repository bucket key value test)
   "Return two values: a new bucket chain associating KEY with VALUE,
@@ -249,14 +250,16 @@ the number of buckets (load factor > 1.0)."
          (new-bucket-count (max 1 (* old-count 2)))
          (new-buckets (make-empty-buckets repository new-bucket-count)))
     (dotimes (i old-count)
-      (loop for node = (persistent-vector-ref old-buckets i) then (persistent-cdr (%ensure-persistent-cons-loaded! node))
-            while (phash-bucket-node-p node)
-            do (let* ((pair (%ensure-persistent-cons-loaded! (persistent-car (%ensure-persistent-cons-loaded! node))))
-                      (key (phash-decode (persistent-car pair)))
-                      (new-index (phash-bucket-index key new-bucket-count))
-                      (existing (persistent-vector-ref new-buckets new-index)))
-                 (setf new-buckets (persistent-vector-copy-with new-buckets new-index
-                                                                  (make-list-node repository pair existing))))))
+      (setf new-buckets
+            (let next ((node (persistent-vector-ref old-buckets i)) (buckets new-buckets))
+              (if (not (phash-bucket-node-p node))
+                  buckets
+                  (let* ((pair (%ensure-persistent-cons-loaded! (persistent-car (%ensure-persistent-cons-loaded! node))))
+                         (key (phash-decode (persistent-car pair)))
+                         (new-index (phash-bucket-index key new-bucket-count))
+                         (existing (persistent-vector-ref buckets new-index)))
+                    (next (persistent-cdr (%ensure-persistent-cons-loaded! node))
+                          (persistent-vector-copy-with buckets new-index (make-list-node repository pair existing))))))))
     (make-instance 'persistent-hash-table
                    :repository repository
                    :test (persistent-hash-table-test table)
@@ -346,10 +349,11 @@ than PHASH-GET's own traversal already would."
   (let* ((buckets (persistent-hash-table-buckets table))
          (bucket-count (persistent-vector-length (%ensure-persistent-vector-loaded! buckets))))
     (dotimes (i bucket-count)
-      (loop for node = (persistent-vector-ref buckets i) then (persistent-cdr (%ensure-persistent-cons-loaded! node))
-            while (phash-bucket-node-p node)
-            do (let* ((pair (%ensure-persistent-cons-loaded! (persistent-car (%ensure-persistent-cons-loaded! node))))
-                      (key (phash-decode (persistent-car pair)))
-                      (value (phash-decode (persistent-cdr pair))))
-                 (funcall function key value))))
+      (let next ((node (persistent-vector-ref buckets i)))
+        (when (phash-bucket-node-p node)
+          (let* ((pair (%ensure-persistent-cons-loaded! (persistent-car (%ensure-persistent-cons-loaded! node))))
+                 (key (phash-decode (persistent-car pair)))
+                 (value (phash-decode (persistent-cdr pair))))
+            (funcall function key value)
+            (next (persistent-cdr (%ensure-persistent-cons-loaded! node)))))))
     nil))

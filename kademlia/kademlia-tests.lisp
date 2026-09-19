@@ -14,6 +14,8 @@
 
 (defpackage "GITHACK-KADEMLIA-TEST"
   (:use "COMMON-LISP" "FIVEAM")
+  (:import-from "ALEXANDRIA"
+                "IOTA")
   (:import-from "GITHACK-KADEMLIA"
                 "+ID-BITS+" "+K+" "+ALPHA+"
                 "GENERATE-NODE-ID" "NODE-ID-DISTANCE" "NODE-ID-BUCKET-INDEX"
@@ -142,7 +144,7 @@ STOP-KADEMLIA-NODE-ing it afterward."
     ;; All ids in [2^20, 2^21) share bucket index 20 (distance = id
     ;; itself, since self-id is 0, and integer-length is 21 throughout
     ;; that range); it comfortably holds more than +K+ distinct ids.
-    (loop for id from base below (+ base +k+) do (routing-table-insert! table (make-contact id "127.0.0.1" 0)))
+    (mapc (lambda (id) (routing-table-insert! table (make-contact id "127.0.0.1" 0))) (iota +k+ :start base))
     (is (= (length (routing-table-all-contacts table)) +k+))
     ;; Bucket is now full; PING-FN says the LRU is still alive, so the
     ;; newcomer must be discarded and every original id retained.

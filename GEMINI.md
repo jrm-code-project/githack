@@ -148,6 +148,13 @@ interactively: `(fiveam:run! 'git-tree-suite)` or `(fiveam:run! 'git-branch-inst
   such as `pending-write/branch-name` or `contact/host`) — this does not
   apply to `DEFINE-PERSISTENT-STRUCT`, which keeps plain dashed
   `defstruct`-style accessor names.
+- **No `LOOP`**: `CL:LOOP` is never used. Simple collect/filter over an
+  existing sequence uses `MAPCAR`/`REMOVE-IF`/`MAPCAN`/`MAP-INTO` (or
+  `ALEXANDRIA:IOTA` to generate an index range); a genuinely stateful
+  traversal (pointer-chasing, retry-until-success) uses a named `LET`
+  (always named `NEXT`) via the `NAMED-LET` library. `DOLIST`/`DOTIMES`
+  are unaffected. A package using `NEXT`-named `LET` for the first time
+  must `:SHADOWING-IMPORT-FROM "NAMED-LET" "LET"`.
 - **Format and Style**: keep the typical Emacs/Slime indentation, Lisp
   header comments, and declare precise dependency lists within
   `githack.asd` when adding new files.

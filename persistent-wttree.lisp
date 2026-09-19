@@ -320,13 +320,14 @@ DEFAULT and NIL if KEY is not present. KEY-LESS-P is the same strict
 order predicate NODE was built with. Only ever descends into the
 single root-to-KEY search path, forcing each node visited along it
 (but no sibling subtree) to be loaded."
-  (loop while node
-        do (let ((node-key (wt-node-key node)))
-             (cond
-               ((funcall key-less-p key node-key) (setf node (wt-node-left node)))
-               ((funcall key-less-p node-key key) (setf node (wt-node-right node)))
-               (t (return-from wt-lookup (values (wt-node-value node) t))))))
-  (values default nil))
+  (let next ((node node))
+    (if (null node)
+        (values default nil)
+        (let ((node-key (wt-node-key node)))
+          (cond
+            ((funcall key-less-p key node-key) (next (wt-node-left node)))
+            ((funcall key-less-p node-key key) (next (wt-node-right node)))
+            (t (values (wt-node-value node) t)))))))
 
 (defun wt-extreme (node direction)
   "Return the leftmost (DIRECTION :LEFT) or rightmost (DIRECTION
@@ -335,11 +336,9 @@ error if NODE is NIL (the empty tree)."
   (when (null node)
     (error 'invalid-argument-error
            :format-control "Cannot take the extreme node of an empty WT-tree."))
-  (let ((current node))
-    (loop for next = (if (eq direction :left) (wt-node-left current) (wt-node-right current))
-          while next
-          do (setf current next))
-    current))
+  (let next ((current node))
+    (let ((successor (if (eq direction :left) (wt-node-left current) (wt-node-right current))))
+      (if successor (next successor) current))))
 
 (defun wt-min (node)
   "Return two values, the smallest key in the non-empty Adams tree

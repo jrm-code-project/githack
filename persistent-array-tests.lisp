@@ -24,11 +24,12 @@ deserialized."
 GIT-BLOBs holding the integers 0..N-1, in order -- a convenience for
 PERSISTENT-ARRAY-TESTS below."
   (make-instance 'persistent-vector :repository :dummy-repo
-                                     :entries (loop for i from 0 below n
-                                                     collect (cons (princ-to-string i)
-                                                                   (make-instance 'git-blob
-                                                                                  :repository :dummy-repo
-                                                                                  :payload i)))))
+                                     :entries (mapcar (lambda (i)
+                                                         (cons (princ-to-string i)
+                                                               (make-instance 'git-blob
+                                                                              :repository :dummy-repo
+                                                                              :payload i)))
+                                                       (iota n))))
 
 (test serialize-persistent-array-flattens-row-major
   "Serializing a 2x3 persistent array persists its underlying

@@ -101,7 +101,7 @@ Returns no useful value."
   "Return a fresh list of every CONTACT currently known to TABLE,
 across all buckets, in an unspecified order."
   (sb-thread:with-mutex ((routing-table/lock table))
-    (loop for bucket across (routing-table/buckets table) append (copy-list bucket))))
+    (mapcan #'copy-list (coerce (routing-table/buckets table) 'list))))
 
 (defun routing-table-closest-contacts (table target-id &optional (count +k+) exclude-id)
   "Return a fresh list of at most COUNT CONTACTs known to TABLE,

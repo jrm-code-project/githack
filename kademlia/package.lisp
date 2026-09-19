@@ -21,7 +21,8 @@
 ;;; any DHT machinery to be loaded at all.
 
 (defpackage "GITHACK-KADEMLIA"
-  (:use "COMMON-LISP")
+  (:shadowing-import-from "NAMED-LET" "LET")
+  (:use "COMMON-LISP" "NAMED-LET")
   (:import-from "GITHACK"
                 "DEFINE-PERSISTENT-STRUCT"
                 "PHASH-MAKE"

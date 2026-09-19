@@ -201,12 +201,13 @@ DISTRIBUTED-TRANSACTION-ERROR if `git mktag` rejects CONTENT."
 (defun split-lines (string)
   "Return a list of STRING's own lines, split on #\\Newline, with no
 trailing empty line for a STRING that itself ends in a newline."
-  (loop with start = 0
-        with length = (length string)
-        while (< start length)
-        collect (let ((newline (position #\Newline string :start start)))
-                  (prog1 (subseq string start (or newline length))
-                    (setf start (if newline (1+ newline) length))))))
+  (let ((length (length string)))
+    (let next ((start 0))
+      (if (>= start length)
+          '()
+          (let ((newline (position #\Newline string :start start)))
+            (cons (subseq string start (or newline length))
+                  (next (if newline (1+ newline) length))))))))
 
 (defun %git-for-each-ref (repository pattern)
   "Shell out to `git for-each-ref --format=... PATTERN` against
@@ -218,11 +219,11 @@ all yet)."
       (%git-run repository (list "for-each-ref" "--format=%(objectname) %(objecttype) %(refname)" pattern))
     (declare (ignore error-output))
     (if (zerop exit-code)
-        (loop for line in (split-lines output)
-              unless (zerop (length line))
-                collect (let* ((sp1 (position #\Space line))
-                               (sp2 (position #\Space line :start (1+ sp1))))
-                          (list (subseq line 0 sp1) (subseq line (1+ sp1) sp2) (subseq line (1+ sp2)))))
+        (mapcar (lambda (line)
+                  (let* ((sp1 (position #\Space line))
+                         (sp2 (position #\Space line :start (1+ sp1))))
+                    (list (subseq line 0 sp1) (subseq line (1+ sp1) sp2) (subseq line (1+ sp2)))))
+                (remove-if (lambda (line) (zerop (length line))) (split-lines output)))
         '())))
 
 (defun %git-rev-parse (repository rev-expr)
@@ -521,10 +522,12 @@ if not. Safe to call on a repository with no stranded refs at all
 resolved and removed, so a second call finds nothing left to do).
 Returns a list of (TX-ID BRANCH-NAME ACTION) for every stranded ref
 resolved, in the order found."
-  (loop for (tag-sha object-type ref-path) in (%git-for-each-ref repository "refs/githack/prepare/")
-        unless (string= object-type "tag")
-          do (error 'distributed-transaction-error
-                     :format-control "RUN-GITHACK-EXORCIST! found a stranded ref ~S in ~A that is not an annotated tag (its object type is ~S) -- GitHack's own Two-Phase-Commit machinery never creates one any other way, so this ref was not created by GitHack."
-                     :format-arguments (list ref-path repository object-type))
-        collect (multiple-value-bind (tx-id branch-name action) (%exorcise-stranded-ref! repository tag-sha ref-path)
-                  (list tx-id branch-name action))))
+  (mapcar (lambda (entry)
+            (destructuring-bind (tag-sha object-type ref-path) entry
+              (unless (string= object-type "tag")
+                (error 'distributed-transaction-error
+                       :format-control "RUN-GITHACK-EXORCIST! found a stranded ref ~S in ~A that is not an annotated tag (its object type is ~S) -- GitHack's own Two-Phase-Commit machinery never creates one any other way, so this ref was not created by GitHack."
+                       :format-arguments (list ref-path repository object-type)))
+              (multiple-value-bind (tx-id branch-name action) (%exorcise-stranded-ref! repository tag-sha ref-path)
+                (list tx-id branch-name action))))
+          (%git-for-each-ref repository "refs/githack/prepare/")))

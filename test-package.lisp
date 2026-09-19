@@ -2,6 +2,8 @@
 
 (defpackage "GITHACK-TEST"
   (:use "COMMON-LISP" "FIVEAM")
+  (:import-from "ALEXANDRIA"
+                "IOTA")
   (:import-from "GITHACK"
                 "GIT-OBJECT"
                 "SHA"

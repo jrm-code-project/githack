@@ -164,20 +164,22 @@ peer must never take a node's listener thread down."
 and dispatch it via %HANDLE-DATAGRAM!, until %RUNNING-P NODE is false
 (set by STOP-KADEMLIA-NODE, which also closes the socket to unblock
 whatever SOCKET-RECEIVE call is currently pending)."
-  (loop while (%running-p node) do
-    (handler-case
-        (multiple-value-bind (buffer length address port) (sb-bsd-sockets:socket-receive (%get-socket node) nil 65507)
-          ;; A socket closed (by STOP-KADEMLIA-NODE) while this thread
-          ;; is blocked inside SOCKET-RECEIVE can, on some platforms,
-          ;; unblock with a bogus out-of-range LENGTH rather than
-          ;; signaling an error -- harmless, and only ever seen during
-          ;; shutdown, so it is silently skipped rather than warned
-          ;; about.
-          (when (and (%running-p node) (<= 0 length (length buffer)))
-            (%handle-datagram! node (subseq buffer 0 length) address port)))
-      (error (condition)
-        (when (%running-p node)
-          (warn "GITHACK-KADEMLIA: listener error on node ~A:~A: ~A" (get-host node) (get-port node) condition))))))
+  (let next ()
+    (when (%running-p node)
+      (handler-case
+          (multiple-value-bind (buffer length address port) (sb-bsd-sockets:socket-receive (%get-socket node) nil 65507)
+            ;; A socket closed (by STOP-KADEMLIA-NODE) while this thread
+            ;; is blocked inside SOCKET-RECEIVE can, on some platforms,
+            ;; unblock with a bogus out-of-range LENGTH rather than
+            ;; signaling an error -- harmless, and only ever seen during
+            ;; shutdown, so it is silently skipped rather than warned
+            ;; about.
+            (when (and (%running-p node) (<= 0 length (length buffer)))
+              (%handle-datagram! node (subseq buffer 0 length) address port)))
+        (error (condition)
+          (when (%running-p node)
+            (warn "GITHACK-KADEMLIA: listener error on node ~A:~A: ~A" (get-host node) (get-port node) condition))))
+      (next))))
 
 (defun %flush-loop (node)
   "NODE's periodic-persistence thread body: sleep GET-FLUSH-INTERVAL
@@ -186,13 +188,15 @@ is false. A failed checkpoint (e.g. a transient Git error) is logged
 via WARN and otherwise ignored -- it will simply be retried on the
 next interval, and STOP-KADEMLIA-NODE always attempts one final
 checkpoint regardless."
-  (loop while (%running-p node) do
-    (sleep (get-flush-interval node))
+  (let next ()
     (when (%running-p node)
-      (handler-case (persist-routing-table! (get-routing-table node) (get-repository-pathname node))
-        (error (condition)
-          (warn "GITHACK-KADEMLIA: periodic routing-table checkpoint failed for node ~A:~A: ~A"
-                (get-host node) (get-port node) condition))))))
+      (sleep (get-flush-interval node))
+      (when (%running-p node)
+        (handler-case (persist-routing-table! (get-routing-table node) (get-repository-pathname node))
+          (error (condition)
+            (warn "GITHACK-KADEMLIA: periodic routing-table checkpoint failed for node ~A:~A: ~A"
+                  (get-host node) (get-port node) condition))))
+      (next))))
 
 ;;; --- Lifecycle ------------------------------------------------------
 

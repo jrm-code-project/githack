@@ -279,10 +279,11 @@ independent transaction, exercising the entire real fetch stack
        (with-transaction (value) (repository :read-write)
          (declare (ignore value))
          (make-instance 'persistent-vector :repository repository-path :loaded? t
-                         :entries (loop for i from 0 below 5
-                                        collect (cons (princ-to-string i)
-                                                      (make-instance 'git-blob :repository repository-path
-                                                                               :payload (* i i) :loaded? t)))))
+                         :entries (mapcar (lambda (i)
+                                            (cons (princ-to-string i)
+                                                  (make-instance 'git-blob :repository repository-path
+                                                                           :payload (* i i) :loaded? t)))
+                                          (iota 5))))
        (with-transaction (value) (repository :read-write)
          (let ((vector (make-instance 'persistent-vector :repository repository-path :sha (sha value))))
            (is (= 5 (persistent-vector-length (%ensure-persistent-vector-loaded! vector))))
@@ -305,10 +306,11 @@ persistence."
        (with-transaction (value) (repository :read-write)
          (declare (ignore value))
          (let ((data (make-instance 'persistent-vector :repository repository-path :loaded? t
-                                     :entries (loop for i from 0 below 6
-                                                     collect (cons (princ-to-string i)
-                                                                   (make-instance 'git-blob :repository repository-path
-                                                                                            :payload i :loaded? t))))))
+                                     :entries (mapcar (lambda (i)
+                                                        (cons (princ-to-string i)
+                                                              (make-instance 'git-blob :repository repository-path
+                                                                                       :payload i :loaded? t)))
+                                                      (iota 6)))))
            (make-instance 'persistent-array :repository repository-path
                            :dimensions '(2 3) :data data)))
        (with-transaction (value) (repository :read-write)

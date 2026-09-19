@@ -119,9 +119,10 @@ SHA, and the index in OCTETS immediately following the entry."
 alist of (FILENAME . GIT-OBJECT) pairs, using INFLATE-GIT-PROXY to
 lazily construct the correct GIT-BLOB or GIT-TREE proxy (bound to
 REPOSITORY) for each entry's SHA."
-  (loop with length = (length octets)
-        with start = 0
-        while (< start length)
-        collect (multiple-value-bind (name sha next) (%read-tree-entry octets start)
-                  (setf start next)
-                  (cons name (inflate-git-proxy repository sha)))))
+  (let ((length (length octets)))
+    (let next ((start 0))
+      (if (>= start length)
+          '()
+          (multiple-value-bind (name sha next-start) (%read-tree-entry octets start)
+            (cons (cons name (inflate-git-proxy repository sha))
+                  (next next-start)))))))

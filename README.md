@@ -320,6 +320,16 @@ real (non-mocked) end-to-end coverage. `examples/bank.lisp` and
   `define-persistent-struct`, which intentionally keeps plain
   `defstruct`-style dashed accessor names (see `persistent-struct.lisp`
   and `examples/library.lisp`'s `book`/`library`).
+- **No `loop` macro**: `CL:LOOP` is never used. A simple collect/filter
+  over an existing sequence uses `mapcar`/`remove-if`/`mapcan`/`map-into`
+  (or `alexandria:iota` to generate an index range first); a genuinely
+  stateful traversal (pointer-chasing, retry-until-success, accumulate-
+  while-condition) uses a named `let` — always named `next` by
+  convention — which is ordinary `let` syntax via the `named-let`
+  library dependency, not a separate macro. `dolist`/`dotimes` are not
+  affected by this rule. Any package that introduces a `next`-named
+  `let` for the first time must `:use`/`:shadowing-import-from
+  "NAMED-LET" "LET"` (see `kademlia/package.lisp`).
 - **Package**: everything lives in the single `"GITHACK"` package
   (`package.lisp`), which shadows symbols from `SERIES` (`DEFUN`,
   `FUNCALL`, `LET*`, `MULTIPLE-VALUE-BIND`), `NAMED-LET` (`LET`,
