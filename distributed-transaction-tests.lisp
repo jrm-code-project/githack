@@ -86,8 +86,9 @@ expected to remain)."
         (dtx-write! repository-2 "main" "value-two"))
       (is (equal "value-one" (dtx-read repository-1 "main")))
       (is (equal "value-two" (dtx-read repository-2 "main")))
-      (is (null (remove-if (lambda (entry) (search "refs/githack/ledger/" (third entry)))
-                            (%git-for-each-ref repository-1 "refs/githack/"))))
+      (is (null (remove nil (%git-for-each-ref repository-1 "refs/githack/")
+                         :key (lambda (entry) (search "refs/githack/ledger/" (third entry)))
+                         :test-not #'eq)))
       (is (null (%git-for-each-ref repository-2 "refs/githack/"))))))
 
 (test three-participant-githack-transaction-commits-all-three-via-2pc
@@ -164,8 +165,9 @@ branch is ever advanced."
             (%finish-githack-transaction! txn)))
         ;; repository-1's own prepare ref (created before repository-2's
         ;; own Prepare step failed) must have been rolled back again.
-        (is (null (remove-if-not (lambda (entry) (search "prepare" (third entry)))
-                                  (%git-for-each-ref repository-1 "refs/githack/"))))
+        (is (null (remove nil (%git-for-each-ref repository-1 "refs/githack/")
+                           :key (lambda (entry) (search "prepare" (third entry)))
+                           :test #'eq)))
         (is (null (git-show-ref-sha repository-1 "main")))
         (is (null (git-show-ref-sha repository-2 "main")))))))
 

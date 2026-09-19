@@ -307,7 +307,9 @@ known contact has already been queried."
         (shortlist (routing-table-closest-contacts (get-routing-table node) target-id k (get-node-id node))))
     (dotimes (round max-rounds)
       (declare (ignorable round))
-      (let ((candidates (remove-if (lambda (c) (gethash (contact/node-id c) queried)) shortlist)))
+      (let ((candidates (remove nil shortlist
+                                 :key (lambda (c) (gethash (contact/node-id c) queried))
+                                 :test-not #'eq)))
         (setf candidates (subseq candidates 0 (min alpha (length candidates))))
         (when (null candidates) (return))
         (let ((progress? nil))

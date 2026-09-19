@@ -108,8 +108,9 @@ committed, and roll it back even if it had, in fact, already reached
 its Point of No Return."
   (let* ((ledger-tx-ids (tx-ids-with-ledger-refs repository))
          (still-stranded (tx-ids-with-stranded-prepare-refs participant-repositories))
-         (reconcilable (remove-if (lambda (tx-id) (member tx-id still-stranded :test #'string=))
-                                   ledger-tx-ids)))
+         (reconcilable (remove nil ledger-tx-ids
+                                :key (lambda (tx-id) (member tx-id still-stranded :test #'string=))
+                                :test-not #'eq)))
     (unless dry-run
       (dolist (tx-id reconcilable)
         (%git-raw-delete-ref! repository (ledger-ref-path tx-id))))

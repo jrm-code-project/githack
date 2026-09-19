@@ -232,7 +232,9 @@ all yet)."
                   (let* ((sp1 (position #\Space line))
                          (sp2 (position #\Space line :start (1+ sp1))))
                     (list (subseq line 0 sp1) (subseq line (1+ sp1) sp2) (subseq line (1+ sp2)))))
-                (remove-if (lambda (line) (zerop (length line))) (split-lines output)))
+                (remove nil (split-lines output)
+                        :key (lambda (line) (zerop (length line)))
+                        :test-not #'eq))
         '())))
 
 (defun %git-rev-parse (repository rev-expr)

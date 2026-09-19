@@ -360,6 +360,20 @@ real (non-mocked) end-to-end coverage. `examples/bank.lisp` and
   than only exercising `"GITHACK"` code that already uses them) must
   `:import-from "FOLD" "FOLD-LEFT" "FOLD-RIGHT"` (see
   `test-package.lisp`).
+- **No `remove-if`/`remove-if-not`**: neither is ever used; a selection
+  is instead expressed as `CL:REMOVE` with a dummy `item` of `nil`, a
+  `:key` of the (unary) selection predicate, and `:test`/`:test-not` of
+  `#'eq`, exploiting `REMOVE`'s "keep elements failing the
+  test"/"keep elements passing test-not" semantics: `(remove nil
+  seq :key predicate :test-not #'eq)` removes every element for which
+  `predicate` is true (replacing `remove-if`), while `(remove nil seq
+  :key predicate :test #'eq)` keeps only elements for which `predicate`
+  is true (replacing `remove-if-not`). See
+  `persistent-vector-index-entries` (`persistent-vector.lisp`),
+  `%git-for-each-ref` (`distributed-transaction.lisp`),
+  `count-githack-temp-files` (`git-io-tests.lisp`), and
+  `%reconcilable-tx-ids`-equivalent logic in `githack-gc.lisp` and
+  `kademlia/node.lisp`.
 - **Package**: everything lives in the single `"GITHACK"` package
   (`package.lisp`), which shadows symbols from `SERIES` (`DEFUN`,
   `FUNCALL`, `LET*`, `MULTIPLE-VALUE-BIND`), `NAMED-LET` (`LET`,

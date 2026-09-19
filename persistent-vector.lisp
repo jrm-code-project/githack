@@ -115,8 +115,9 @@ is :VECTOR."
   "Return VECTOR's own ENTRIES with any \".meta\"/\"README.md\"
 entries excluded: just the \"0\"..\"N-1\" index entries, in whatever
 order GET-ENTRIES currently holds them."
-  (remove-if (lambda (entry) (member (car entry) '(".meta" "README.md") :test #'string=))
-             (get-entries vector)))
+  (remove nil (get-entries vector)
+          :key (lambda (entry) (member (car entry) '(".meta" "README.md") :test #'string=))
+          :test-not #'eq))
 
 (defgeneric persist-vector-component-by-type (git-object)
   (:documentation

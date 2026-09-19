@@ -178,6 +178,15 @@ interactively: `(fiveam:run! 'git-tree-suite)` or `(fiveam:run! 'git-branch-inst
   `PERSISTENT-CONS` spine in original list order. A test package that
   calls `FOLD-LEFT`/`FOLD-RIGHT` directly must
   `:IMPORT-FROM "FOLD" "FOLD-LEFT" "FOLD-RIGHT"`.
+- **No `REMOVE-IF`/`REMOVE-IF-NOT`**: neither is ever used; use
+  `CL:REMOVE` with a dummy `ITEM` of `NIL`, `:KEY` set to the (unary)
+  selection predicate, and `:TEST`/`:TEST-NOT` of `#'EQ`: `(REMOVE NIL
+  SEQ :KEY PREDICATE :TEST-NOT #'EQ)` removes every element for which
+  `PREDICATE` is true (replaces `REMOVE-IF`); `(REMOVE NIL SEQ :KEY
+  PREDICATE :TEST #'EQ)` keeps only elements for which `PREDICATE` is
+  true (replaces `REMOVE-IF-NOT`). See
+  `PERSISTENT-VECTOR-INDEX-ENTRIES`, `%GIT-FOR-EACH-REF`, and
+  `COUNT-GITHACK-TEMP-FILES`.
 - **Format and Style**: keep the typical Emacs/Slime indentation, Lisp
   header comments, and declare precise dependency lists within
   `githack.asd` when adding new files.

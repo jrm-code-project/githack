@@ -27,13 +27,13 @@ convention (see UNIQUE-TEMPORARY-PATHNAME) -- so a test can confirm
 none are ever left behind, even when the subprocess using one
 fails."
   (length
-   (remove-if-not
-    (lambda (pathname)
-      (let ((name (pathname-name pathname)))
-        (and (stringp name)
-             (or (and (>= (length name) 15) (string= name "githack-object-" :end1 15))
-                 (and (>= (length name) 17) (string= name "githack-catfile-" :end1 16))))))
-    (directory (merge-pathnames "*.tmp" (uiop:default-temporary-directory))))))
+   (remove nil (directory (merge-pathnames "*.tmp" (uiop:default-temporary-directory)))
+           :key (lambda (pathname)
+                  (let ((name (pathname-name pathname)))
+                    (and (stringp name)
+                         (or (and (>= (length name) 15) (string= name "githack-object-" :end1 15))
+                             (and (>= (length name) 17) (string= name "githack-catfile-" :end1 16))))))
+           :test #'eq)))
 
 (test git-hash-object-reuses-a-single-persistent-session-across-calls
   "Two GIT-HASH-OBJECT calls of the same TYPE against the same
