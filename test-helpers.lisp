@@ -13,9 +13,7 @@
 mirroring GIT-SHOW-REF-SHA's real behavior for a nonexistent branch.
 The real definition (or lack of one) of GIT-SHOW-REF-SHA is restored
 afterward."
-  (let ((was-bound (gensym "WAS-BOUND"))
-        (original (gensym "ORIGINAL"))
-        (table (gensym "TABLE")))
+  (with-gensyms (was-bound original table)
     `(let* ((,table ,alist)
             (,was-bound (fboundp 'git-show-ref-sha))
             (,original (and ,was-bound (fdefinition 'git-show-ref-sha))))
@@ -36,8 +34,7 @@ SHA, exactly mimicking GIT-UPDATE-REF!'s real return value. Never
 simulates a compare-and-swap failure; see
 WITH-CAS-FAILING-GIT-UPDATE-REF for that. The real definition (or
 lack of one) of GIT-UPDATE-REF! is restored afterward."
-  (let ((was-bound (gensym "WAS-BOUND"))
-        (original (gensym "ORIGINAL")))
+  (with-gensyms (was-bound original)
     `(let* ((,was-bound (fboundp 'git-update-ref!))
             (,original (and ,was-bound (fdefinition 'git-update-ref!))))
        (setf (fdefinition 'git-update-ref!)
@@ -63,9 +60,7 @@ exactly mimicking GIT-UPDATE-REF!'s real return value. Suitable for
 testing CALL-WITH-GIT-TRANSACTION's :CONFLICT-RESOLUTION :RETRY
 mode's re-attempt loop. The real definition (or lack of one) of
 GIT-UPDATE-REF! is restored afterward."
-  (let ((was-bound (gensym "WAS-BOUND"))
-        (original (gensym "ORIGINAL"))
-        (remaining (gensym "REMAINING")))
+  (with-gensyms (was-bound original remaining)
     `(let* ((,was-bound (fboundp 'git-update-ref!))
             (,original (and ,was-bound (fdefinition 'git-update-ref!)))
             (,remaining ,fail-count))
@@ -109,8 +104,7 @@ the filesystem; instead it returns a fake SHA deterministically
 derived from its TYPE and OCTETS arguments by FAKE-SHA-FOR. The
 real definition (or lack of one) of GIT-HASH-OBJECT is restored
 afterward."
-  (let ((was-bound (gensym "WAS-BOUND"))
-        (original (gensym "ORIGINAL")))
+  (with-gensyms (was-bound original)
     `(let* ((,was-bound (fboundp 'git-hash-object))
             (,original (and ,was-bound (fdefinition 'git-hash-object))))
        (setf (fdefinition 'git-hash-object)
@@ -130,8 +124,7 @@ deterministically derived from TYPE and OCTETS by FAKE-SHA-FOR,
 exactly as WITH-FAKE-GIT-HASH-OBJECT's fake SHAs behave. The real
 definition (or lack of one) of GIT-HASH-OBJECT is restored
 afterward."
-  (let ((was-bound (gensym "WAS-BOUND"))
-        (original (gensym "ORIGINAL")))
+  (with-gensyms (was-bound original)
     `(let* ((,was-bound (fboundp 'git-hash-object))
             (,original (and ,was-bound (fdefinition 'git-hash-object))))
        (setf (fdefinition 'git-hash-object)
@@ -149,9 +142,7 @@ with a SHA in SHA->OCTETS-ALIST (an alist of (sha . octets) conses,
 compared with STRING=), signaling an error for any SHA not present.
 The real definition (or lack of one) of GIT-CAT-FILE is restored
 afterward."
-  (let ((was-bound (gensym "WAS-BOUND"))
-        (original (gensym "ORIGINAL"))
-        (alist (gensym "ALIST")))
+  (with-gensyms (was-bound original alist)
     `(let* ((,alist ,sha->octets-alist)
             (,was-bound (fboundp 'git-cat-file))
             (,original (and ,was-bound (fdefinition 'git-cat-file))))
@@ -174,11 +165,7 @@ under that SHA; GIT-CAT-FILE returns the OCTETS previously remembered
 for a SHA, signaling an error for any SHA never hashed in this way.
 The real definitions (or lack thereof) of both functions are
 restored afterward."
-  (let ((hash-was-bound (gensym "HASH-WAS-BOUND"))
-        (hash-original (gensym "HASH-ORIGINAL"))
-        (cat-was-bound (gensym "CAT-WAS-BOUND"))
-        (cat-original (gensym "CAT-ORIGINAL"))
-        (table (gensym "TABLE")))
+  (with-gensyms (hash-was-bound hash-original cat-was-bound cat-original table)
     `(let* ((,table (make-hash-table :test 'equal))
             (,hash-was-bound (fboundp 'git-hash-object))
             (,hash-original (and ,hash-was-bound (fdefinition 'git-hash-object)))
@@ -222,13 +209,8 @@ distinguish a blob SHA from a tree SHA) without having to separately
 enumerate every SHA's type via WITH-FAKE-GIT-TYPE by hand. The real
 definitions (or lack thereof) of all three functions are restored
 afterward."
-  (let ((hash-was-bound (gensym "HASH-WAS-BOUND"))
-        (hash-original (gensym "HASH-ORIGINAL"))
-        (cat-was-bound (gensym "CAT-WAS-BOUND"))
-        (cat-original (gensym "CAT-ORIGINAL"))
-        (type-was-bound (gensym "TYPE-WAS-BOUND"))
-        (type-original (gensym "TYPE-ORIGINAL"))
-        (table (gensym "TABLE")))
+  (with-gensyms (hash-was-bound hash-original cat-was-bound cat-original
+                 type-was-bound type-original table)
     `(let* ((,table (make-hash-table :test 'equal))
             (,hash-was-bound (fboundp 'git-hash-object))
             (,hash-original (and ,hash-was-bound (fdefinition 'git-hash-object)))
@@ -301,7 +283,7 @@ temporary directory afterward, regardless of how BODY exits
 (normally, via a non-local exit, or by signaling an error) -- a live
 session's pipes would otherwise silently outlive, and keep
 referencing, a directory this macro is about to delete."
-  (let ((path (gensym "PATH")))
+  (with-gensyms (path)
     `(let ((,path (e2e-unique-repository-pathname ,@(and name-prefix (list name-prefix)))))
        (ensure-directories-exist ,path)
        (uiop:run-program (list "git" "init" "--bare" (uiop:native-namestring ,path))
@@ -317,9 +299,7 @@ referencing, a directory this macro is about to delete."
 TYPE-ALIST (an alist of (sha . type) conses, compared with STRING=),
 signaling an error for any SHA not present. The real definition (or
 lack of one) of GIT-TYPE is restored afterward."
-  (let ((was-bound (gensym "WAS-BOUND"))
-        (original (gensym "ORIGINAL"))
-        (alist (gensym "ALIST")))
+  (with-gensyms (was-bound original alist)
     `(let* ((,alist ,type-alist)
             (,was-bound (fboundp 'git-type))
             (,original (and ,was-bound (fdefinition 'git-type))))

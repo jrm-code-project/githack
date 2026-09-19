@@ -299,7 +299,7 @@ lazily-allocated DIMENSIONS/DATA), where -- unlike WITH-OBJECT-LOAD-
 LOCK's own CL:CHANGE-CLASS concern -- every racing thread computes an
 equally valid, purely functional NEW value, so losing this race costs
 only a little redundant work, never correctness."
-  (let ((old-var (gensym "OLD")) (new-var (gensym "NEW")) (previous (gensym "PREVIOUS")))
-    `(let* ((,old-var ,old) (,new-var ,new)
-            (,previous (sb-ext:compare-and-swap ,place ,old-var ,new-var)))
-       (if (eql ,previous ,old-var) ,new-var ,previous))))
+  (once-only (old new)
+    (with-gensyms (previous)
+      `(let ((,previous (sb-ext:compare-and-swap ,place ,old ,new)))
+         (if (eql ,previous ,old) ,new ,previous)))))

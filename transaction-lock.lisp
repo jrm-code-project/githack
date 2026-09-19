@@ -83,9 +83,8 @@ transaction -- in this process or any other -- opened with
 :CONFLICT-RESOLUTION :LOCK against the same repository runs
 concurrently with BODY. The lock is released (and its lock file
 removed) when BODY exits, whether normally or abnormally."
-  (let ((path-var (gensym "GIT-DIR"))
-        (stream-var (gensym "LOCK-STREAM")))
-    `(let* ((,path-var ,git-dir-pathname)
-            (,stream-var (%acquire-repository-transaction-lock ,path-var)))
-       (unwind-protect (progn ,@body)
-         (%release-repository-transaction-lock ,stream-var ,path-var)))))
+  (once-only (git-dir-pathname)
+    (with-gensyms (stream-var)
+      `(let ((,stream-var (%acquire-repository-transaction-lock ,git-dir-pathname)))
+         (unwind-protect (progn ,@body)
+           (%release-repository-transaction-lock ,stream-var ,git-dir-pathname))))))

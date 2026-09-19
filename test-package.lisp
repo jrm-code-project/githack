@@ -3,7 +3,8 @@
 (defpackage "GITHACK-TEST"
   (:use "COMMON-LISP" "FIVEAM")
   (:import-from "ALEXANDRIA"
-                "IOTA")
+                "IOTA"
+                "WITH-GENSYMS")
   (:import-from "FOLD"
                 "FOLD-LEFT"
                 "FOLD-RIGHT")

@@ -374,6 +374,23 @@ real (non-mocked) end-to-end coverage. `examples/bank.lisp` and
   `count-githack-temp-files` (`git-io-tests.lisp`), and
   `%reconcilable-tx-ids`-equivalent logic in `githack-gc.lisp` and
   `kademlia/node.lisp`.
+- **Macro hygiene**: every macro that takes expression arguments (as
+  opposed to a bare binding-variable name, like `REPOSITORY-VAR`, or a
+  setf-able place, like a `CALLS-VAR` a fixture pushes onto) uses
+  `alexandria:with-gensyms` for any internal temporary it introduces
+  and `alexandria:once-only` for any argument it must guarantee is
+  evaluated exactly once — never a raw, hand-rolled `(gensym "...")`.
+  `alexandria:once-only` replaces the old manual `(let ((var-gensym
+  (gensym ...))) `(let ((,var-gensym ,var)) ...))` pattern in one
+  step (see `%cas-install-once!` in `git-object.lisp` and
+  `with-repository-transaction-lock` in `transaction-lock.lisp`); use
+  `alexandria:with-gensyms` alone when every argument expression is
+  only ever spliced into the expansion exactly once (see `query` in
+  `query-engine.lisp` and every `with-fake-git-*`/`with-recording-
+  git-*` fixture in `test-helpers.lisp`). A test package that calls
+  `with-gensyms`/`once-only` directly must `:import-from "ALEXANDRIA"
+  "WITH-GENSYMS"` (and `"ONCE-ONLY"` if needed) — see
+  `test-package.lisp` and `kademlia/kademlia-tests.lisp`.
 - **Package**: everything lives in the single `"GITHACK"` package
   (`package.lisp`), which shadows symbols from `SERIES` (`DEFUN`,
   `FUNCALL`, `LET*`, `MULTIPLE-VALUE-BIND`), `NAMED-LET` (`LET`,

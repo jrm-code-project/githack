@@ -187,6 +187,16 @@ interactively: `(fiveam:run! 'git-tree-suite)` or `(fiveam:run! 'git-branch-inst
   true (replaces `REMOVE-IF-NOT`). See
   `PERSISTENT-VECTOR-INDEX-ENTRIES`, `%GIT-FOR-EACH-REF`, and
   `COUNT-GITHACK-TEMP-FILES`.
+- **Macro Hygiene**: every macro taking expression arguments (not a
+  bare binding-variable name or a setf-able place) uses
+  `ALEXANDRIA:WITH-GENSYMS` for internal temporaries and
+  `ALEXANDRIA:ONCE-ONLY` for any argument requiring guaranteed
+  single evaluation -- never a raw `(GENSYM "...")`. See
+  `%CAS-INSTALL-ONCE!` (`git-object.lisp`) and
+  `WITH-REPOSITORY-TRANSACTION-LOCK` (`transaction-lock.lisp`) for
+  `ONCE-ONLY`; `QUERY` (`query-engine.lisp`) and the
+  `WITH-FAKE-GIT-*`/`WITH-RECORDING-GIT-*` fixtures
+  (`test-helpers.lisp`) for `WITH-GENSYMS` alone.
 - **Format and Style**: keep the typical Emacs/Slime indentation, Lisp
   header comments, and declare precise dependency lists within
   `githack.asd` when adding new files.

@@ -15,7 +15,8 @@
 (defpackage "GITHACK-KADEMLIA-TEST"
   (:use "COMMON-LISP" "FIVEAM")
   (:import-from "ALEXANDRIA"
-                "IOTA")
+                "IOTA"
+                "WITH-GENSYMS")
   (:import-from "GITHACK-KADEMLIA"
                 "+ID-BITS+" "+K+" "+ALPHA+"
                 "GENERATE-NODE-ID" "NODE-ID-DISTANCE" "NODE-ID-BUCKET-INDEX"
@@ -52,7 +53,7 @@
    (uiop:default-temporary-directory)))
 
 (defmacro with-temporary-bare-repository ((repository-var) &body body)
-  (let ((path (gensym "PATH")))
+  (with-gensyms (path)
     `(let ((,path (%unique-temp-repository-pathname "githack-kademlia-test-")))
        (ensure-directories-exist ,path)
        (uiop:run-program (list "git" "init" "--bare" (uiop:native-namestring ,path))

@@ -243,30 +243,29 @@ Example -- a join of two collections, correlated by ISBN:
            (where-form (if wheres `(and ,@wheres) t))
            (select-form (if (eq select :default)
                              (if (rest vars) `(list ,@vars) (first vars))
-                             select))
-           (results (gensym "RESULTS"))
-           (row (gensym "ROW")))
-      `(let ((,results '()))
-         ,(query-build-loop froms where-form
-                              `(push ,(if order-by-key
-                                          `(cons ,order-by-key ,select-form)
-                                          select-form)
-                                     ,results))
-         (setf ,results (nreverse ,results))
-         ,@(when order-by-key
-             `((setf ,results
-                     (stable-sort ,results
-                                  ,(if order-by-descending
-                                       `(lambda (a b) (funcall ,(or order-by-test '#'query-default-less-than) b a))
-                                       `(lambda (a b) (funcall ,(or order-by-test '#'query-default-less-than) a b)))
-                                  :key #'car))
-               (setf ,results (mapcar #'cdr ,results))))
-         ,@(when distinct?
-             `((setf ,results (remove-duplicates ,results :test #'equal :from-end t))))
-         ,@(when limit
-             `((let ((,row ,limit))
-                 (setf ,results (if (< ,row (length ,results)) (subseq ,results 0 ,row) ,results)))))
-         ,results))))
+                             select)))
+      (with-gensyms (results row)
+        `(let ((,results '()))
+           ,(query-build-loop froms where-form
+                               `(push ,(if order-by-key
+                                           `(cons ,order-by-key ,select-form)
+                                           select-form)
+                                      ,results))
+           (setf ,results (nreverse ,results))
+           ,@(when order-by-key
+               `((setf ,results
+                       (stable-sort ,results
+                                    ,(if order-by-descending
+                                         `(lambda (a b) (funcall ,(or order-by-test '#'query-default-less-than) b a))
+                                         `(lambda (a b) (funcall ,(or order-by-test '#'query-default-less-than) a b)))
+                                    :key #'car))
+                 (setf ,results (mapcar #'cdr ,results))))
+           ,@(when distinct?
+               `((setf ,results (remove-duplicates ,results :test #'equal :from-end t))))
+           ,@(when limit
+               `((let ((,row ,limit))
+                   (setf ,results (if (< ,row (length ,results)) (subseq ,results 0 ,row) ,results)))))
+           ,results)))))
 
 (defun query-count (predicate list)
   "Return the number of elements of LIST (typically a QUERY result,
