@@ -162,6 +162,22 @@ interactively: `(fiveam:run! 'git-tree-suite)` or `(fiveam:run! 'git-branch-inst
   `ATOM->ENVELOPE`, applied to values instead of classes. See
   `ENVELOPE-TAG->ATOM`, `%DISPATCH-KADEMLIA-MESSAGE`,
   `%APPLY-QUERY-CLAUSE!`, and `CALL-WITH-CONFLICT-RESOLUTION`.
+- **No `REDUCE`**: `CL:REDUCE` is never used; the `FOLD` library (a
+  `:USE`d dependency of `"GITHACK"`) is used instead. `FOLD-LEFT`
+  (lambda list `(FUNCTION INITIAL LIST &REST LISTS)`, where `INITIAL`
+  is a required positional argument, not an `:INITIAL-VALUE` keyword,
+  and there is no `:KEY` keyword -- apply `:KEY` via `MAPCAR` first)
+  handles the common left-to-right case, e.g. `QUERY-SUM`
+  (`query-engine.lisp`) and `PERSISTENT-ARRAY-VOLUME`
+  (`persistent-array.lisp`). `FOLD-RIGHT` (lambda list
+  `(FUNCTION LIST FINAL &REST LISTS)`) replaces what `REDUCE`'s
+  `:FROM-END T` previously expressed, needed when the combining
+  function must see each element ahead of the already-folded tail, as
+  in `COLLECT-PERSISTENT-LIST`/`COLLECT-PERSISTENT-ALIST`/
+  `COLLECT-PERSISTENT-PLIST` (`persistent-cons.lisp`), which build a
+  `PERSISTENT-CONS` spine in original list order. A test package that
+  calls `FOLD-LEFT`/`FOLD-RIGHT` directly must
+  `:IMPORT-FROM "FOLD" "FOLD-LEFT" "FOLD-RIGHT"`.
 - **Format and Style**: keep the typical Emacs/Slime indentation, Lisp
   header comments, and declare precise dependency lists within
   `githack.asd` when adding new files.

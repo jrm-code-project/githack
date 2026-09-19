@@ -282,13 +282,12 @@ uses for its own bucket chains."
 in-memory, already GET-LOADED? PERSISTENT-CONS spine chaining the
 given PAIRS (each already a PERSISTENT-CONS, e.g. as returned by
 MAKE-PERSISTENT-ALIST-PAIR) in order, terminated by NIL."
-  (reduce (lambda (pair tail)
-            (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
-                                             :persistent-car pair
-                                             :persistent-cdr tail))
-          pairs
-          :from-end t
-          :initial-value nil))
+  (fold-right (lambda (pair tail)
+                (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
+                                                 :persistent-car pair
+                                                 :persistent-cdr tail))
+              pairs
+              nil))
 
 (test scan-persistent-alist-of-nil-is-empty
   "SCAN-PERSISTENT-ALIST of NIL (the empty alist) produces two empty
@@ -352,14 +351,13 @@ in-memory, already GET-LOADED? PERSISTENT-CONS spine holding the
 successive elements of PLIST (an ordinary Lisp plist -- a flat list
 alternating indicator, value, indicator, value, ...) in order,
 wrapping each raw, non-GIT-OBJECT element in a fresh GIT-BLOB."
-  (reduce (lambda (value tail)
-            (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
-                                             :persistent-car (if (typep value 'git-object) value
-                                                                  (make-instance 'git-blob :repository :dummy-repo :payload value :loaded? t))
-                                             :persistent-cdr tail))
-          plist
-          :from-end t
-          :initial-value nil))
+  (fold-right (lambda (value tail)
+                (make-instance 'persistent-cons :repository :dummy-repo :loaded? t
+                                                 :persistent-car (if (typep value 'git-object) value
+                                                                      (make-instance 'git-blob :repository :dummy-repo :payload value :loaded? t))
+                                                 :persistent-cdr tail))
+              plist
+              nil))
 
 (test scan-persistent-plist-of-nil-is-empty
   "SCAN-PERSISTENT-PLIST of NIL (the empty plist) produces two empty

@@ -472,13 +472,12 @@ directly built via MAKE-INSTANCE with an explicit :PERSISTENT-CAR/
 -- but it still has no SHA, so callers must still call
 SERIALIZE-PERSISTENT-CONS on the returned head (or on any nested,
 newly built cons cell) to actually persist it to Git."
-  (reduce (lambda (value tail)
-            (make-instance 'persistent-cons :repository repository :loaded? t
-                                             :persistent-car (persistent-cons-encode repository value)
-                                             :persistent-cdr tail))
-          items
-          :from-end t
-          :initial-value nil))
+  (fold-right (lambda (value tail)
+                (make-instance 'persistent-cons :repository repository :loaded? t
+                                                 :persistent-car (persistent-cons-encode repository value)
+                                                 :persistent-cdr tail))
+              items
+              nil))
 
 (defun collect-persistent-alist (repository keys values)
   "Inverse of SCAN-PERSISTENT-ALIST, analogous to SERIES's own
@@ -503,15 +502,14 @@ of its two output series, and vice versa."
   (unless (= (length keys) (length values))
     (error "COLLECT-PERSISTENT-ALIST: KEYS and VALUES must be the same length, but got ~D key~:P and ~D value~:P."
            (length keys) (length values)))
-  (reduce (lambda (pair tail)
-            (make-instance 'persistent-cons :repository repository :loaded? t
-                                             :persistent-car (make-instance 'persistent-cons :repository repository :loaded? t
-                                                                             :persistent-car (persistent-cons-encode repository (car pair))
-                                                                             :persistent-cdr (persistent-cons-encode repository (cdr pair)))
-                                             :persistent-cdr tail))
-          (mapcar #'cons keys values)
-          :from-end t
-          :initial-value nil))
+  (fold-right (lambda (pair tail)
+                (make-instance 'persistent-cons :repository repository :loaded? t
+                                                 :persistent-car (make-instance 'persistent-cons :repository repository :loaded? t
+                                                                                 :persistent-car (persistent-cons-encode repository (car pair))
+                                                                                 :persistent-cdr (persistent-cons-encode repository (cdr pair)))
+                                                 :persistent-cdr tail))
+              (mapcar #'cons keys values)
+              nil))
 
 (defun collect-persistent-plist (repository indicators values)
   "Inverse of SCAN-PERSISTENT-PLIST, analogous to SERIES's own
@@ -536,12 +534,11 @@ versa."
   (unless (= (length indicators) (length values))
     (error "COLLECT-PERSISTENT-PLIST: INDICATORS and VALUES must be the same length, but got ~D indicator~:P and ~D value~:P."
            (length indicators) (length values)))
-  (reduce (lambda (pair tail)
-            (make-instance 'persistent-cons :repository repository :loaded? t
-                                             :persistent-car (persistent-cons-encode repository (car pair))
-                                             :persistent-cdr (make-instance 'persistent-cons :repository repository :loaded? t
-                                                                             :persistent-car (persistent-cons-encode repository (cdr pair))
-                                                                             :persistent-cdr tail)))
-          (mapcar #'cons indicators values)
-          :from-end t
-          :initial-value nil))
+  (fold-right (lambda (pair tail)
+                (make-instance 'persistent-cons :repository repository :loaded? t
+                                                 :persistent-car (persistent-cons-encode repository (car pair))
+                                                 :persistent-cdr (make-instance 'persistent-cons :repository repository :loaded? t
+                                                                                 :persistent-car (persistent-cons-encode repository (cdr pair))
+                                                                                 :persistent-cdr tail)))
+              (mapcar #'cons indicators values)
+              nil))

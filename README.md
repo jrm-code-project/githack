@@ -343,6 +343,23 @@ real (non-mocked) end-to-end coverage. `examples/bank.lisp` and
   dispatch whose body needs to mutate several caller-local
   accumulator variables (bundle them into a small mutable `defstruct`
   passed as an extra argument, as `%query-parse-state` does).
+- **No `reduce`**: `CL:REDUCE` is never used; the `fold` library (a
+  `:use`d dependency of `"GITHACK"`) is used instead. A left-to-right
+  fold (the common case) uses `fold-left` — whose lambda list is
+  `(function initial list &rest lists)`, i.e. `initial` is a required
+  positional argument, not an `:initial-value` keyword, and there is no
+  `:key` keyword either (apply a `:key` transform via `mapcar` first,
+  e.g. `query-sum` in `query-engine.lisp`). A right-to-left fold (what
+  `reduce`'s `:from-end t` previously expressed — needed when the
+  combining function must see each element before the already-folded
+  tail, e.g. building a `persistent-cons` spine in original list order
+  in `collect-persistent-list`/`collect-persistent-alist`/
+  `collect-persistent-plist`, `persistent-cons.lisp`) uses `fold-right`
+  instead, whose lambda list is `(function list final &rest lists)`.
+  Any test package that calls `fold-left`/`fold-right` directly (rather
+  than only exercising `"GITHACK"` code that already uses them) must
+  `:import-from "FOLD" "FOLD-LEFT" "FOLD-RIGHT"` (see
+  `test-package.lisp`).
 - **Package**: everything lives in the single `"GITHACK"` package
   (`package.lisp`), which shadows symbols from `SERIES` (`DEFUN`,
   `FUNCALL`, `LET*`, `MULTIPLE-VALUE-BIND`), `NAMED-LET` (`LET`,

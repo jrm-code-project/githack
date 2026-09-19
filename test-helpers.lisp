@@ -98,8 +98,8 @@ similar as the serialized envelopes of small, adjacent integers)
 collide for distinct OCTETS that merely share a long enough common
 prefix."
   (let ((hash (logand (sxhash type) #xFFFFFFFFFFFFFFFF)))
-    (setf hash (reduce (lambda (hash byte) (logand (* (logxor hash byte) 1099511628211) #xFFFFFFFFFFFFFFFF))
-                        octets :initial-value hash))
+    (setf hash (fold-left (lambda (hash byte) (logand (* (logxor hash byte) 1099511628211) #xFFFFFFFFFFFFFFFF))
+                          hash octets))
     (setf hash (logxor hash (length octets)))
     (format nil "~(~40,'0X~)" (mod hash (expt 16 40)))))
 

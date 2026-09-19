@@ -279,7 +279,7 @@ final aggregation step reads declaratively alongside QUERY itself."
   "Return the sum of (FUNCALL KEY-FUNCTION element) over every
 element of LIST (typically a QUERY result). Returns 0 if LIST is
 empty."
-  (reduce #'+ list :key key-function :initial-value 0))
+  (fold-left #'+ 0 (mapcar key-function list)))
 
 (defun query-max (key-function list)
   "Return two values: the element of LIST (typically a QUERY result)

@@ -4,6 +4,9 @@
   (:use "COMMON-LISP" "FIVEAM")
   (:import-from "ALEXANDRIA"
                 "IOTA")
+  (:import-from "FOLD"
+                "FOLD-LEFT"
+                "FOLD-RIGHT")
   (:import-from "GITHACK"
                 "GIT-OBJECT"
                 "SHA"

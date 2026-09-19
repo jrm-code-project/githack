@@ -113,7 +113,7 @@ integers."
     (error 'invalid-argument-error
            :format-control "Invalid persistent array dimensions: ~S."
            :format-arguments (list dimensions)))
-  (reduce #'* dimensions :initial-value 1))
+  (fold-left #'* 1 dimensions))
 
 (defun persistent-array-row-major-index (dimensions subscripts)
   "Return the single, flattened, zero-based row-major index -- into
