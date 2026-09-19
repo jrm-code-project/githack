@@ -455,6 +455,38 @@ at all."
     (and meta-entry
          (getf (deserialize-plist (git-cat-file repository (sha (cdr meta-entry)))) :tag))))
 
+(defgeneric %persistent-class-for-tag (tag)
+  (:documentation
+   "Return the concrete PERSISTENT-* class-name symbol REDISPATCH-
+PERSISTENT-TREE must MAKE-INSTANCE for a compound TAG (:CONS,
+:VECTOR, :ARRAY, or :WTTREE), dispatching via an EQL specializer on
+TAG."))
+
+(defmethod %persistent-class-for-tag ((tag (eql :cons))) 'persistent-cons)
+(defmethod %persistent-class-for-tag ((tag (eql :vector))) 'persistent-vector)
+(defmethod %persistent-class-for-tag ((tag (eql :array))) 'persistent-array)
+(defmethod %persistent-class-for-tag ((tag (eql :wttree))) 'persistent-wttree)
+
+(defgeneric %deserialize-persistent-compound! (tag hollow tree-octets meta-octets)
+  (:documentation
+   "Destructively finish loading HOLLOW -- a freshly MAKE-INSTANCE'd,
+not-yet-loaded proxy of the class %PERSISTENT-CLASS-FOR-TAG TAG names
+-- from TREE-OCTETS/META-OCTETS, dispatching via an EQL specializer
+on TAG to the matching DESERIALIZE-PERSISTENT-*! function. Returns
+HOLLOW."))
+
+(defmethod %deserialize-persistent-compound! ((tag (eql :cons)) hollow tree-octets meta-octets)
+  (deserialize-persistent-cons! hollow tree-octets meta-octets))
+
+(defmethod %deserialize-persistent-compound! ((tag (eql :vector)) hollow tree-octets meta-octets)
+  (deserialize-persistent-vector! hollow tree-octets meta-octets))
+
+(defmethod %deserialize-persistent-compound! ((tag (eql :array)) hollow tree-octets meta-octets)
+  (deserialize-persistent-array! hollow tree-octets meta-octets))
+
+(defmethod %deserialize-persistent-compound! ((tag (eql :wttree)) hollow tree-octets meta-octets)
+  (deserialize-persistent-wttree-node! hollow tree-octets meta-octets))
+
 (defun redispatch-persistent-tree (tree)
   "Return the correctly, specifically typed proxy for TREE (a plain,
 not-yet-more-specifically-typed GIT-TREE, with its own ENTRIES
@@ -479,17 +511,9 @@ BUCKETS slot) whose stored value is one of these compound types."
        (let* ((tree-octets (git-cat-file repository sha))
               (meta-entry (assoc ".meta" (get-entries tree) :test #'string=))
               (meta-octets (git-cat-file repository (sha (cdr meta-entry))))
-              (hollow (make-instance (ecase tag
-                                        (:cons 'persistent-cons)
-                                        (:vector 'persistent-vector)
-                                        (:array 'persistent-array)
-                                        (:wttree 'persistent-wttree))
+              (hollow (make-instance (%persistent-class-for-tag tag)
                                       :repository repository :sha sha)))
-         (ecase tag
-           (:cons (deserialize-persistent-cons! hollow tree-octets meta-octets))
-           (:vector (deserialize-persistent-vector! hollow tree-octets meta-octets))
-           (:array (deserialize-persistent-array! hollow tree-octets meta-octets))
-           (:wttree (deserialize-persistent-wttree-node! hollow tree-octets meta-octets)))))
+         (%deserialize-persistent-compound! tag hollow tree-octets meta-octets)))
       (t tree))))
 
 (defun resolve-persistent-slot-value (value)

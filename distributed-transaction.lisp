@@ -154,6 +154,21 @@ to distinguish \"already gone\" from \"just deleted\"."
     (declare (ignore output error-output))
     (zerop exit-code)))
 
+(defgeneric %format-git-update-ref-stdin-command (kind stream command)
+  (:documentation
+   "Write COMMAND's own `git update-ref --stdin` line to STREAM,
+dispatching on KIND (COMMAND's own head, :UPDATE or :DELETE) via an
+EQL specializer -- the per-command-kind step of %GIT-UPDATE-REF-
+STDIN!'s own batch-input assembly."))
+
+(defmethod %format-git-update-ref-stdin-command ((kind (eql :update)) stream command)
+  (destructuring-bind (ref new old) (rest command)
+    (format stream "update ~A ~A ~A~%" ref new (or old ""))))
+
+(defmethod %format-git-update-ref-stdin-command ((kind (eql :delete)) stream command)
+  (destructuring-bind (ref) (rest command)
+    (format stream "delete ~A~%" ref)))
+
 (defun %git-update-ref-stdin! (repository commands)
   "Execute COMMANDS -- a list of (:UPDATE REF NEW-SHA OLD-SHA) or
 (:DELETE REF) entries, OLD-SHA being NIL to require REF not already
@@ -166,13 +181,7 @@ Returns T on success; signals CONCURRENT-MODIFICATION-ERROR
 otherwise."
   (let ((input (with-output-to-string (s)
                  (dolist (command commands)
-                   (ecase (first command)
-                     (:update
-                      (destructuring-bind (ref new old) (rest command)
-                        (format s "update ~A ~A ~A~%" ref new (or old ""))))
-                     (:delete
-                      (destructuring-bind (ref) (rest command)
-                        (format s "delete ~A~%" ref))))))))
+                   (%format-git-update-ref-stdin-command (first command) s command)))))
     (multiple-value-bind (output error-output exit-code) (%git-run repository (list "update-ref" "--stdin") :input input)
       (declare (ignore output))
       (unless (zerop exit-code)

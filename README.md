@@ -330,6 +330,19 @@ real (non-mocked) end-to-end coverage. `examples/bank.lisp` and
   affected by this rule. Any package that introduces a `next`-named
   `let` for the first time must `:use`/`:shadowing-import-from
   "NAMED-LET" "LET"` (see `kademlia/package.lisp`).
+- **No `ecase`**: `CL:ECASE` is never used (plain, non-exhaustive
+  `CL:CASE` is unaffected). Every `ecase` dispatch is instead a
+  `defgeneric`/`defmethod` set specialized on `(eql <value>)` for each
+  case key, exactly mirroring how type-based dispatch already uses one
+  `defmethod` per concrete class (e.g. `atom->envelope` in
+  `git-blob.lisp`) in place of an `etypecase`. See
+  `envelope-tag->atom` (`git-blob.lisp`), `%dispatch-kademlia-message`
+  (`kademlia/node.lisp`), `%apply-query-clause!` (`query-engine.lisp`),
+  and `call-with-conflict-resolution`/`%signal-rebase-fallback-error`
+  (`git-transaction.lisp`) for the pattern, including how to handle a
+  dispatch whose body needs to mutate several caller-local
+  accumulator variables (bundle them into a small mutable `defstruct`
+  passed as an extra argument, as `%query-parse-state` does).
 - **Package**: everything lives in the single `"GITHACK"` package
   (`package.lisp`), which shadows symbols from `SERIES` (`DEFUN`,
   `FUNCALL`, `LET*`, `MULTIPLE-VALUE-BIND`), `NAMED-LET` (`LET`,

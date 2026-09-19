@@ -427,6 +427,29 @@ Records the new commit in TRANSACTION's RESULT slot and returns it."
     (setf (get-current-root transaction) root)
     commit))
 
+(defgeneric %signal-rebase-fallback-error (rebase-fallback &key repository branch-name base-sha current-head-sha candidate-sha conflict-detail)
+  (:documentation
+   "Signal the error TRANSACTION's own REBASE-FALLBACK value calls
+for, once COMMIT-GIT-TRANSACTION-WITH-REBASE!'s own rebase-retry loop
+finds a genuine, unresolvable GIT-MERGE-TREE conflict, dispatching on
+REBASE-FALLBACK (:RETRY or :ERROR) via an EQL specializer."))
+
+(defmethod %signal-rebase-fallback-error ((rebase-fallback (eql :retry)) &key repository branch-name base-sha current-head-sha candidate-sha conflict-detail)
+  (declare (ignore candidate-sha))
+  (error 'concurrent-modification-error
+         :repository repository :name branch-name
+         :expected-sha base-sha :new-sha current-head-sha
+         :detail (format nil "Unresolvable rebase merge conflict; falling back to :RETRY.~@[~%~A~]"
+                          conflict-detail)))
+
+(defmethod %signal-rebase-fallback-error ((rebase-fallback (eql :error)) &key repository branch-name base-sha current-head-sha candidate-sha conflict-detail)
+  (error 'merge-conflict-error
+         :repository repository :name branch-name
+         :base-sha base-sha
+         :candidate-sha candidate-sha
+         :current-head-sha current-head-sha
+         :detail conflict-detail))
+
 (defun commit-git-transaction-with-rebase! (transaction root)
   "Commit TRANSACTION (an outermost, :READ-WRITE GIT-TRANSACTION
 whose CONFLICT-RESOLUTION is :REBASE) with root GIT-OBJECT ROOT.
@@ -521,18 +544,11 @@ COMMIT-GIT-TRANSACTION-NOW! does. Returns that commit."
                       (if raced-again
                           (next)
                           (finish rebased-commit)))
-                    (ecase (get-rebase-fallback transaction)
-                      (:retry (error 'concurrent-modification-error
-                                     :repository repository :name branch-name
-                                     :expected-sha base-sha :new-sha current-head-sha
-                                     :detail (format nil "Unresolvable rebase merge conflict; falling back to :RETRY.~@[~%~A~]"
-                                                      conflict-detail)))
-                      (:error (error 'merge-conflict-error
-                                     :repository repository :name branch-name
-                                     :base-sha base-sha
-                                     :candidate-sha (sha candidate-commit)
-                                     :current-head-sha current-head-sha
-                                     :detail conflict-detail)))))))))))) 
+                    (%signal-rebase-fallback-error (get-rebase-fallback transaction)
+                                                   :repository repository :branch-name branch-name
+                                                   :base-sha base-sha :current-head-sha current-head-sha
+                                                   :candidate-sha (sha candidate-commit)
+                                                   :conflict-detail conflict-detail))))))))))
 
 (defun commit-git-transaction (transaction root)
   "Explicitly and immediately commit TRANSACTION with root GIT-OBJECT
@@ -718,6 +734,41 @@ GIT-TRANSACTION."
       (setf (get-current-root parent) (get-current-root transaction)))
     transaction))
 
+(defun %retry-until-success (attempt)
+  "Call ATTEMPT (a zero-argument thunk) repeatedly, retrying it
+every time it signals CONCURRENT-MODIFICATION-ERROR, until it
+returns normally; return its return value. Shared by the :RETRY and
+:REBASE CALL-WITH-CONFLICT-RESOLUTION methods, whose outer retry
+loop is identical (any REBASE-FALLBACK-specific behavior happens
+deeper, inside ATTEMPT itself)."
+  (let next ()
+    (handler-case (funcall attempt)
+      (concurrent-modification-error () (next)))))
+
+(defgeneric call-with-conflict-resolution (conflict-resolution repository-pathname attempt)
+  (:documentation
+   "Invoke ATTEMPT (a zero-argument thunk that runs one
+CALL-WITH-GIT-TRANSACTION-ATTEMPT) applying the retry/locking
+strategy CONFLICT-RESOLUTION names (:ERROR, :RETRY, :LOCK, or
+:REBASE), dispatching via an EQL specializer. REPOSITORY-PATHNAME is
+only consulted by the :LOCK method."))
+
+(defmethod call-with-conflict-resolution ((conflict-resolution (eql :error)) repository-pathname attempt)
+  (declare (ignore repository-pathname))
+  (funcall attempt))
+
+(defmethod call-with-conflict-resolution ((conflict-resolution (eql :retry)) repository-pathname attempt)
+  (declare (ignore repository-pathname))
+  (%retry-until-success attempt))
+
+(defmethod call-with-conflict-resolution ((conflict-resolution (eql :lock)) repository-pathname attempt)
+  (with-repository-transaction-lock (repository-pathname)
+    (funcall attempt)))
+
+(defmethod call-with-conflict-resolution ((conflict-resolution (eql :rebase)) repository-pathname attempt)
+  (declare (ignore repository-pathname))
+  (%retry-until-success attempt))
+
 (defun call-with-git-transaction (repository mode &key branch author committer message parents receiver
                                                         (conflict-resolution :error) (rebase-fallback :error))
   "Open a GIT-TRANSACTION against REPOSITORY (a GIT-REPOSITORY),
@@ -868,16 +919,7 @@ Returns TRANSACTION."
              (call-with-git-transaction-attempt
               repository mode branch-name final-author final-committer final-message
               parents receiver conflict-resolution rebase-fallback)))
-      (ecase conflict-resolution
-        (:error (attempt))
-        (:retry (let next ()
-                  (handler-case (attempt)
-                    (concurrent-modification-error () (next)))))
-        (:lock (with-repository-transaction-lock ((get-pathname repository))
-                 (attempt)))
-        (:rebase (let next ()
-                   (handler-case (attempt)
-                     (concurrent-modification-error () (next)))))))))
+      (call-with-conflict-resolution conflict-resolution (get-pathname repository) #'attempt))))
 
 (defmacro with-git-transaction ((transaction-var head-commit-var) (repository mode &key branch author committer message parents (conflict-resolution :error) (rebase-fallback :error)) &body body)
   "Macro wrapper around CALL-WITH-GIT-TRANSACTION: expands into a

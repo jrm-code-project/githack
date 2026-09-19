@@ -103,6 +103,72 @@ application data."
     ((and (symbolp a) (symbolp b)) (string< (symbol-name a) (symbol-name b)))
     (t (< (sxhash a) (sxhash b)))))
 
+(defstruct (%query-parse-state (:constructor %make-query-parse-state ())
+                                (:conc-name %query-parse-state/))
+  "Mutable accumulator QUERY-PARSE-CLAUSES builds up across its
+single left-to-right walk over a QUERY macro's own clause list, one
+%APPLY-QUERY-CLAUSE! call per clause; see QUERY-PARSE-CLAUSES for
+what each slot ultimately means."
+  (froms '())
+  (wheres '())
+  (order-by-key nil)
+  (order-by-descending nil)
+  (order-by-test nil)
+  (order-by-seen? nil)
+  (distinct? nil)
+  (limit nil)
+  (limit-seen? nil)
+  (select :default)
+  (select-seen? nil))
+
+(defgeneric %apply-query-clause! (head clause state)
+  (:documentation
+   "Destructively update STATE (a %QUERY-PARSE-STATE) to reflect
+CLAUSE, one QUERY macro clause whose own head keyword is HEAD, as
+part of QUERY-PARSE-CLAUSES's single left-to-right walk over the
+macro's own clause list. Dispatches on HEAD via an EQL specializer."))
+
+(defmethod %apply-query-clause! ((head (eql :from)) clause state)
+  (destructuring-bind (var source-form) (cdr clause)
+    (push (list var source-form) (%query-parse-state/froms state))))
+
+(defmethod %apply-query-clause! ((head (eql :where)) clause state)
+  (destructuring-bind (predicate-form) (cdr clause)
+    (push predicate-form (%query-parse-state/wheres state))))
+
+(defmethod %apply-query-clause! ((head (eql :order-by)) clause state)
+  (when (%query-parse-state/order-by-seen? state)
+    (error "QUERY accepts at most one :ORDER-BY clause."))
+  (setf (%query-parse-state/order-by-seen? state) t)
+  (destructuring-bind (key-form &key descending test) (cdr clause)
+    (setf (%query-parse-state/order-by-key state) key-form)
+    (setf (%query-parse-state/order-by-descending state) descending)
+    (setf (%query-parse-state/order-by-test state) test)))
+
+(defmethod %apply-query-clause! ((head (eql :distinct)) clause state)
+  (declare (ignore clause))
+  (when (%query-parse-state/distinct? state)
+    (error "QUERY accepts at most one :DISTINCT clause."))
+  (setf (%query-parse-state/distinct? state) t))
+
+(defmethod %apply-query-clause! ((head (eql :limit)) clause state)
+  (when (%query-parse-state/limit-seen? state)
+    (error "QUERY accepts at most one :LIMIT clause."))
+  (setf (%query-parse-state/limit-seen? state) t)
+  (destructuring-bind (limit-form) (cdr clause)
+    (setf (%query-parse-state/limit state) limit-form)))
+
+(defmethod %apply-query-clause! ((head (eql :select)) clause state)
+  (when (%query-parse-state/select-seen? state)
+    (error "QUERY accepts at most one :SELECT clause."))
+  (setf (%query-parse-state/select-seen? state) t)
+  (destructuring-bind (select-form) (cdr clause)
+    (setf (%query-parse-state/select state) select-form)))
+
+(defmethod %apply-query-clause! ((head t) clause state)
+  (declare (ignore state))
+  (error "Malformed QUERY clause ~S: expected a list headed by a keyword (:FROM, :WHERE, :ORDER-BY, :DISTINCT, :LIMIT, or :SELECT)." clause))
+
 (defun query-parse-clauses (clauses)
   "Return seven values parsed out of CLAUSES (a QUERY macro's own
 &REST clause list, each clause a list headed by one of :FROM,
@@ -118,50 +184,21 @@ given, meaning QUERY should compute its own default -- see QUERY).
 Signals an ordinary Lisp error if CLAUSES holds no :FROM clause at
 all, or more than one each of :ORDER-BY, :DISTINCT, :LIMIT, or
 :SELECT."
-  (let ((froms '())
-        (wheres '())
-        (order-by-key nil)
-        (order-by-descending nil)
-        (order-by-test nil)
-        (order-by-seen? nil)
-        (distinct? nil)
-        (limit nil)
-        (limit-seen? nil)
-        (select :default)
-        (select-seen? nil))
+  (let ((state (%make-query-parse-state)))
     (dolist (clause clauses)
       (unless (and (consp clause) (keywordp (car clause)))
         (error "Malformed QUERY clause ~S: expected a list headed by a keyword (:FROM, :WHERE, :ORDER-BY, :DISTINCT, :LIMIT, or :SELECT)." clause))
-      (ecase (car clause)
-        (:from
-         (destructuring-bind (var source-form) (cdr clause)
-           (push (list var source-form) froms)))
-        (:where
-         (destructuring-bind (predicate-form) (cdr clause)
-           (push predicate-form wheres)))
-        (:order-by
-         (when order-by-seen? (error "QUERY accepts at most one :ORDER-BY clause."))
-         (setf order-by-seen? t)
-         (destructuring-bind (key-form &key descending test) (cdr clause)
-           (setf order-by-key key-form)
-           (setf order-by-descending descending)
-           (setf order-by-test test)))
-        (:distinct
-         (when distinct? (error "QUERY accepts at most one :DISTINCT clause."))
-         (setf distinct? t))
-        (:limit
-         (when limit-seen? (error "QUERY accepts at most one :LIMIT clause."))
-         (setf limit-seen? t)
-         (destructuring-bind (limit-form) (cdr clause)
-           (setf limit limit-form)))
-        (:select
-         (when select-seen? (error "QUERY accepts at most one :SELECT clause."))
-         (setf select-seen? t)
-         (destructuring-bind (select-form) (cdr clause)
-           (setf select select-form)))))
-    (setf froms (nreverse froms))
-    (unless froms (error "QUERY requires at least one :FROM clause."))
-    (values froms (nreverse wheres) order-by-key order-by-descending order-by-test distinct? limit select)))
+      (%apply-query-clause! (car clause) clause state))
+    (let ((froms (nreverse (%query-parse-state/froms state))))
+      (unless froms (error "QUERY requires at least one :FROM clause."))
+      (values froms
+              (nreverse (%query-parse-state/wheres state))
+              (%query-parse-state/order-by-key state)
+              (%query-parse-state/order-by-descending state)
+              (%query-parse-state/order-by-test state)
+              (%query-parse-state/distinct? state)
+              (%query-parse-state/limit state)
+              (%query-parse-state/select state)))))
 
 (defun query-build-loop (froms where-form body-form)
   "Return the form QUERY's expansion nests its own BODY-FORM inside:

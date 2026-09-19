@@ -116,6 +116,35 @@ unregisters RPC-ID before returning, whichever way."
 
 ;;; --- Inbound datagram dispatch ------------------------------------
 
+(defgeneric %dispatch-kademlia-message (type node message rpc-id source-address source-port)
+  (:documentation
+   "Handle one already-decoded, already-routing-table-refreshed
+inbound Kademlia MESSAGE, dispatching on its own :TYPE (TYPE, one of
+:PING, :PONG, :FIND-NODE, or :FIND-NODE-REPLY) via an EQL specializer
+-- the per-type step of %HANDLE-DATAGRAM!'s own dispatch."))
+
+(defmethod %dispatch-kademlia-message ((type (eql :ping)) node message rpc-id source-address source-port)
+  (declare (ignore message))
+  (%send-string! node (encode-pong rpc-id (%self-contact node)) source-address source-port))
+
+(defmethod %dispatch-kademlia-message ((type (eql :pong)) node message rpc-id source-address source-port)
+  (declare (ignore message source-address source-port))
+  (%complete-pending! node rpc-id (list :type :pong)))
+
+(defmethod %dispatch-kademlia-message ((type (eql :find-node)) node message rpc-id source-address source-port)
+  (let* ((target-id (hex-string->node-id (getf message :target)))
+         (closest (routing-table-closest-contacts (get-routing-table node) target-id +k+ (get-node-id node))))
+    (%send-string! node (encode-find-node-reply rpc-id (%self-contact node) closest) source-address source-port)))
+
+(defmethod %dispatch-kademlia-message ((type (eql :find-node-reply)) node message rpc-id source-address source-port)
+  (declare (ignore source-address source-port))
+  (%complete-pending! node rpc-id (list :type :find-node-reply
+                                         :contacts (mapcar #'%triple->contact (getf message :contacts)))))
+
+(defmethod %dispatch-kademlia-message ((type t) node message rpc-id source-address source-port)
+  (declare (ignore node message rpc-id source-address source-port))
+  (error "Unknown Kademlia message type ~S." type))
+
 (defun %handle-datagram! (node payload source-address source-port)
   "Decode PAYLOAD (one inbound UDP datagram's contents) and dispatch
 it: every message, of any type, first causes its claimed sender to be
@@ -143,18 +172,7 @@ peer must never take a node's listener thread down."
            (get-routing-table node)
            (make-contact sender-id observed-host source-port)
            :ping-fn (lambda (contact) (kademlia-ping node (contact/host contact) (contact/port contact)))))
-        (ecase type
-          (:ping
-           (%send-string! node (encode-pong rpc-id (%self-contact node)) source-address source-port))
-          (:pong
-           (%complete-pending! node rpc-id (list :type :pong)))
-          (:find-node
-           (let* ((target-id (hex-string->node-id (getf message :target)))
-                  (closest (routing-table-closest-contacts (get-routing-table node) target-id +k+ (get-node-id node))))
-             (%send-string! node (encode-find-node-reply rpc-id (%self-contact node) closest) source-address source-port)))
-          (:find-node-reply
-           (%complete-pending! node rpc-id (list :type :find-node-reply
-                                                  :contacts (mapcar #'%triple->contact (getf message :contacts)))))))
+        (%dispatch-kademlia-message type node message rpc-id source-address source-port))
     (error (condition)
       (declare (ignorable condition))
       (values))))

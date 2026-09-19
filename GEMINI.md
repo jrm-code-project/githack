@@ -155,6 +155,13 @@ interactively: `(fiveam:run! 'git-tree-suite)` or `(fiveam:run! 'git-branch-inst
   (always named `NEXT`) via the `NAMED-LET` library. `DOLIST`/`DOTIMES`
   are unaffected. A package using `NEXT`-named `LET` for the first time
   must `:SHADOWING-IMPORT-FROM "NAMED-LET" "LET"`.
+- **No `ECASE`**: `CL:ECASE` is never used (plain `CL:CASE` is
+  unaffected). Convert every `ECASE` into a `DEFGENERIC`/`DEFMETHOD`
+  set specialized on `(EQL <value>)` per case key -- the same
+  polymorphism-over-`ETYPECASE` pattern already used for
+  `ATOM->ENVELOPE`, applied to values instead of classes. See
+  `ENVELOPE-TAG->ATOM`, `%DISPATCH-KADEMLIA-MESSAGE`,
+  `%APPLY-QUERY-CLAUSE!`, and `CALL-WITH-CONFLICT-RESOLUTION`.
 - **Format and Style**: keep the typical Emacs/Slime indentation, Lisp
   header comments, and declare precise dependency lists within
   `githack.asd` when adding new files.

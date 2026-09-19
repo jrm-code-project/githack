@@ -103,6 +103,65 @@ methods respectively."))
          :format-control "SERIALIZE-ATOM does not support objects of type ~S."
          :format-arguments (list (type-of atom))))
 
+(defgeneric envelope-tag->atom (tag data)
+  (:documentation
+   "Reconstruct the atom ENVELOPE->ATOM's own (TAG . DATA) envelope
+describes, dispatching on TAG via an EQL specializer -- the inverse,
+per-tag step of ATOM->ENVELOPE's own per-class methods."))
+
+(defmethod envelope-tag->atom ((tag (eql :integer)) data)
+  (first data))
+
+(defmethod envelope-tag->atom ((tag (eql :keyword)) data)
+  (intern (first data) (find-package "KEYWORD")))
+
+(defmethod envelope-tag->atom ((tag (eql :symbol)) data)
+  (destructuring-bind (package-name symbol-name) data
+    (let ((package (find-package package-name)))
+      (unless package
+        (error 'malformed-git-object-error
+               :format-control "Cannot deserialize symbol: no package named ~S."
+               :format-arguments (list package-name)))
+      (intern symbol-name package))))
+
+(defmethod envelope-tag->atom ((tag (eql :single-float)) data)
+  (let ((*read-eval* nil))
+    (read-from-string (first data))))
+
+(defmethod envelope-tag->atom ((tag (eql :double-float)) data)
+  (let ((*read-eval* nil))
+    (read-from-string (first data))))
+
+(defmethod envelope-tag->atom ((tag (eql :character)) data)
+  (first data))
+
+(defmethod envelope-tag->atom ((tag (eql :named-character)) data)
+  (or (name-char (first data))
+      (error 'malformed-git-object-error
+             :format-control "Unknown character name ~S."
+             :format-arguments (list (first data)))))
+
+(defmethod envelope-tag->atom ((tag (eql :character-code)) data)
+  (code-char (first data)))
+
+(defmethod envelope-tag->atom ((tag (eql :string)) data)
+  (first data))
+
+(defmethod envelope-tag->atom ((tag (eql :bit-vector)) data)
+  (let ((bits (first data)))
+    (make-array (length bits) :element-type 'bit :initial-contents bits)))
+
+(defmethod envelope-tag->atom ((tag (eql :byte-vector)) data)
+  (let ((bytes (first data)))
+    (make-array (length bytes) :element-type '(unsigned-byte 8)
+                                :initial-contents bytes)))
+
+(defmethod envelope-tag->atom ((tag t) data)
+  (declare (ignore data))
+  (error 'malformed-git-object-error
+         :format-control "Malformed atom envelope: unknown tag ~S."
+         :format-arguments (list tag)))
+
 (defun envelope->atom (envelope)
   "Inverse of ATOM->ENVELOPE: reconstructs the exact Lisp atom
 described by ENVELOPE."
@@ -111,35 +170,7 @@ described by ENVELOPE."
            :format-control "Malformed atom envelope: ~S."
            :format-arguments (list envelope)))
   (destructuring-bind (tag &rest data) envelope
-    (ecase tag
-      (:integer (first data))
-      (:keyword (intern (first data) (find-package "KEYWORD")))
-      (:symbol
-       (destructuring-bind (package-name symbol-name) data
-         (let ((package (find-package package-name)))
-           (unless package
-             (error 'malformed-git-object-error
-                    :format-control "Cannot deserialize symbol: no package named ~S."
-                    :format-arguments (list package-name)))
-           (intern symbol-name package))))
-      ((:single-float :double-float)
-       (let ((*read-eval* nil))
-         (read-from-string (first data))))
-      (:character (first data))
-      (:named-character
-       (or (name-char (first data))
-           (error 'malformed-git-object-error
-                  :format-control "Unknown character name ~S."
-                  :format-arguments (list (first data)))))
-      (:character-code (code-char (first data)))
-      (:string (first data))
-      (:bit-vector
-       (let ((bits (first data)))
-         (make-array (length bits) :element-type 'bit :initial-contents bits)))
-      (:byte-vector
-       (let ((bytes (first data)))
-         (make-array (length bytes) :element-type '(unsigned-byte 8)
-                                     :initial-contents bytes))))))
+    (envelope-tag->atom tag data)))
 
 (defun serialize-atom (atom)
   "Convert ATOM -- an INTEGER, SYMBOL (KEYWORD or otherwise),
