@@ -296,6 +296,13 @@ real (non-mocked) end-to-end coverage. `examples/bank.lisp` and
 
 ## Conventions
 
+Several of the rules below (`defstruct` conc-names, no `loop`, no
+`ecase`, no `reduce`, no `remove-if`/`remove-if-not`, and macro
+hygiene) originate from an external `lisp-functional` Common Lisp
+skill definition, not tracked in this repository; they are recorded
+here so contributors without access to that skill can still follow
+them.
+
 - **Everything is persistent/immutable.** Operations that "update" a
   structure return a new SHA/root and leave prior roots valid and
   independently loadable — never mutate in place. Every persistent type
@@ -321,7 +328,7 @@ real (non-mocked) end-to-end coverage. `examples/bank.lisp` and
   `defstruct`-style dashed accessor names (see `persistent-struct.lisp`
   and `examples/library.lisp`'s `book`/`library`).
 - **No `loop` macro**: `CL:LOOP` is never used. A simple collect/filter
-  over an existing sequence uses `mapcar`/`remove-if`/`mapcan`/`map-into`
+  over an existing sequence uses `mapcar`/`remove`/`mapcan`/`map-into`
   (or `alexandria:iota` to generate an index range first); a genuinely
   stateful traversal (pointer-chasing, retry-until-success, accumulate-
   while-condition) uses a named `let` — always named `next` by

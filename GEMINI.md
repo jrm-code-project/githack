@@ -130,6 +130,13 @@ interactively: `(fiveam:run! 'git-tree-suite)` or `(fiveam:run! 'git-branch-inst
 
 ## Development & Contribution Conventions
 
+Several of the rules below (`DEFSTRUCT` conc-names, no `LOOP`, no
+`ECASE`, no `REDUCE`, no `REMOVE-IF`/`REMOVE-IF-NOT`, and macro
+hygiene) originate from an external `lisp-functional` Common Lisp
+skill definition, not tracked in this repository; they are recorded
+here so contributors without access to that skill can still follow
+them.
+
 - **SBCL Specifics**: Do not introduce non-SBCL constructs or abstract
   away MOP interactions unless carefully wrapping them under appropriate
   feature-flags. Stick strictly to standard `sb-mop` and `sb-ext` patterns
@@ -149,7 +156,7 @@ interactively: `(fiveam:run! 'git-tree-suite)` or `(fiveam:run! 'git-branch-inst
   apply to `DEFINE-PERSISTENT-STRUCT`, which keeps plain dashed
   `defstruct`-style accessor names.
 - **No `LOOP`**: `CL:LOOP` is never used. Simple collect/filter over an
-  existing sequence uses `MAPCAR`/`REMOVE-IF`/`MAPCAN`/`MAP-INTO` (or
+  existing sequence uses `MAPCAR`/`REMOVE`/`MAPCAN`/`MAP-INTO` (or
   `ALEXANDRIA:IOTA` to generate an index range); a genuinely stateful
   traversal (pointer-chasing, retry-until-success) uses a named `LET`
   (always named `NEXT`) via the `NAMED-LET` library. `DOLIST`/`DOTIMES`
