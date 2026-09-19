@@ -32,7 +32,8 @@ can cheaply check it with a simple boolean test with no BOUNDP
 dance required.")
 
 (defstruct (pending-write
-            (:constructor %make-pending-write (git-repository branch-name old-sha new-commit-sha)))
+            (:constructor %make-pending-write (git-repository branch-name old-sha new-commit-sha))
+            (:conc-name pending-write/))
   "One participating repository's own prepared-but-not-yet-ref-
 visible write within a GITHACK-TRANSACTION: the GIT-REPOSITORY it
 belongs to, its BRANCH-NAME, the branch's OLD-SHA (its SHA when this
@@ -61,7 +62,7 @@ needs one at all."
 
 (defstruct (githack-transaction
             (:constructor %make-githack-transaction (tx-id))
-            (:conc-name %githack-transaction-))
+            (:conc-name %githack-transaction/))
   "A distributed, potentially multi-repository transaction context;
 see WITH-GITHACK-TRANSACTION/CALL-WITH-GITHACK-TRANSACTION.
 

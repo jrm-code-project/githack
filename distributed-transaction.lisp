@@ -264,9 +264,9 @@ later reconstitute a real pathname via UIOP:PARSE-NATIVE-NAMESTRING."
         :ledger (uiop:native-namestring (get-pathname ledger-git-repository))
         :participants
         (mapcar (lambda (pw)
-                  (list :repository (uiop:native-namestring (get-pathname (pending-write-git-repository pw)))
-                        :branch (pending-write-branch-name pw)
-                        :old-sha (pending-write-old-sha pw)))
+                  (list :repository (uiop:native-namestring (get-pathname (pending-write/git-repository pw)))
+                        :branch (pending-write/branch-name pw)
+                        :old-sha (pending-write/old-sha pw)))
                 pending-writes)))
 
 (defun format-transaction-manifest (manifest)
@@ -311,16 +311,16 @@ ref not already exist -- a collision would mean TX-ID was somehow
 reused, which GENERATE-TRANSACTION-ID's 128 bits of randomness makes
 astronomically unlikely). Records the new prepare ref's path in PW's
 own PREPARE-REF slot. Returns PW."
-  (let* ((git-repository (pending-write-git-repository pw))
+  (let* ((git-repository (pending-write/git-repository pw))
          (repository (get-pathname git-repository))
-         (branch-name (pending-write-branch-name pw))
+         (branch-name (pending-write/branch-name pw))
          (tag-name (format nil "githack-prepare-~A-~A" tx-id (sanitize-tag-name-component branch-name)))
          (tagger (or (get-committer git-repository) (get-author git-repository) "GitHack 2PC <githack@localhost>"))
-         (tag-content (format-annotated-tag-content (pending-write-new-commit-sha pw) tag-name tagger manifest-text))
+         (tag-content (format-annotated-tag-content (pending-write/new-commit-sha pw) tag-name tagger manifest-text))
          (tag-sha (%git-mktag repository tag-content))
          (ref-path (prepare-ref-path tx-id branch-name)))
     (%git-raw-update-ref! repository ref-path tag-sha :expected-sha nil)
-    (setf (pending-write-prepare-ref pw) ref-path)
+    (setf (pending-write/prepare-ref pw) ref-path)
     pw))
 
 (defun %rollback-participant-prepare! (pw)
@@ -330,9 +330,9 @@ leaving its already-persisted commit object as harmless, unreachable
 Git garbage. Used only when some LATER participant's own Phase 1
 step fails, to avoid leaving earlier participants' prepare refs
 stranded for RUN-GITHACK-EXORCIST! to have to clean up later."
-  (when (pending-write-prepare-ref pw)
-    (%git-raw-delete-ref! (get-pathname (pending-write-git-repository pw)) (pending-write-prepare-ref pw))
-    (setf (pending-write-prepare-ref pw) nil)))
+  (when (pending-write/prepare-ref pw)
+    (%git-raw-delete-ref! (get-pathname (pending-write/git-repository pw)) (pending-write/prepare-ref pw))
+    (setf (pending-write/prepare-ref pw) nil)))
 
 ;;; ------------------------------------------------------------------
 ;;; Phase 2 (POINT OF NO RETURN & ROLL FORWARD).
@@ -364,11 +364,11 @@ delete its own prepare ref, both via one single atomic
 `git update-ref --stdin` batch, so no external observer can ever see
 PW's branch newly advanced while its prepare ref still lingers, or
 vice versa."
-  (let ((repository (get-pathname (pending-write-git-repository pw))))
+  (let ((repository (get-pathname (pending-write/git-repository pw))))
     (%git-update-ref-stdin! repository
-                            (list (list :update (format nil "refs/heads/~A" (pending-write-branch-name pw))
-                                        (pending-write-new-commit-sha pw) (pending-write-old-sha pw))
-                                  (list :delete (pending-write-prepare-ref pw))))))
+                            (list (list :update (format nil "refs/heads/~A" (pending-write/branch-name pw))
+                                        (pending-write/new-commit-sha pw) (pending-write/old-sha pw))
+                                  (list :delete (pending-write/prepare-ref pw))))))
 
 ;;; ------------------------------------------------------------------
 ;;; Smart-commit dispatch: 0 / 1 / >1 participants.
@@ -382,10 +382,10 @@ single atomic `git update-ref --stdin` call (rather than plain
 GIT-UPDATE-REF!, purely so this path, too, honours the architecture
 spec's own requirement to use `update-ref --stdin`; the two are
 equally atomic for a single ref)."
-  (let ((repository (get-pathname (pending-write-git-repository pw))))
+  (let ((repository (get-pathname (pending-write/git-repository pw))))
     (%git-update-ref-stdin! repository
-                            (list (list :update (format nil "refs/heads/~A" (pending-write-branch-name pw))
-                                        (pending-write-new-commit-sha pw) (pending-write-old-sha pw))))))
+                            (list (list :update (format nil "refs/heads/~A" (pending-write/branch-name pw))
+                                        (pending-write/new-commit-sha pw) (pending-write/old-sha pw))))))
 
 (defun %finish-two-phase-commit! (tx-id pending-writes)
   "Drive the full distributed Two-Phase-Commit protocol for TX-ID
@@ -396,7 +396,7 @@ participant in turn (rolling back and signalling DISTRIBUTED-
 TRANSACTION-ERROR if any one Prepare step fails), write the Ledger's
 own commit-point ref (the Point of No Return), and finally roll every
 participant forward. Returns TX-ID."
-  (let* ((ledger-git-repository (pending-write-git-repository (first pending-writes)))
+  (let* ((ledger-git-repository (pending-write/git-repository (first pending-writes)))
          (manifest-text (format-transaction-manifest
                           (build-transaction-manifest tx-id pending-writes ledger-git-repository)))
          (prepared '()))
@@ -424,11 +424,11 @@ Path (%FINISH-SINGLE-REPO-WRITE!), and more than one drives the full
 via PUSH, so it is reversed first to restore first-encountered order
 (significant only for >1 participants, since the first is elected
 the Ledger)."
-  (let ((pending (reverse (%githack-transaction-pending-writes txn))))
+  (let ((pending (reverse (%githack-transaction/pending-writes txn))))
     (cond
       ((null pending) nil)
       ((null (rest pending)) (%finish-single-repo-write! (first pending)))
-      (t (%finish-two-phase-commit! (%githack-transaction-tx-id txn) pending)))))
+      (t (%finish-two-phase-commit! (%githack-transaction/tx-id txn) pending)))))
 
 ;;; ------------------------------------------------------------------
 ;;; Public entry points.
@@ -465,7 +465,7 @@ protocol."
 
 (defun githack-transaction-tx-id (transaction)
   "Return TRANSACTION's (a GITHACK-TRANSACTION) own TX-ID string."
-  (%githack-transaction-tx-id transaction))
+  (%githack-transaction/tx-id transaction))
 
 ;;; ------------------------------------------------------------------
 ;;; The Exorcist: crash recovery.

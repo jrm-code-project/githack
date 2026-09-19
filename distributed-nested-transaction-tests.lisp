@@ -214,9 +214,9 @@ result)."
             ;; own write was never made ref-visible.
             (is (equal "original" v))
             "second-write"))
-        (let ((pending (%githack-transaction-pending-writes *current-transaction*)))
+        (let ((pending (%githack-transaction/pending-writes *current-transaction*)))
           (is (= 1 (length pending)))
-          (is (equal original-sha (pending-write-old-sha (first pending))))))
+          (is (equal original-sha (pending-write/old-sha (first pending))))))
       (is (equal "second-write" (dtx-read repository-1 "main"))))))
 
 (test nested-githack-transaction-commits-independently-of-its-own-enclosing-transactions-later-outcome

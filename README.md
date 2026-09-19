@@ -312,6 +312,14 @@ real (non-mocked) end-to-end coverage. `examples/bank.lisp` and
   Scheme-style trailing `?`/`!` conventions apply going forward to *new*
   predicates/side-effecting functions per project preference, without
   requiring existing `-P` names to be renamed.
+- **`defstruct` conc-names**: raw `defstruct` forms (as opposed to CLOS
+  `defclass`es, see above) use an explicit `:conc-name` of `<type>/`
+  (a trailing slash), so slot `bar` in struct `foo` gets accessor
+  `foo/bar` (e.g. `pending-write/branch-name`, `contact/host`,
+  `routing-table/self-id`) — this does not apply to
+  `define-persistent-struct`, which intentionally keeps plain
+  `defstruct`-style dashed accessor names (see `persistent-struct.lisp`
+  and `examples/library.lisp`'s `book`/`library`).
 - **Package**: everything lives in the single `"GITHACK"` package
   (`package.lisp`), which shadows symbols from `SERIES` (`DEFUN`,
   `FUNCALL`, `LET*`, `MULTIPLE-VALUE-BIND`), `NAMED-LET` (`LET`,

@@ -26,7 +26,8 @@
 
 (defstruct (routing-table
             (:constructor %make-routing-table (self-id buckets lock))
-            (:predicate routing-table-p))
+            (:predicate routing-table-p)
+            (:conc-name routing-table/))
   "SELF-ID is the owning node's own NODE-ID (never itself stored as a
 contact -- see ROUTING-TABLE-INSERT!). BUCKETS is a SIMPLE-VECTOR of
 length +ID-BITS+, each element a list of CONTACT instances (bucket I
@@ -60,47 +61,47 @@ not supplied at all), the old contact is evicted and CONTACT takes its
 place. Silently does nothing (returns NIL) if CONTACT's node-id is
 TABLE's own SELF-ID -- a node is never its own routing-table entry.
 Returns CONTACT on any successful insert/refresh."
-  (let ((self-id (routing-table-self-id table)))
-    (when (= (contact-node-id contact) self-id)
+  (let ((self-id (routing-table/self-id table)))
+    (when (= (contact/node-id contact) self-id)
       (return-from routing-table-insert! nil))
-    (let ((index (node-id-bucket-index self-id (contact-node-id contact)))
+    (let ((index (node-id-bucket-index self-id (contact/node-id contact)))
           (lru nil)
           (bucket-full? nil))
-      (sb-thread:with-mutex ((routing-table-lock table))
-        (let* ((bucket (aref (routing-table-buckets table) index))
-               (existing (find (contact-node-id contact) bucket :key #'contact-node-id)))
+      (sb-thread:with-mutex ((routing-table/lock table))
+        (let* ((bucket (aref (routing-table/buckets table) index))
+               (existing (find (contact/node-id contact) bucket :key #'contact/node-id)))
           (cond
             (existing
-             (setf (aref (routing-table-buckets table) index)
+             (setf (aref (routing-table/buckets table) index)
                    (append (remove existing bucket) (list contact)))
              (return-from routing-table-insert! contact))
             ((< (length bucket) +k+)
-             (setf (aref (routing-table-buckets table) index) (append bucket (list contact)))
+             (setf (aref (routing-table/buckets table) index) (append bucket (list contact)))
              (return-from routing-table-insert! contact))
             (t (setf bucket-full? t lru (first bucket))))))
       ;; Bucket was full: decide LRU's fate without holding the lock.
       (when bucket-full?
         (let ((lru-alive? (and ping-fn (funcall ping-fn lru))))
-          (sb-thread:with-mutex ((routing-table-lock table))
-            (let ((bucket (remove lru (aref (routing-table-buckets table) index) :count 1)))
-              (setf (aref (routing-table-buckets table) index)
+          (sb-thread:with-mutex ((routing-table/lock table))
+            (let ((bucket (remove lru (aref (routing-table/buckets table) index) :count 1)))
+              (setf (aref (routing-table/buckets table) index)
                     (append bucket (list (if lru-alive? lru contact))))))))
       contact)))
 
 (defun routing-table-remove! (table node-id)
   "Remove the contact identified by NODE-ID from TABLE, if present.
 Returns no useful value."
-  (let ((index (node-id-bucket-index (routing-table-self-id table) node-id)))
-    (sb-thread:with-mutex ((routing-table-lock table))
-      (setf (aref (routing-table-buckets table) index)
-            (remove node-id (aref (routing-table-buckets table) index) :key #'contact-node-id))))
+  (let ((index (node-id-bucket-index (routing-table/self-id table) node-id)))
+    (sb-thread:with-mutex ((routing-table/lock table))
+      (setf (aref (routing-table/buckets table) index)
+            (remove node-id (aref (routing-table/buckets table) index) :key #'contact/node-id))))
   (values))
 
 (defun routing-table-all-contacts (table)
   "Return a fresh list of every CONTACT currently known to TABLE,
 across all buckets, in an unspecified order."
-  (sb-thread:with-mutex ((routing-table-lock table))
-    (loop for bucket across (routing-table-buckets table) append (copy-list bucket))))
+  (sb-thread:with-mutex ((routing-table/lock table))
+    (loop for bucket across (routing-table/buckets table) append (copy-list bucket))))
 
 (defun routing-table-closest-contacts (table target-id &optional (count +k+) exclude-id)
   "Return a fresh list of at most COUNT CONTACTs known to TABLE,
@@ -111,6 +112,6 @@ contact with that node-id from the result (used to keep a lookup from
 ever returning the querying node's own id back to itself)."
   (let ((all (routing-table-all-contacts table)))
     (when exclude-id
-      (setf all (remove exclude-id all :key #'contact-node-id :test #'=)))
-    (let ((sorted (sort all #'< :key (lambda (c) (node-id-distance target-id (contact-node-id c))))))
+      (setf all (remove exclude-id all :key #'contact/node-id :test #'=)))
+    (let ((sorted (sort all #'< :key (lambda (c) (node-id-distance target-id (contact/node-id c))))))
       (subseq sorted 0 (min count (length sorted))))))

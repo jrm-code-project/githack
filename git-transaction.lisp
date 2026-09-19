@@ -377,15 +377,15 @@ WITH-GITHACK-TRANSACTION for genuinely distinct repositories."
   (let* ((git-repository (get-git-repository transaction))
          (branch-name (get-name (get-target-branch transaction)))
          (existing (find-if (lambda (pw)
-                               (and (equal (get-pathname (pending-write-git-repository pw))
+                               (and (equal (get-pathname (pending-write/git-repository pw))
                                            (get-pathname git-repository))
-                                    (string= (pending-write-branch-name pw) branch-name)))
-                             (%githack-transaction-pending-writes *current-transaction*))))
+                                    (string= (pending-write/branch-name pw) branch-name)))
+                             (%githack-transaction/pending-writes *current-transaction*))))
     (if existing
-        (setf (pending-write-new-commit-sha existing) (sha commit))
+        (setf (pending-write/new-commit-sha existing) (sha commit))
         (push (%make-pending-write git-repository branch-name
                                     (get-expected-branch-sha transaction) (sha commit))
-              (%githack-transaction-pending-writes *current-transaction*))))
+              (%githack-transaction/pending-writes *current-transaction*))))
   commit)
 
 (defun commit-git-transaction-now! (transaction root)

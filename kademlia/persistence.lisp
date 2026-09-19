@@ -90,7 +90,7 @@ contacts TABLE itself has since evicted."
       (declare (ignore value))
       (let ((catalog (phash-make :repository repository-pathname :test 'equal)))
         (dolist (contact (routing-table-all-contacts table))
-          (setf catalog (phash-put (node-id->hex-string (contact-node-id contact))
+          (setf catalog (phash-put (node-id->hex-string (contact/node-id contact))
                                    (contact->persistent-contact contact repository-pathname)
                                    catalog)))
         catalog))))

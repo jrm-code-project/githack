@@ -13,7 +13,8 @@
 
 (defstruct (contact
             (:constructor make-contact (node-id host port &optional (last-seen (get-universal-time))))
-            (:predicate contact-p))
+            (:predicate contact-p)
+            (:conc-name contact/))
   "A single routing-table entry: NODE-ID is that peer's Kademlia
 identity (see node-id.lisp), HOST/PORT its UDP contact address, and
 LAST-SEEN the universal-time this contact was last confirmed live
@@ -50,10 +51,10 @@ persists its routing table into -- see persistence.lisp), suitable
 for storing as one entry of that node's routing-table catalog."
   (make-instance 'persistent-contact
                  :repository repository-pathname
-                 :node-id (node-id->hex-string (contact-node-id contact))
-                 :host (contact-host contact)
-                 :port (contact-port contact)
-                 :last-seen (contact-last-seen contact)))
+                 :node-id (node-id->hex-string (contact/node-id contact))
+                 :host (contact/host contact)
+                 :port (contact/port contact)
+                 :last-seen (contact/last-seen contact)))
 
 (defun persistent-contact->contact (persistent-contact)
   "Return a fresh, transient CONTACT reconstructed from PERSISTENT-

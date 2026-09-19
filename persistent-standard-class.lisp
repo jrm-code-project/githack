@@ -555,5 +555,5 @@ information (branch, author, committer, message) to actually
                               (slot-boundp instance 'repository)
                               (ignore-errors (get-repository instance)))))
         (when repository
-          (pushnew repository (%githack-transaction-touched-pathnames *current-transaction*)
+          (pushnew repository (%githack-transaction/touched-pathnames *current-transaction*)
                     :test #'equal))))))

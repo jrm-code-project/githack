@@ -18,7 +18,7 @@
                 "+ID-BITS+" "+K+" "+ALPHA+"
                 "GENERATE-NODE-ID" "NODE-ID-DISTANCE" "NODE-ID-BUCKET-INDEX"
                 "NODE-ID->HEX-STRING" "HEX-STRING->NODE-ID"
-                "MAKE-CONTACT" "CONTACT-NODE-ID" "CONTACT-HOST" "CONTACT-PORT"
+                "MAKE-CONTACT" "CONTACT/NODE-ID" "CONTACT/HOST" "CONTACT/PORT"
                 "MAKE-ROUTING-TABLE" "ROUTING-TABLE-INSERT!" "ROUTING-TABLE-REMOVE!"
                 "ROUTING-TABLE-ALL-CONTACTS" "ROUTING-TABLE-CLOSEST-CONTACTS"
                 "LOAD-ROUTING-TABLE!" "PERSIST-ROUTING-TABLE!"
@@ -116,7 +116,7 @@ STOP-KADEMLIA-NODE-ing it afterward."
     (routing-table-insert! table (make-contact other-id "127.0.0.1" 5000))
     (let ((contacts (routing-table-all-contacts table)))
       (is (= (length contacts) 1))
-      (is (= (contact-port (first contacts)) 5000)))))
+      (is (= (contact/port (first contacts)) 5000)))))
 
 (test routing-table-closest-contacts-sorted-by-xor-distance
   (let* ((self-id 0)
@@ -125,7 +125,7 @@ STOP-KADEMLIA-NODE-ing it afterward."
       (routing-table-insert! table (make-contact id "127.0.0.1" id)))
     (let ((closest (routing-table-closest-contacts table 3 3)))
       ;; distances from 3: 1->2, 2->1, 4->7, 8->11, 16->19
-      (is (equal (mapcar #'contact-node-id closest) '(2 1 4))))))
+      (is (equal (mapcar #'contact/node-id closest) '(2 1 4))))))
 
 (test routing-table-closest-contacts-excludes-given-id
   (let* ((self-id 0)
@@ -133,7 +133,7 @@ STOP-KADEMLIA-NODE-ing it afterward."
     (routing-table-insert! table (make-contact 1 "127.0.0.1" 1))
     (routing-table-insert! table (make-contact 2 "127.0.0.1" 2))
     (let ((closest (routing-table-closest-contacts table 1 10 1)))
-      (is (equal (mapcar #'contact-node-id closest) '(2))))))
+      (is (equal (mapcar #'contact/node-id closest) '(2))))))
 
 (test routing-table-bucket-eviction-keeps-live-lru
   (let* ((self-id 0)
@@ -148,15 +148,15 @@ STOP-KADEMLIA-NODE-ing it afterward."
     ;; newcomer must be discarded and every original id retained.
     (routing-table-insert! table (make-contact (+ base +k+) "127.0.0.1" 0) :ping-fn (constantly t))
     (is (= (length (routing-table-all-contacts table)) +k+))
-    (is (null (find (+ base +k+) (routing-table-all-contacts table) :key #'contact-node-id)))
+    (is (null (find (+ base +k+) (routing-table-all-contacts table) :key #'contact/node-id)))
     ;; Now the LRU (BASE was refreshed to most-recently-seen by the
     ;; previous "alive" ping, so BASE+1 is the new LRU) is reported
     ;; dead: the newcomer must be admitted, and exactly BASE+1 gone.
     (routing-table-insert! table (make-contact (+ base +k+ 1) "127.0.0.1" 0) :ping-fn (constantly nil))
     (is (= (length (routing-table-all-contacts table)) +k+))
-    (is (find base (routing-table-all-contacts table) :key #'contact-node-id))
-    (is (null (find (1+ base) (routing-table-all-contacts table) :key #'contact-node-id)))
-    (is (find (+ base +k+ 1) (routing-table-all-contacts table) :key #'contact-node-id))))
+    (is (find base (routing-table-all-contacts table) :key #'contact/node-id))
+    (is (null (find (1+ base) (routing-table-all-contacts table) :key #'contact/node-id)))
+    (is (find (+ base +k+ 1) (routing-table-all-contacts table) :key #'contact/node-id))))
 
 ;;; --- Persistence round-trip (real Git, no network) -------------------
 
@@ -169,7 +169,7 @@ STOP-KADEMLIA-NODE-ing it afterward."
       (persist-routing-table! table repository)
       (let ((reloaded (make-routing-table self-id)))
         (load-routing-table! reloaded repository)
-        (let ((ids (sort (mapcar #'contact-node-id (routing-table-all-contacts reloaded)) #'<)))
+        (let ((ids (sort (mapcar #'contact/node-id (routing-table-all-contacts reloaded)) #'<)))
           (is (equal ids '(1 2))))))))
 
 (test load-routing-table-on-fresh-repository-is-a-no-op
@@ -189,8 +189,8 @@ STOP-KADEMLIA-NODE-ing it afterward."
           (is (kademlia-ping node-b (get-host node-a) (get-port node-a)))
           ;; Each node's routing table must now know about the other,
           ;; learned purely as a side effect of PING/PONG handling.
-          (is (find (get-node-id node-b) (routing-table-all-contacts (get-routing-table node-a)) :key #'contact-node-id))
-          (is (find (get-node-id node-a) (routing-table-all-contacts (get-routing-table node-b)) :key #'contact-node-id)))))))
+          (is (find (get-node-id node-b) (routing-table-all-contacts (get-routing-table node-a)) :key #'contact/node-id))
+          (is (find (get-node-id node-a) (routing-table-all-contacts (get-routing-table node-b)) :key #'contact/node-id)))))))
 
 (test ping-a-silent-port-times-out
   (with-temporary-bare-repository (repo-a)
@@ -213,7 +213,7 @@ STOP-KADEMLIA-NODE-ing it afterward."
               (is (kademlia-join! node-b (get-host node-a) (get-port node-a)))
               (is (kademlia-join! node-c (get-host node-a) (get-port node-a)))
               (let ((discovered (kademlia-find-node node-c (get-node-id node-b))))
-                (is (find (get-node-id node-b) discovered :key #'contact-node-id))))))))))
+                (is (find (get-node-id node-b) discovered :key #'contact/node-id))))))))))
 
 (test kademlia-join-against-a-dead-bootstrap-fails-cleanly
   (with-temporary-bare-repository (repo-a)
@@ -234,4 +234,4 @@ STOP-KADEMLIA-NODE-ing it afterward."
             (stop-kademlia-node node-a)))
         (let ((reloaded (make-routing-table (generate-node-id))))
           (load-routing-table! reloaded repo-a)
-          (is (find node-b-id (routing-table-all-contacts reloaded) :key #'contact-node-id)))))))
+          (is (find node-b-id (routing-table-all-contacts reloaded) :key #'contact/node-id)))))))

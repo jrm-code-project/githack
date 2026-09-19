@@ -143,7 +143,11 @@ interactively: `(fiveam:run! 'git-tree-suite)` or `(fiveam:run! 'git-branch-inst
 - **Naming**: use `GET-<slot-name>` for CLOS `:reader`/`:accessor` slot
   names (never a `<class-name>-<slot-name>` `defstruct`-style prefix). A
   leading `%` marks an internal/low-level helper not meant for use outside
-  its defining file.
+  its defining file. Raw `defstruct` forms use an explicit `:conc-name`
+  of `<type>/` (e.g. slot `bar` in struct `foo` gets accessor `foo/bar`,
+  such as `pending-write/branch-name` or `contact/host`) — this does not
+  apply to `DEFINE-PERSISTENT-STRUCT`, which keeps plain dashed
+  `defstruct`-style accessor names.
 - **Format and Style**: keep the typical Emacs/Slime indentation, Lisp
   header comments, and declare precise dependency lists within
   `githack.asd` when adding new files.

@@ -28,7 +28,7 @@ its NODE-ID (as a hex-string, see NODE-ID->HEX-STRING), HOST, and
 PORT. LAST-SEEN is deliberately not transmitted -- it is purely local
 bookkeeping for the receiving node's own routing table, not a property
 of the contact itself."
-  (list (node-id->hex-string (contact-node-id contact)) (contact-host contact) (contact-port contact)))
+  (list (node-id->hex-string (contact/node-id contact)) (contact/host contact) (contact/port contact)))
 
 (defun %triple->contact (triple)
   "Inverse of %CONTACT-TRIPLE: reconstruct a fresh CONTACT (with

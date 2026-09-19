@@ -15,7 +15,8 @@
 ;;; A single outstanding RPC awaiting its reply: a semaphore the
 ;;; issuing thread blocks on, and a box the listener thread deposits
 ;;; the decoded reply payload into before signalling that semaphore.
-(defstruct (%pending-request (:constructor %make-pending-request ()))
+(defstruct (%pending-request (:constructor %make-pending-request ())
+                              (:conc-name %pending-request/))
   (semaphore (sb-thread:make-semaphore :count 0) :read-only t)
   (reply nil))
 
@@ -98,8 +99,8 @@ node's own request -- e.g. a duplicate or spoofed reply)."
   (let ((pending (sb-thread:with-mutex ((%pending-lock node))
                    (gethash rpc-id (%pending-requests node)))))
     (when pending
-      (setf (%pending-request-reply pending) reply)
-      (sb-thread:signal-semaphore (%pending-request-semaphore pending)))))
+      (setf (%pending-request/reply pending) reply)
+      (sb-thread:signal-semaphore (%pending-request/semaphore pending)))))
 
 (defun %await-pending! (node rpc-id timeout)
   "Register RPC-ID as an outstanding request, block up to TIMEOUT
@@ -108,8 +109,8 @@ REPLY T) if it was, or (VALUES NIL NIL) on timeout. Always
 unregisters RPC-ID before returning, whichever way."
   (let ((pending (%register-pending! node rpc-id)))
     (unwind-protect
-        (if (sb-thread:wait-on-semaphore (%pending-request-semaphore pending) :timeout timeout)
-            (values (%pending-request-reply pending) t)
+        (if (sb-thread:wait-on-semaphore (%pending-request/semaphore pending) :timeout timeout)
+            (values (%pending-request/reply pending) t)
             (values nil nil))
       (%forget-pending! node rpc-id))))
 
@@ -141,7 +142,7 @@ peer must never take a node's listener thread down."
           (routing-table-insert!
            (get-routing-table node)
            (make-contact sender-id observed-host source-port)
-           :ping-fn (lambda (contact) (kademlia-ping node (contact-host contact) (contact-port contact)))))
+           :ping-fn (lambda (contact) (kademlia-ping node (contact/host contact) (contact/port contact)))))
         (ecase type
           (:ping
            (%send-string! node (encode-pong rpc-id (%self-contact node)) source-address source-port))
@@ -262,7 +263,7 @@ contacts to TARGET-ID, and block up to TIMEOUT seconds for the reply.
 Returns a fresh list of CONTACT instances (possibly empty) on a timely
 reply, or NIL on timeout."
   (let ((rpc-id (make-rpc-id)))
-    (%send-string! node (encode-find-node rpc-id (%self-contact node) target-id) (contact-host contact) (contact-port contact))
+    (%send-string! node (encode-find-node rpc-id (%self-contact node) target-id) (contact/host contact) (contact/port contact))
     (multiple-value-bind (reply found?) (%await-pending! node rpc-id timeout)
       (when found? (getf reply :contacts)))))
 
@@ -284,17 +285,17 @@ known contact has already been queried."
         (shortlist (routing-table-closest-contacts (get-routing-table node) target-id k (get-node-id node))))
     (dotimes (round max-rounds)
       (declare (ignorable round))
-      (let ((candidates (remove-if (lambda (c) (gethash (contact-node-id c) queried)) shortlist)))
+      (let ((candidates (remove-if (lambda (c) (gethash (contact/node-id c) queried)) shortlist)))
         (setf candidates (subseq candidates 0 (min alpha (length candidates))))
         (when (null candidates) (return))
         (let ((progress? nil))
           (dolist (contact candidates)
-            (setf (gethash (contact-node-id contact) queried) t)
+            (setf (gethash (contact/node-id contact) queried) t)
             (let ((discovered (%find-node-rpc node contact target-id :timeout timeout)))
               (when discovered
                 (setf progress? t)
                 (dolist (rc discovered)
-                  (unless (= (contact-node-id rc) (get-node-id node))
+                  (unless (= (contact/node-id rc) (get-node-id node))
                     (routing-table-insert! (get-routing-table node) rc))))))
           (setf shortlist (routing-table-closest-contacts (get-routing-table node) target-id k (get-node-id node)))
           (unless progress? (return)))))

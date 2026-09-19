@@ -181,9 +181,9 @@ untouched."
            (txn (%make-githack-transaction tx-id)))
       (let ((*current-transaction* txn))
         (dtx-write! repository "main" "never-committed"))
-      (let* ((pw (first (%githack-transaction-pending-writes txn)))
+      (let* ((pw (first (%githack-transaction/pending-writes txn)))
              (manifest-text (format-transaction-manifest
-                              (build-transaction-manifest tx-id (list pw) (pending-write-git-repository pw)))))
+                              (build-transaction-manifest tx-id (list pw) (pending-write/git-repository pw)))))
         (%prepare-participant! pw tx-id manifest-text))
       ;; Crash simulated here: the Ledger ref (in this same repository,
       ;; since it is the sole, and so its own elected, participant) is
@@ -206,12 +206,12 @@ ref."
            (txn (%make-githack-transaction tx-id)))
       (let ((*current-transaction* txn))
         (dtx-write! repository "main" "should-be-committed"))
-      (let* ((pw (first (%githack-transaction-pending-writes txn)))
+      (let* ((pw (first (%githack-transaction/pending-writes txn)))
              (manifest-text (format-transaction-manifest
-                              (build-transaction-manifest tx-id (list pw) (pending-write-git-repository pw)))))
+                              (build-transaction-manifest tx-id (list pw) (pending-write/git-repository pw)))))
         (%prepare-participant! pw tx-id manifest-text)
         ;; Point of no return reached, then crash simulated before roll-forward.
-        (%write-ledger-commit-point! (pending-write-git-repository pw) tx-id))
+        (%write-ledger-commit-point! (pending-write/git-repository pw) tx-id))
       (let ((results (run-githack-exorcist! repository)))
         (is (equal (list (list tx-id "main" :committed)) results)))
       (is (equal "should-be-committed" (dtx-read repository "main")))
@@ -235,10 +235,10 @@ already resolved a stranded ref, finds nothing left to do."
            (txn (%make-githack-transaction tx-id)))
       (let ((*current-transaction* txn))
         (dtx-write! repository "main" "resolved-once"))
-      (let* ((pw (first (%githack-transaction-pending-writes txn)))
+      (let* ((pw (first (%githack-transaction/pending-writes txn)))
              (manifest-text (format-transaction-manifest
-                              (build-transaction-manifest tx-id (list pw) (pending-write-git-repository pw)))))
+                              (build-transaction-manifest tx-id (list pw) (pending-write/git-repository pw)))))
         (%prepare-participant! pw tx-id manifest-text)
-        (%write-ledger-commit-point! (pending-write-git-repository pw) tx-id))
+        (%write-ledger-commit-point! (pending-write/git-repository pw) tx-id))
       (run-githack-exorcist! repository)
       (is (null (run-githack-exorcist! repository))))))
