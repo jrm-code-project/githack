@@ -8,7 +8,9 @@
 ;;; TRANSACTION's own 0/1/>1-participant no-op/Fast-Path/2PC
 ;;; dispatch, Phase 1 (Prepare) failure/rollback, and RUN-GITHACK-
 ;;; EXORCIST's crash recovery for both the "already committed" and
-;;; "never committed" cases. Like END-TO-END-SUITE, every test here
+;;; "never committed" cases. One test below actually kills a child
+;;; SBCL between Phase 1 and the ledger write; the others reconstruct
+;;; that on-disk state in-process. Like END-TO-END-SUITE, every test here
 ;;; genuinely shells out to real `git` executables against real,
 ;;; temporary bare repositories (via WITH-TEMPORARY-GIT-REPOSITORY)
 ;;; -- no GIT-HASH-OBJECT/GIT-CAT-FILE/GIT-TYPE/GIT-SHOW-REF-SHA/
@@ -244,3 +246,135 @@ already resolved a stranded ref, finds nothing left to do."
         (%write-ledger-commit-point! (pending-write/git-repository pw) tx-id))
       (run-githack-exorcist! repository)
       (is (null (run-githack-exorcist! repository))))))
+
+(defun %exorcist-kill-poll (predicate seconds)
+  "Return true once PREDICATE is true, checking every tenth of a
+second for up to SECONDS. Used to wait on a child process without
+blocking the test forever."
+  (dotimes (i (round (* seconds 10)) nil)
+    (when (funcall predicate)
+      (return t))
+    (sleep 0.1)))
+
+(defun %exorcist-kill-tail (path)
+  "Return up to the last 4000 characters of PATH, or a short note
+when the file cannot be read."
+  (or (ignore-errors
+        (with-open-file (stream path :direction :input :if-does-not-exist nil)
+          (when stream
+            (let* ((size (file-length stream))
+                   (start (max 0 (- size 4000))))
+              (file-position stream start)
+              (let ((text (make-string (- size start))))
+                (read-sequence text stream)
+                text)))))
+      "<log unreadable>"))
+
+(defun %write-exorcist-kill-line (stream control &rest args)
+  "Write one line of the child script. CONTROL is a FORMAT control
+with no embedded newlines; each call ends the line itself."
+  (apply #'format stream control args)
+  (terpri stream))
+
+(defun %write-exorcist-kill-child-script (script ready repository-1 repository-2)
+  "Write a standalone SBCL script that runs a real two-repository
+WITH-GITHACK-TRANSACTION against REPOSITORY-1 and REPOSITORY-2, and
+blocks inside %WRITE-LEDGER-COMMIT-POINT! -- the call %FINISH-TWO-
+PHASE-COMMIT! makes immediately after every Prepare has returned --
+after closing Git sessions and creating READY."
+  (with-open-file (stream script :direction :output :if-exists :supersede :if-does-not-exist :create)
+    (let ((quicklisp (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname)))
+          (asd (asdf:system-source-file (asdf:find-system :githack))))
+      (%write-exorcist-kill-line stream "(load ~S)" quicklisp)
+      (%write-exorcist-kill-line stream "(asdf:load-asd ~S)" asd)
+      (%write-exorcist-kill-line stream "(ql:quickload :githack :silent t)")
+      (%write-exorcist-kill-line stream "(in-package \"GITHACK\")")
+      (%write-exorcist-kill-line stream "(setf (fdefinition '%write-ledger-commit-point!)")
+      (%write-exorcist-kill-line stream "      (lambda (&rest args)")
+      (%write-exorcist-kill-line stream "        (declare (ignore args))")
+      (%write-exorcist-kill-line stream "        (close-git-io-sessions)")
+      (%write-exorcist-kill-line stream "        (with-open-file (stream ~S :direction :output :if-exists :supersede :if-does-not-exist :create)" ready)
+      (%write-exorcist-kill-line stream "          (write-line \"prepared\" stream)")
+      (%write-exorcist-kill-line stream "          (finish-output stream))")
+      (%write-exorcist-kill-line stream "        (dotimes (i 1000000)")
+      (%write-exorcist-kill-line stream "          (sleep 60))))")
+      (%write-exorcist-kill-line stream "(with-githack-transaction ()")
+      (%write-exorcist-kill-line stream "  (with-repository (repo) (~S :branch \"main\" :author ~S :committer ~S :message \"dtx\" :mode :read-write)"
+                                 repository-1 +dtx-author+ +dtx-author+)
+      (%write-exorcist-kill-line stream "    (with-transaction (v) (repo :read-write)")
+      (%write-exorcist-kill-line stream "      (declare (ignore v))")
+      (%write-exorcist-kill-line stream "      \"should-not-survive-1\"))")
+      (%write-exorcist-kill-line stream "  (with-repository (repo) (~S :branch \"main\" :author ~S :committer ~S :message \"dtx\" :mode :read-write)"
+                                 repository-2 +dtx-author+ +dtx-author+)
+      (%write-exorcist-kill-line stream "    (with-transaction (v) (repo :read-write)")
+      (%write-exorcist-kill-line stream "      (declare (ignore v))")
+      (%write-exorcist-kill-line stream "      \"should-not-survive-2\")))")
+      (%write-exorcist-kill-line stream "(write-line \"ledger write returned; the process was not killed\")")
+      (%write-exorcist-kill-line stream "(sb-ext:exit :code 2)"))))
+
+(test exorcist-rolls-back-when-the-process-is-killed-between-prepare-and-ledger-write
+  "A real child SBCL runs WITH-GITHACK-TRANSACTION across two
+repositories. Phase 1 Prepare finishes, both prepare refs are on
+disk, and the child then blocks inside the production call that
+would write the ledger ref. The parent kills that process with
+taskkill /F (UIOP:TERMINATE-PROCESS :URGENT T) before the ledger
+ref exists. RUN-GITHACK-EXORCIST!, in this process, rolls both
+participants back: the branches stay absent and the prepare refs
+are gone."
+  (with-temporary-git-repository (repository-1)
+    (with-temporary-git-repository (repository-2)
+      (let* ((suffix (format nil "~(~36,8,'0R~)" (random (expt 36 8) (make-random-state t))))
+             (ready (merge-pathnames (format nil "githack-kill-~A-ready" suffix)
+                                     (uiop:default-temporary-directory)))
+             (script (merge-pathnames (format nil "githack-kill-~A-child.lisp" suffix)
+                                      (uiop:default-temporary-directory)))
+             (log (merge-pathnames (format nil "githack-kill-~A-child.log" suffix)
+                                   (uiop:default-temporary-directory)))
+             (child nil))
+        (unwind-protect
+             (progn
+               (%write-exorcist-kill-child-script script ready repository-1 repository-2)
+               (setf child (uiop:launch-program
+                            (list "sbcl" "--noinform" "--disable-debugger" "--load" (namestring script))
+                            :output log :error-output :output))
+               (let ((reached (%exorcist-kill-poll (lambda () (probe-file ready)) 120)))
+                 (unless reached
+                   (when (ignore-errors (uiop:process-alive-p child))
+                     (ignore-errors (uiop:terminate-process child :urgent t))
+                     (ignore-errors (%exorcist-kill-poll (lambda () (not (uiop:process-alive-p child))) 15))
+                     (ignore-errors (uiop:wait-process child)))
+                   (sleep 0.2))
+                 (is (not (null reached))
+                     "Child never reached the ledger write.~%~A"
+                     (%exorcist-kill-tail log))
+                 (when reached
+                   (let* ((prepared-1 (%git-for-each-ref repository-1 "refs/githack/prepare/"))
+                          (prepared-2 (%git-for-each-ref repository-2 "refs/githack/prepare/"))
+                          (tx-id (and prepared-1 (prepare-tx-id-from-ref (third (first prepared-1))))))
+                     (is (= 1 (length prepared-1)))
+                     (is (= 1 (length prepared-2)))
+                     (is (string= tx-id (prepare-tx-id-from-ref (third (first prepared-2)))))
+                     (is (null (%git-for-each-ref repository-1 "refs/githack/ledger/")))
+                     (is (null (%git-for-each-ref repository-2 "refs/githack/ledger/")))
+                     (is (null (git-show-ref-sha repository-1 "main")))
+                     (is (null (git-show-ref-sha repository-2 "main")))
+                     (is (uiop:process-alive-p child))
+                     (uiop:terminate-process child :urgent t)
+                     (is (%exorcist-kill-poll (lambda () (not (uiop:process-alive-p child))) 15)
+                         "taskkill /F did not kill the child.~%~A"
+                         (%exorcist-kill-tail log))
+                     (ignore-errors (uiop:wait-process child))
+                     (is (equal (list (list tx-id "main" :rolled-back))
+                                (run-githack-exorcist! repository-1)))
+                     (is (equal (list (list tx-id "main" :rolled-back))
+                                (run-githack-exorcist! repository-2)))
+                     (is (null (dtx-read repository-1 "main")))
+                     (is (null (dtx-read repository-2 "main")))
+                     (is (null (%git-for-each-ref repository-1 "refs/githack/")))
+                     (is (null (%git-for-each-ref repository-2 "refs/githack/")))))))
+          (when (and child (ignore-errors (uiop:process-alive-p child)))
+            (ignore-errors (uiop:terminate-process child :urgent t))
+            (ignore-errors (uiop:wait-process child)))
+          (ignore-errors (delete-file ready))
+          (ignore-errors (delete-file script))
+          (ignore-errors (delete-file log)))))))
