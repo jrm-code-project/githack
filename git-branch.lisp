@@ -31,9 +31,9 @@ under `refs/heads/`. See RESOLVE-BRANCH and UPDATE-BRANCH!."))
 
 (setf (documentation 'get-name 'function)
       "Return OBJECT's name: for a GIT-BRANCH, its branch name (e.g.
-\"main\" or \"master\"); for a BRANCH-NOT-FOUND-ERROR or
-CONCURRENT-MODIFICATION-ERROR, the branch name that was searched for
-or being updated.")
+\"main\" or \"master\"); for a BRANCH-NOT-FOUND-ERROR,
+REF-HIERARCHY-CONFLICT-ERROR, or CONCURRENT-MODIFICATION-ERROR, the
+branch name (or raw ref path) that was searched for or being updated.")
 (setf (documentation 'get-target 'function)
       "Return BRANCH's (a GIT-BRANCH) GIT-COMMIT proxy target --
 the commit it currently points to (possibly still unloaded), or NIL
@@ -94,9 +94,110 @@ exist yet.")
       "Return the SHA CONDITION (a CONCURRENT-MODIFICATION-ERROR)
 attempted, and failed, to advance a branch to.")
 (setf (documentation 'get-detail 'function)
-      "Return CONDITION's (a CONCURRENT-MODIFICATION-ERROR) extra
-free-text detail describing the conflict, or NIL if none was
-supplied.")
+      "Return CONDITION's extra free-text detail, or NIL if none was
+supplied. For a CONCURRENT-MODIFICATION-ERROR, Git's own
+compare-and-swap refusal; for a REF-HIERARCHY-CONFLICT-ERROR, Git's
+own refusal to create a ref at a path another ref already occupies;
+for a MERGE-CONFLICT-ERROR or GARBAGE-COLLECTION-ERROR, the
+underlying tool's own report.")
+
+(defun %run-git (repository args)
+  "Shell out to `git --git-dir=<REPOSITORY> ARGS...` and return
+(VALUES OUTPUT ERROR-OUTPUT EXIT-CODE). Never signals on a non-zero
+exit code."
+  (uiop:run-program (append (list "git" (format nil "--git-dir=~A" (uiop:native-namestring repository)))
+                            args)
+                    :output :string :error-output :string :ignore-error-status t))
+
+(defun %nonempty-trimmed-lines (string)
+  "Return STRING's own lines, with surrounding whitespace removed and
+empty lines dropped."
+  (let ((text (or string "")))
+    (let next ((start 0))
+      (if (>= start (length text))
+          '()
+          (let* ((newline (position #\Newline text :start start))
+                 (line (string-trim '(#\Return #\Space #\Tab)
+                                    (subseq text start (or newline (length text))))))
+            (let ((rest (next (if newline (1+ newline) (length text)))))
+              (if (zerop (length line)) rest (cons line rest))))))))
+
+(defun %ref-proper-prefixes (ref-path)
+  "Return the proper slash-prefixes of REF-PATH, longest first.
+\"refs/heads/feature/foo\" yields (\"refs/heads/feature\"
+\"refs/heads\" \"refs\")."
+  (let next ((end (length ref-path)))
+    (let ((slash (position #\/ ref-path :from-end t :end end)))
+      (if slash
+          (cons (subseq ref-path 0 slash) (next slash))
+          '()))))
+
+(defun %git-ref-exists-p (repository ref-path)
+  "Return true when REF-PATH is an existing ref in REPOSITORY."
+  (multiple-value-bind (output error-output exit-code)
+      (%run-git repository (list "show-ref" "--verify" "--quiet" ref-path))
+    (declare (ignore output error-output))
+    (zerop exit-code)))
+
+(defun %git-ref-names-under (repository ref-path)
+  "Return the full names of every ref strictly under REF-PATH (so
+REF-PATH itself is not included), or NIL if there are none or the
+listing itself cannot be read."
+  (let ((prefix (concatenate 'string ref-path "/")))
+    (multiple-value-bind (output error-output exit-code)
+        (%run-git repository (list "for-each-ref" "--format=%(refname)" prefix))
+      (declare (ignore error-output))
+      (when (zerop exit-code)
+        (remove nil
+                (mapcar (lambda (line)
+                          (and (<= (length prefix) (length line))
+                               (string= prefix line :end2 (length prefix))
+                               line))
+                        (%nonempty-trimmed-lines output)))))))
+
+(defun %blocking-ref-for-hierarchy (repository ref-path)
+  "Return the full name of an existing ref that makes REF-PATH
+impossible to create, or NIL if no such ref is visible. A proper
+prefix of REF-PATH that is itself a ref blocks it (a file where a
+directory is required), as does any ref strictly under REF-PATH (a
+directory where a file is required)."
+  (or (find-if (lambda (prefix) (%git-ref-exists-p repository prefix))
+               (%ref-proper-prefixes ref-path))
+      (first (%git-ref-names-under repository ref-path))))
+
+(defun %signal-ref-update-failure (repository name ref-path sha expected-sha detail)
+  "Signal the failure of an attempted update of REF-PATH in
+REPOSITORY. NAME is the caller-facing label (a branch name, or
+REF-PATH itself). A path occupied by another ref -- the \"feature\"
+versus \"feature/foo\" case -- signals REF-HIERARCHY-CONFLICT-ERROR.
+Any other refusal, including Git's own compare-and-swap miss, signals
+CONCURRENT-MODIFICATION-ERROR so :RETRY and :REBASE still re-attempt
+a lost update and only a lost update."
+  (let ((blocking (%blocking-ref-for-hierarchy repository ref-path)))
+    (if blocking
+        (error 'ref-hierarchy-conflict-error
+               :repository repository :name name
+               :blocking-ref blocking :detail detail)
+        (error 'concurrent-modification-error
+               :repository repository :name name
+               :expected-sha (and (not (eq expected-sha :unconditional)) expected-sha)
+               :new-sha sha :detail detail))))
+
+(defun %signal-ref-batch-update-failure (repository commands detail)
+  "Like %SIGNAL-REF-UPDATE-FAILURE for a failed `git update-ref
+--stdin` batch COMMANDS. Each (:UPDATE REF ...) entry is checked for
+a hierarchy conflict; if none of them has one, the failure is a
+compare-and-swap miss on the batch as a whole."
+  (dolist (command commands)
+    (when (eq (first command) :update)
+      (let ((blocking (%blocking-ref-for-hierarchy repository (second command))))
+        (when blocking
+          (error 'ref-hierarchy-conflict-error
+                 :repository repository :name (second command)
+                 :blocking-ref blocking :detail detail)))))
+  (error 'concurrent-modification-error
+         :repository repository :name "(batch `update-ref --stdin`)"
+         :expected-sha nil :new-sha nil :detail detail))
 
 (defun git-update-ref! (repository name sha &key (expected-sha :unconditional))
   "Shell out to `git update-ref refs/heads/<NAME> <SHA> [<EXPECTED-SHA>]`
@@ -116,7 +217,12 @@ EXPECTED-SHA controls Git's own compare-and-swap semantics:
 In either compare-and-swap case (a string or NIL EXPECTED-SHA),
 signals CONCURRENT-MODIFICATION-ERROR if Git's own check fails,
 i.e. if some other writer already advanced (or, for NIL, created)
-the ref out from under us. Returns SHA on success."
+the ref out from under us. Signals REF-HIERARCHY-CONFLICT-ERROR
+instead when NAME cannot be created because it is a proper
+path-prefix of an existing branch, or an existing branch is a proper
+path-prefix of NAME (\"feature\" versus \"feature/foo\"). That
+conflict is structural, so :RETRY and :REBASE do not catch it.
+Returns SHA on success."
   (let ((args (append (list "git"
                              (format nil "--git-dir=~A" (uiop:native-namestring repository))
                              "update-ref"
@@ -128,11 +234,7 @@ the ref out from under us. Returns SHA on success."
         (uiop:run-program args :output :string :error-output :string :ignore-error-status t)
       (declare (ignore output))
       (unless (zerop exit-code)
-        (error 'concurrent-modification-error
-               :repository repository :name name
-               :expected-sha (and (not (eq expected-sha :unconditional)) expected-sha)
-               :new-sha sha
-               :detail error-output))
+        (%signal-ref-update-failure repository name (branch-ref-name name) sha expected-sha error-output))
       sha)))
 
 (defun resolve-branch (repository name &key (if-does-not-exist :error))

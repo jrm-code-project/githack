@@ -46,7 +46,10 @@ its subclasses, typically via INFLATE-GIT-PROXY."))
 (setf (documentation 'get-repository 'function)
       "Return the repository OBJECT belongs to: for a GIT-OBJECT
 proxy or a GIT-BRANCH, the REPOSITORY it was constructed with; for a
-BRANCH-NOT-FOUND-ERROR, the repository that was searched.")
+BRANCH-NOT-FOUND-ERROR, REF-HIERARCHY-CONFLICT-ERROR,
+CONCURRENT-MODIFICATION-ERROR, MERGE-CONFLICT-ERROR,
+GARBAGE-COLLECTION-ERROR, or TRANSACTION-LOCK-TIMEOUT-ERROR, the
+repository the failed operation was using.")
 (setf (documentation 'get-loaded? 'function)
       "Return true once OBJECT's (a GIT-OBJECT) payload has been
 fetched from disk. Supports lazy-loading: a proxy may exist with

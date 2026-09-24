@@ -130,17 +130,17 @@ does not exist."
 than being hardwired to \"refs/heads/<name>\". EXPECTED-SHA has the
 same meaning as GIT-UPDATE-REF!'s own argument of the same name.
 Signals CONCURRENT-MODIFICATION-ERROR (naming REF-PATH) if Git's own
-compare-and-swap check fails. Returns SHA on success."
+compare-and-swap check fails, and REF-HIERARCHY-CONFLICT-ERROR when
+REF-PATH collides with an existing ref along a shared slash-prefix
+(the same distinction GIT-UPDATE-REF! makes for a branch name).
+Returns SHA on success."
   (let ((args (append (list "update-ref" ref-path sha)
                        (unless (eq expected-sha :unconditional)
                          (list (or expected-sha ""))))))
     (multiple-value-bind (output error-output exit-code) (%git-run repository args)
       (declare (ignore output))
       (unless (zerop exit-code)
-        (error 'concurrent-modification-error
-               :repository repository :name ref-path
-               :expected-sha (and (not (eq expected-sha :unconditional)) expected-sha)
-               :new-sha sha :detail error-output))
+        (%signal-ref-update-failure repository ref-path ref-path sha expected-sha error-output))
       sha)))
 
 (defun %git-raw-delete-ref! (repository ref-path)
@@ -177,17 +177,17 @@ REPOSITORY, via `git update-ref --stdin`. Per Git's own documented
 behaviour, every command in one --stdin invocation is applied as a
 single atomic transaction: if any one update's compare-and-swap
 check fails, Git performs NONE of the updates in COMMANDS at all.
-Returns T on success; signals CONCURRENT-MODIFICATION-ERROR
-otherwise."
+Returns T on success. Signals REF-HIERARCHY-CONFLICT-ERROR when an
+:UPDATE in COMMANDS collides with an existing ref along a shared
+slash-prefix, and CONCURRENT-MODIFICATION-ERROR for a
+compare-and-swap miss."
   (let ((input (with-output-to-string (s)
                  (dolist (command commands)
                    (%format-git-update-ref-stdin-command (first command) s command)))))
     (multiple-value-bind (output error-output exit-code) (%git-run repository (list "update-ref" "--stdin") :input input)
       (declare (ignore output))
       (unless (zerop exit-code)
-        (error 'concurrent-modification-error
-               :repository repository :name "(batch `update-ref --stdin`)"
-               :expected-sha nil :new-sha nil :detail error-output))
+        (%signal-ref-batch-update-failure repository commands error-output))
       t)))
 
 (defun %git-mktag (repository content)

@@ -175,6 +175,8 @@
                 "+LOAD-STRIPE-MUTEXES+"
                 "+LOAD-STRIPE-MUTEX-COUNT+"
                 "CONCURRENT-MODIFICATION-ERROR"
+                "REF-HIERARCHY-CONFLICT-ERROR"
+                "GET-BLOCKING-REF"
                 "MERGE-CONFLICT-ERROR"
                 "GET-BASE-SHA"
                 "GET-CANDIDATE-SHA"

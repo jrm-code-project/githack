@@ -16,10 +16,10 @@
 ;;; they read identically, from a caller's point of view, to the bare
 ;;; CL:ERROR calls they replace, except for now being a
 ;;; programmatically distinguishable condition class. A few
-;;; (BRANCH-NOT-FOUND-ERROR, CONCURRENT-MODIFICATION-ERROR in
-;;; git-branch.lisp, TRANSACTION-LOCK-TIMEOUT-ERROR in
-;;; transaction-lock.lisp) carry their own structured slots and a
-;;; custom REPORT method instead.
+;;; (BRANCH-NOT-FOUND-ERROR, REF-HIERARCHY-CONFLICT-ERROR,
+;;; CONCURRENT-MODIFICATION-ERROR in git-branch.lisp,
+;;; TRANSACTION-LOCK-TIMEOUT-ERROR in transaction-lock.lisp) carry
+;;; their own structured slots and a custom REPORT method instead.
 
 (define-condition githack-error (simple-error)
   ()
@@ -96,6 +96,34 @@ itself be reached."))
   (:documentation
    "Signaled by RESOLVE-BRANCH when no branch named NAME exists in
 REPOSITORY and :IF-DOES-NOT-EXIST is :ERROR (the default)."))
+
+(define-condition ref-hierarchy-conflict-error (githack-error)
+  ((repository :initarg :repository :reader get-repository)
+   (name :initarg :name :reader get-name)
+   (blocking-ref :initarg :blocking-ref :reader get-blocking-ref)
+   (detail :initarg :detail :initform nil :reader get-detail))
+  (:report
+   (lambda (condition stream)
+     (format stream "Cannot create or update ~S in ~A: ~S already occupies that path. Git stores each \"/\" in a ref name as a directory boundary, so one ref cannot be created at a proper path-prefix of another.~@[~%~A~]"
+             (get-name condition)
+             (get-repository condition)
+             (get-blocking-ref condition)
+             (get-detail condition))))
+  (:documentation
+   "Signaled by GIT-UPDATE-REF!, %GIT-RAW-UPDATE-REF!, and
+%GIT-UPDATE-REF-STDIN! when the ref being created is impossible
+because some existing ref is a proper path-prefix of it, or it is a
+proper path-prefix of some existing ref. This is how a branch named
+\"feature\" collides with a branch named \"feature/foo\": Git stores
+the latter as a file inside a directory named for the former. It is
+not a lost update. :RETRY and :REBASE catch only
+CONCURRENT-MODIFICATION-ERROR, so this condition propagates instead
+of being retried forever."))
+
+(setf (documentation 'get-blocking-ref 'function)
+      "Return the full ref path (e.g. \"refs/heads/feature/foo\") that
+already occupies the path CONDITION (a REF-HIERARCHY-CONFLICT-ERROR)
+was trying to create or update.")
 
 (define-condition merge-conflict-error (githack-error)
   ((repository :initarg :repository :reader get-repository)
