@@ -378,3 +378,80 @@ are gone."
           (ignore-errors (delete-file ready))
           (ignore-errors (delete-file script))
           (ignore-errors (delete-file log)))))))
+
+(defun %strand-second-participant-after-ledger (repository-1 repository-2)
+  "Leave a two-repository transaction crashed after the ledger write
+and after participant 1's roll-forward, before participant 2's.
+Both branches are \"main\" and both already have a commit, and those
+two parent SHAs differ. Returns (VALUES TX-ID PW1 PW2) with PW1 the
+ledger participant (enlisted first) and PW2 the stranded one.
+PENDING-WRITES is pushed, so the list is reversed to restore
+first-enlisted order, the same order %FINISH-GITHACK-TRANSACTION!
+uses when it builds the manifest. A branch-only FIND therefore
+selects PW1 for a recovery of PW2."
+  (dtx-write! repository-1 "main" "seed-1")
+  (dtx-write! repository-2 "main" "seed-2")
+  (let* ((tx-id (generate-transaction-id))
+         (txn (%make-githack-transaction tx-id)))
+    (let ((*current-transaction* txn))
+      (dtx-write! repository-1 "main" "final-1")
+      (dtx-write! repository-2 "main" "final-2"))
+    (let* ((pending (reverse (%githack-transaction/pending-writes txn)))
+           (pw1 (first pending))
+           (pw2 (second pending))
+           (manifest-text (format-transaction-manifest
+                            (build-transaction-manifest tx-id pending (pending-write/git-repository pw1)))))
+      (%prepare-participant! pw1 tx-id manifest-text)
+      (%prepare-participant! pw2 tx-id manifest-text)
+      (%write-ledger-commit-point! (pending-write/git-repository pw1) tx-id)
+      (%roll-forward-participant! pw1)
+      (values tx-id pw1 pw2))))
+
+(test exorcist-rolls-forward-repo-2-using-its-own-old-sha-not-repo-1s
+  "Two repositories, both on \"main\", each with its own non-NIL
+parent commit. The transaction is crashed after the ledger write and
+after participant 1 rolls forward, before participant 2 does.
+RUN-GITHACK-EXORCIST! is invoked on repository 2 only. Repository 2's
+branch must advance to its own prepared SHA and its prepare ref must
+be gone. A lookup keyed only by branch name selects participant 1,
+whose old SHA is a different commit, and the compare-and-swap
+refuses."
+  (with-temporary-git-repository (repository-1)
+    (with-temporary-git-repository (repository-2)
+      (multiple-value-bind (tx-id pw1 pw2)
+          (%strand-second-participant-after-ledger repository-1 repository-2)
+        (is (not (string= (pending-write/old-sha pw1) (pending-write/old-sha pw2))))
+        (is (string= (pending-write/old-sha pw2) (git-show-ref-sha repository-2 "main")))
+        (is (equal (list (list tx-id "main" :committed))
+                   (run-githack-exorcist! repository-2)))
+        (is (string= (pending-write/new-commit-sha pw2)
+                     (git-show-ref-sha repository-2 "main")))
+        (is (null (%git-for-each-ref repository-2 "refs/githack/prepare/")))
+        (is (equal "final-2" (dtx-read repository-2 "main")))
+        (is (equal "final-1" (dtx-read repository-1 "main")))))))
+
+(test stolen-old-sha-makes-the-roll-forward-batch-a-no-op
+  "Feeding participant 1's old SHA into participant 2's roll-forward
+batch -- the SHA a branch-only FIND returns, because participant 1
+is the first manifest entry named \"main\" -- must not move
+participant 2. Git's compare-and-swap refuses, and because the
+branch update and the prepare-ref delete are one --stdin batch, the
+prepare ref stays."
+  (with-temporary-git-repository (repository-1)
+    (with-temporary-git-repository (repository-2)
+      (multiple-value-bind (tx-id pw1 pw2)
+          (%strand-second-participant-after-ledger repository-1 repository-2)
+        (declare (ignore tx-id))
+        (let ((stolen-old-sha (pending-write/old-sha pw1))
+              (own-old-sha (pending-write/old-sha pw2))
+              (prepare-ref (pending-write/prepare-ref pw2)))
+          (is (not (string= stolen-old-sha own-old-sha)))
+          (signals concurrent-modification-error
+            (%git-update-ref-stdin! repository-2
+                                    (list (list :update "refs/heads/main"
+                                                (pending-write/new-commit-sha pw2)
+                                                stolen-old-sha)
+                                          (list :delete prepare-ref))))
+          (is (string= own-old-sha (git-show-ref-sha repository-2 "main")))
+          (is (equal (list prepare-ref)
+                     (mapcar #'third (%git-for-each-ref repository-2 "refs/githack/prepare/")))))))))

@@ -87,6 +87,17 @@
 ;;; simply deleted, leaving the branch untouched and its orphaned
 ;;; commit for `git gc` to eventually collect.
 ;;;
+;;; A participant's identity is the pair (repository, branch), not
+;;; the branch name. ENLIST-TRANSACTION-WRITE! coalesces a second
+;;; top-level write to the same pair in place and keeps the original
+;;; old SHA, so a manifest contains at most one entry per pair.
+;;; Recovery compares the repository as UIOP:NATIVE-NAMESTRING
+;;; (EQUAL, not EQ of pathname objects) and the branch with STRING=,
+;;; the same two checks enlist uses. Branch name alone is not an
+;;; identity: two participants on "main" are the ordinary case, and
+;;; the first plist with that name is the wrong compare-and-swap
+;;; baseline for every later one.
+;;;
 ;;; Every one of these operations relies solely on standard Git
 ;;; plumbing (`hash-object`, `cat-file`, `update-ref`, `update-ref
 ;;; --stdin`, `mktag`, `rev-parse`, `for-each-ref`) against ordinary
@@ -483,15 +494,38 @@ protocol."
 ;;; The Exorcist: crash recovery.
 ;;; ------------------------------------------------------------------
 
+(defun %manifest-participant (manifest repository branch-name)
+  "Return MANIFEST's participant plist for REPOSITORY and BRANCH-NAME,
+or NIL. The key is the pair ENLIST-TRANSACTION-WRITE! coalesces on.
+The repository half is compared as UIOP:NATIVE-NAMESTRING under
+EQUAL, not by EQ of pathname objects; the branch half is STRING=.
+Enlist keeps at most one pending write per pair (a second top-level
+write to the same repository and branch replaces the new commit SHA
+and preserves the original old SHA), so the match is unique. Branch
+name alone is not a key."
+  (let ((repository-key (uiop:native-namestring repository)))
+    (find-if (lambda (participant)
+               (and (equal repository-key (getf participant :repository))
+                    (string= branch-name (getf participant :branch))))
+             (getf manifest :participants))))
+
 (defun %exorcise-stranded-ref! (repository tag-sha ref-path)
   "Resolve one stranded `refs/githack/prepare/<tx-id>/<branch-name>`
 ref (REF-PATH, whose annotated tag object's SHA is TAG-SHA) found in
 REPOSITORY: parse its own Manifest, ask its Ledger whether it was
 ever permanently committed, and either roll it forward or delete it.
+The roll-forward compare-and-swap baseline is that participant's own
+old SHA, looked up by (%MANIFEST-PARTICIPANT MANIFEST REPOSITORY
+BRANCH-NAME). There is at most one manifest entry per (repository,
+branch), because ENLIST-TRANSACTION-WRITE! coalesces a second write
+to the same pair. Do not look the participant up by branch name
+alone: every participant on \"main\" would then share the first
+entry's old SHA, and the later ones' compare-and-swap would refuse.
 Returns (VALUES TX-ID BRANCH-NAME ACTION), ACTION being :COMMITTED or
 :ROLLED-BACK. Signals DISTRIBUTED-TRANSACTION-ERROR if REF-PATH's own
-tag cannot be read back into a well-formed Manifest, or if its
-Ledger repository cannot itself be reached."
+tag cannot be read back into a well-formed Manifest, if no
+participant matches REPOSITORY and BRANCH-NAME, or if its Ledger
+repository cannot itself be reached."
   (let* ((prefix "refs/githack/prepare/")
          (suffix (subseq ref-path (length prefix)))
          (slash (position #\/ suffix))
@@ -502,19 +536,22 @@ Ledger repository cannot itself be reached."
                (manifest-text (nth-value 1 (split-commit-header-and-message tag-content)))
                (manifest (parse-transaction-manifest manifest-text))
                (ledger-repository (uiop:parse-native-namestring (getf manifest :ledger)))
-               (participant (find branch-name (getf manifest :participants)
-                                   :key (lambda (p) (getf p :branch)) :test #'string=))
-               (old-sha (and participant (getf participant :old-sha))))
-          (if (%git-raw-show-ref ledger-repository (ledger-ref-path tx-id))
-              (let ((target-commit-sha (%git-rev-parse repository (format nil "~A^{commit}" ref-path))))
-                (%git-update-ref-stdin! repository
-                                       (list (list :update (format nil "refs/heads/~A" branch-name)
-                                                   target-commit-sha old-sha)
-                                             (list :delete ref-path)))
-                (values tx-id branch-name :committed))
-              (progn
-                (%git-raw-delete-ref! repository ref-path)
-                (values tx-id branch-name :rolled-back))))
+               (participant (%manifest-participant manifest repository branch-name)))
+          (unless participant
+            (error 'distributed-transaction-error
+                   :format-control "No manifest participant for repository ~A branch ~S."
+                   :format-arguments (list repository branch-name)))
+          (let ((old-sha (getf participant :old-sha)))
+            (if (%git-raw-show-ref ledger-repository (ledger-ref-path tx-id))
+                (let ((target-commit-sha (%git-rev-parse repository (format nil "~A^{commit}" ref-path))))
+                  (%git-update-ref-stdin! repository
+                                         (list (list :update (format nil "refs/heads/~A" branch-name)
+                                                     target-commit-sha old-sha)
+                                               (list :delete ref-path)))
+                  (values tx-id branch-name :committed))
+                (progn
+                  (%git-raw-delete-ref! repository ref-path)
+                  (values tx-id branch-name :rolled-back)))))
       (distributed-transaction-error (condition) (error condition))
       (error (condition)
         (error 'distributed-transaction-error
@@ -528,7 +565,9 @@ WITH-GITHACK-TRANSACTION whose Lisp process crashed somewhere between
 Phase 1 (Prepare) and Phase 2 (Roll Forward) -- and resolve each one
 via %EXORCISE-STRANDED-REF!: fast-forward and clean up if its own
 Ledger shows it was already permanently committed, or simply clean up
-if not. Safe to call on a repository with no stranded refs at all
+if not. The fast-forward baseline is that repository's own old SHA
+for that branch, not the old SHA of whichever manifest entry shares
+the branch name. Safe to call on a repository with no stranded refs at all
 (returns the empty list); safe to call repeatedly (each ref is
 resolved and removed, so a second call finds nothing left to do).
 Returns a list of (TX-ID BRANCH-NAME ACTION) for every stranded ref
