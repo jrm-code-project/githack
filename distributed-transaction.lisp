@@ -2,9 +2,13 @@
 
 (in-package "GITHACK")
 
-;;; Transparent, crash-proof distributed (multi-repository) Two-
-;;; Phase-Commit (2PC) transactions on top of GitHack's existing,
-;;; single-repository GIT-TRANSACTION/TRANSACTION machinery.
+;;; Transparent distributed (multi-repository) Two-Phase-Commit (2PC)
+;;; transactions on top of GitHack's existing, single-repository
+;;; GIT-TRANSACTION/TRANSACTION machinery. From Prepare until the
+;;; prepared commit is published, the participant branch is held
+;;; with Git's own `refs/heads/<branch>.lock`, so an ordinary
+;;; update-ref cannot move it. Recovery of a dead process publishes
+;;; that same lock file.
 ;;;
 ;;; WITH-GITHACK-TRANSACTION/CALL-WITH-GITHACK-TRANSACTION bind
 ;;; *CURRENT-TRANSACTION* (declared very early, in distributed-
@@ -67,13 +71,16 @@
 ;;; meaningless blob) is written in the Ledger repository. The
 ;;; instant that ref exists, this transaction is permanently
 ;;; committed, no matter what happens next -- even if this very Lisp
-;;; process crashes one line later. Every participant is then rolled
-;;; forward: its own real branch ref is advanced to its prepared
-;;; commit, and its own prepare ref is deleted, both in one single
-;;; atomic `git update-ref --stdin` batch per participant (Git's own
-;;; --stdin batches are all-or-nothing: if the branch's own
-;;; compare-and-swap check somehow fails at this point, NEITHER
-;;; update in that one participant's batch takes effect).
+;;; process crashes one line later. Every participant is then
+;;; published by atomically replacing `refs/heads/<branch>` with the
+;;; lock file written at Prepare (the new SHA and a newline). That
+;;; replace both makes the prepared commit the branch tip and
+;;; releases the lock. The prepare ref is deleted after the
+;;; publish. A crash between those two leaves the branch already at
+;;; the prepared commit; RUN-GITHACK-EXORCIST! sees that and only
+;;; deletes the prepare ref. A crash before the publish leaves the
+;;; lock file in place, so an ordinary update-ref still cannot move
+;;; the branch, and the Exorcist performs the same replace.
 ;;;
 ;;; CRASH RECOVERY ("The Exorcist"): if this Lisp process dies
 ;;; between Phase 1 and Phase 2 (or partway through Phase 2's own
@@ -363,6 +370,125 @@ tag's own message -- suitable input for %GIT-MKTAG."
           commit-sha tag-name tagger-signature (unix-time-now) +default-commit-timezone-offset+ manifest-text))
 
 ;;; ------------------------------------------------------------------
+;;; Branch ref lock. Git's update-ref creates `refs/heads/<branch>.lock`
+;;; with O_EXCL and refuses to move the branch while that file exists.
+;;; Prepare creates it, writes the prepared SHA, and leaves it on
+;;; disk through the ledger write. Publishing renames it onto the
+;;; branch ref. Rollback deletes it.
+;;; ------------------------------------------------------------------
+
+(defun %git-dir-pathname (repository)
+  "Return REPOSITORY as a directory pathname, so merging a relative
+ref path onto it keeps every component of the Git directory."
+  (uiop:ensure-directory-pathname repository))
+
+(defun %branch-ref-pathname (repository branch-name)
+  "Return the loose-ref pathname of REPOSITORY's branch BRANCH-NAME."
+  (merge-pathnames (uiop:parse-unix-namestring (format nil "refs/heads/~A" branch-name))
+                   (%git-dir-pathname repository)))
+
+(defun %branch-ref-lock-pathname (repository branch-name)
+  "Return Git's own lock pathname for REPOSITORY's branch BRANCH-NAME:
+`refs/heads/<branch>.lock`."
+  (merge-pathnames (uiop:parse-unix-namestring (format nil "refs/heads/~A.lock" branch-name))
+                   (%git-dir-pathname repository)))
+
+(defun %write-lock-sha (lock-pathname sha)
+  "Write SHA and a single linefeed into LOCK-PATHNAME. The bytes are
+written explicitly so a Windows stream cannot turn the linefeed
+into a carriage return."
+  (with-open-file (out lock-pathname :direction :output
+                       :element-type '(unsigned-byte 8)
+                       :if-exists :overwrite :if-does-not-exist :error)
+    (write-sequence (sb-ext:string-to-octets (format nil "~A~%" sha) :external-format :ascii) out)
+    (finish-output out)))
+
+(defun %atomic-replace-file (source target)
+  "Replace TARGET with SOURCE. SOURCE is consumed. On Windows this is
+MoveFileEx with MOVEFILE_REPLACE_EXISTING and MOVEFILE_WRITE_THROUGH,
+so a crash cannot leave the branch ref missing."
+  #+os-windows
+  (let* ((src (substitute #\/ #\\ (uiop:native-namestring source)))
+         (dst (substitute #\/ #\\ (uiop:native-namestring target)))
+         (script (format nil "Add-Type -Namespace GithackAtomic -Name Move -MemberDefinition '[DllImport(\"kernel32.dll\", SetLastError=true, CharSet=CharSet.Unicode)] public static extern bool MoveFileEx(string existing, string neu, int flags);'; if (-not [GithackAtomic.Move]::MoveFileEx('~A','~A', 9)) { exit 1 }"
+                         src dst)))
+    (multiple-value-bind (output error-output code)
+        (uiop:run-program (list "powershell" "-NoProfile" "-NonInteractive" "-Command" script)
+                          :output :string :error-output :string :ignore-error-status t)
+      (unless (zerop code)
+        (error 'distributed-transaction-error
+               :format-control "Could not publish ~A onto ~A (~D): ~A~A"
+               :format-arguments (list source target code output error-output)))))
+  #-os-windows
+  (uiop:rename-file-overwriting-target source target))
+
+(defun %release-branch-ref-lock! (repository branch-name)
+  "Delete REPOSITORY's branch lock for BRANCH-NAME if it exists.
+Used when a Prepare is rolled back, or when the branch ref already
+holds the prepared commit and the lock file is only a leftover."
+  (ignore-errors (delete-file (%branch-ref-lock-pathname repository branch-name)))
+  nil)
+
+(defun %acquire-branch-ref-lock! (repository branch-name old-sha new-sha)
+  "Create Git's `refs/heads/<branch>.lock` for BRANCH-NAME and write
+NEW-SHA into it. After the file exists, the branch must still be at
+OLD-SHA (NIL when the branch does not exist yet); otherwise the lock
+is removed and CONCURRENT-MODIFICATION-ERROR is signalled. Polls
+while some other update holds the lock, then signals
+TRANSACTION-LOCK-TIMEOUT-ERROR."
+  (let ((lock (%branch-ref-lock-pathname repository branch-name))
+        (deadline (+ (get-internal-real-time)
+                     (round (* +transaction-lock-timeout+ internal-time-units-per-second)))))
+    (ensure-directories-exist lock)
+    (let next ()
+      (let ((stream (open lock :direction :output
+                          :element-type '(unsigned-byte 8)
+                          :if-exists nil :if-does-not-exist :create)))
+        (if (null stream)
+            (progn
+              (when (> (get-internal-real-time) deadline)
+                (error 'transaction-lock-timeout-error :pathname lock))
+              (sleep +transaction-lock-poll-interval+)
+              (next))
+            (handler-case
+                (progn
+                  (let ((current (git-show-ref-sha repository branch-name)))
+                    (unless (equal current old-sha)
+                      (error 'concurrent-modification-error
+                             :repository repository :name branch-name
+                             :expected-sha old-sha :new-sha new-sha)))
+                  (write-sequence (sb-ext:string-to-octets (format nil "~A~%" new-sha) :external-format :ascii)
+                                  stream)
+                  (finish-output stream)
+                  (close stream))
+              (error (condition)
+                (ignore-errors (close stream))
+                (%release-branch-ref-lock! repository branch-name)
+                (error condition))))))))
+
+(defun %publish-locked-branch-ref! (repository branch-name new-sha)
+  "Make BRANCH-NAME point at NEW-SHA by replacing the loose ref with
+the lock file. If the branch already points at NEW-SHA, only a
+leftover lock file is removed."
+  (if (equal (git-show-ref-sha repository branch-name) new-sha)
+      (%release-branch-ref-lock! repository branch-name)
+      (let ((lock (%branch-ref-lock-pathname repository branch-name)))
+        (unless (probe-file lock)
+          (ensure-directories-exist lock)
+          (with-open-file (out lock :direction :output
+                               :element-type '(unsigned-byte 8)
+                               :if-exists nil :if-does-not-exist :create)
+            (unless out
+              (error 'distributed-transaction-error
+                     :format-control "Branch ~A in ~A moved while its lock file was gone."
+                     :format-arguments (list branch-name repository)))
+            (write-sequence (sb-ext:string-to-octets (format nil "~A~%" new-sha) :external-format :ascii) out)
+            (finish-output out)
+            (close out)))
+        (%write-lock-sha lock new-sha)
+        (%atomic-replace-file lock (%branch-ref-pathname repository branch-name)))))
+
+;;; ------------------------------------------------------------------
 ;;; Phase 1 (PREPARE) and its rollback.
 ;;; ------------------------------------------------------------------
 
@@ -370,10 +496,16 @@ tag's own message -- suitable input for %GIT-MKTAG."
   "Perform Phase 1 (\"Prepare\") for PW (a PENDING-WRITE): create an
 annotated tag (via %GIT-MKTAG) targeting PW's own already-persisted
 NEW-COMMIT-SHA, with MANIFEST-TEXT as its message, then point
-`refs/githack/prepare/<tx-id>/<branch-name>` at it (requiring that
-ref not already exist -- a collision would mean TX-ID was somehow
-reused, which GENERATE-TRANSACTION-ID's 128 bits of randomness makes
-astronomically unlikely). Records the new prepare ref's path in PW's
+`refs/githack/prepare/<tx-id>/<encoded-branch>` at it. The branch
+segment is %ENCODE-REF-PATH-SEGMENT of the raw branch name (`/` is
+`%2F`), not the raw name. The raw name is only in MANIFEST-TEXT.
+The tag object's own \"tag\" header is SANITIZE-TAG-NAME-COMPONENT
+of that name (`/` becomes `-`). That header string is not an
+identity: \"feature/foo\" and \"feature-foo\" sanitize to the same
+header, and nothing looks a participant up by it. The ref must not
+already exist -- a collision would mean TX-ID was somehow reused,
+which GENERATE-TRANSACTION-ID's 128 bits of randomness makes
+astronomically unlikely. Records the new prepare ref's path in PW's
 own PREPARE-REF slot. Returns PW."
   (let* ((git-repository (pending-write/git-repository pw))
          (repository (get-pathname git-repository))
@@ -383,20 +515,30 @@ own PREPARE-REF slot. Returns PW."
          (tag-content (format-annotated-tag-content (pending-write/new-commit-sha pw) tag-name tagger manifest-text))
          (tag-sha (%git-mktag repository tag-content))
          (ref-path (prepare-ref-path tx-id branch-name)))
-    (%git-raw-update-ref! repository ref-path tag-sha :expected-sha nil)
-    (setf (pending-write/prepare-ref pw) ref-path)
-    pw))
+    (%acquire-branch-ref-lock! repository branch-name
+                               (pending-write/old-sha pw) (pending-write/new-commit-sha pw))
+    (handler-case
+        (progn
+          (%git-raw-update-ref! repository ref-path tag-sha :expected-sha nil)
+          (setf (pending-write/prepare-ref pw) ref-path)
+          pw)
+      (error (condition)
+        (%release-branch-ref-lock! repository branch-name)
+        (error condition)))))
 
 (defun %rollback-participant-prepare! (pw)
   "Undo %PREPARE-PARTICIPANT!'s effect on PW (a PENDING-WRITE) that
-already succeeded: best-effort delete its own prepare ref (if any),
-leaving its already-persisted commit object as harmless, unreachable
-Git garbage. Used only when some LATER participant's own Phase 1
-step fails, to avoid leaving earlier participants' prepare refs
-stranded for RUN-GITHACK-EXORCIST! to have to clean up later."
-  (when (pending-write/prepare-ref pw)
-    (%git-raw-delete-ref! (get-pathname (pending-write/git-repository pw)) (pending-write/prepare-ref pw))
-    (setf (pending-write/prepare-ref pw) nil)))
+already succeeded: best-effort delete its own prepare ref (if any)
+and its branch lock, leaving its already-persisted commit object as
+harmless, unreachable Git garbage. Used only when some LATER
+participant's own Phase 1 step fails, and by the Exorcist when the
+ledger ref was never written. The branch lock has to go too, or the
+branch stays frozen for every later update-ref."
+  (let ((repository (get-pathname (pending-write/git-repository pw))))
+    (when (pending-write/prepare-ref pw)
+      (%git-raw-delete-ref! repository (pending-write/prepare-ref pw))
+      (setf (pending-write/prepare-ref pw) nil))
+    (%release-branch-ref-lock! repository (pending-write/branch-name pw))))
 
 ;;; ------------------------------------------------------------------
 ;;; Phase 2 (POINT OF NO RETURN & ROLL FORWARD).
@@ -419,20 +561,16 @@ SHA."
     blob-sha))
 
 (defun %roll-forward-participant! (pw)
-  "Perform Phase 2's own per-participant \"Roll Forward\" for PW (a
-PENDING-WRITE) whose Phase 1 Prepare step already succeeded: advance
-its real `refs/heads/<branch-name>` to its own prepared NEW-COMMIT-
-SHA (checked against OLD-SHA, exactly the same compare-and-swap
-baseline an ordinary, non-distributed commit would have used) and
-delete its own prepare ref, both via one single atomic
-`git update-ref --stdin` batch, so no external observer can ever see
-PW's branch newly advanced while its prepare ref still lingers, or
-vice versa."
+  "Publish PW's prepared commit by replacing its branch ref with the
+lock file %PREPARE-PARTICIPANT! wrote, then delete PW's prepare ref.
+An ordinary update-ref cannot move the branch until this replace
+happens, because that lock file is Git's own
+`refs/heads/<branch>.lock`."
   (let ((repository (get-pathname (pending-write/git-repository pw))))
-    (%git-update-ref-stdin! repository
-                            (list (list :update (format nil "refs/heads/~A" (pending-write/branch-name pw))
-                                        (pending-write/new-commit-sha pw) (pending-write/old-sha pw))
-                                  (list :delete (pending-write/prepare-ref pw))))))
+    (%publish-locked-branch-ref! repository (pending-write/branch-name pw)
+                                 (pending-write/new-commit-sha pw))
+    (when (pending-write/prepare-ref pw)
+      (%git-raw-delete-ref! repository (pending-write/prepare-ref pw)))))
 
 ;;; ------------------------------------------------------------------
 ;;; Smart-commit dispatch: 0 / 1 / >1 participants.
@@ -584,14 +722,22 @@ repository cannot itself be reached."
                    :format-arguments (list repository branch-name)))
           (let ((old-sha (getf participant :old-sha)))
             (if (%git-raw-show-ref ledger-repository (ledger-ref-path tx-id))
-                (let ((target-commit-sha (%git-rev-parse repository (format nil "~A^{commit}" ref-path))))
-                  (%git-update-ref-stdin! repository
-                                         (list (list :update (format nil "refs/heads/~A" branch-name)
-                                                     target-commit-sha old-sha)
-                                               (list :delete ref-path)))
+                (let* ((target-commit-sha (%git-rev-parse repository (format nil "~A^{commit}" ref-path)))
+                       (current (git-show-ref-sha repository branch-name)))
+                  (cond
+                    ((equal current target-commit-sha)
+                     (%release-branch-ref-lock! repository branch-name))
+                    ((equal current old-sha)
+                     (%publish-locked-branch-ref! repository branch-name target-commit-sha))
+                    (t
+                     (error 'distributed-transaction-error
+                            :format-control "Branch ~A in ~A is at ~A, neither its prepared commit ~A nor its old SHA ~A, so the branch lock was lost before publish."
+                            :format-arguments (list branch-name repository current target-commit-sha old-sha))))
+                  (%git-raw-delete-ref! repository ref-path)
                   (values tx-id branch-name :committed))
                 (progn
                   (%git-raw-delete-ref! repository ref-path)
+                  (%release-branch-ref-lock! repository branch-name)
                   (values tx-id branch-name :rolled-back)))))
       (distributed-transaction-error (condition) (error condition))
       (error (condition)

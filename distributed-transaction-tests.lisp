@@ -174,7 +174,9 @@ branch is ever advanced."
                            :key (lambda (entry) (search "prepare" (third entry)))
                            :test #'eq)))
         (is (null (git-show-ref-sha repository-1 "main")))
-        (is (null (git-show-ref-sha repository-2 "main")))))))
+        (is (null (git-show-ref-sha repository-2 "main")))
+        (is (not (probe-file (%branch-ref-lock-pathname repository-1 "main"))))
+        (is (not (probe-file (%branch-ref-lock-pathname repository-2 "main"))))))))
 
 (test exorcist-rolls-back-a-stranded-prepare-ref-with-no-ledger
   "RUN-GITHACK-EXORCIST!, run against a repository holding a stranded
@@ -198,7 +200,8 @@ untouched."
       (let ((results (run-githack-exorcist! repository)))
         (is (equal (list (list tx-id "main" :rolled-back)) results)))
       (is (null (git-show-ref-sha repository "main")))
-      (is (null (%git-for-each-ref repository "refs/githack/prepare/"))))))
+      (is (null (%git-for-each-ref repository "refs/githack/prepare/")))
+      (is (not (probe-file (%branch-ref-lock-pathname repository "main")))))))
 
 (test exorcist-rolls-forward-a-stranded-prepare-ref-with-a-written-ledger
   "RUN-GITHACK-EXORCIST!, run against a repository holding a stranded
@@ -508,6 +511,40 @@ at, and the prepare ref is gone."
           (ignore-errors (delete-file script))
           (ignore-errors (delete-file log)))))))
 
+(test branch-ref-lock-rejects-an-ordinary-update-until-publish
+  "After Prepare, Git's own refs/heads/<branch>.lock is on disk, so
+an ordinary git update-ref of that branch fails and the tip stays
+on the parent commit. Publishing the lock file then makes the
+prepared commit the tip and removes the lock. The ordinary update
+does not land."
+  (with-temporary-git-repository (repository)
+    (dtx-write! repository "main" "seed")
+    (let* ((tx-id (generate-transaction-id))
+           (txn (%make-githack-transaction tx-id)))
+      (let ((*current-transaction* txn))
+        (dtx-write! repository "main" "final"))
+      (let* ((pw (first (%githack-transaction/pending-writes txn)))
+             (manifest-text (format-transaction-manifest
+                              (build-transaction-manifest tx-id (list pw)
+                                                          (pending-write/git-repository pw))))
+             (lock (%branch-ref-lock-pathname repository "main")))
+        (%prepare-participant! pw tx-id manifest-text)
+        (is (probe-file lock))
+        (multiple-value-bind (output error-output code)
+            (uiop:run-program
+             (list "git" (format nil "--git-dir=~A" (uiop:native-namestring repository))
+                   "update-ref" "refs/heads/main" (pending-write/new-commit-sha pw))
+             :output :string :error-output :string :ignore-error-status t)
+          (declare (ignore output))
+          (is (not (zerop code)))
+          (is (search "lock" error-output)))
+        (is (string= (pending-write/old-sha pw) (git-show-ref-sha repository "main")))
+        (%write-ledger-commit-point! (pending-write/git-repository pw) tx-id)
+        (%roll-forward-participant! pw)
+        (is (not (probe-file lock)))
+        (is (string= (pending-write/new-commit-sha pw) (git-show-ref-sha repository "main")))
+        (is (equal "final" (dtx-read repository "main")))))))
+
 (test exorcist-decodes-feature/foo-from-one-prepare-ref-segment
   "The prepare ref for branch \"feature/foo\" is
 refs/githack/prepare/<tx-id>/feature%2Ffoo: one segment after the
@@ -609,6 +646,10 @@ prepare ref stays."
               (own-old-sha (pending-write/old-sha pw2))
               (prepare-ref (pending-write/prepare-ref pw2)))
           (is (not (string= stolen-old-sha own-old-sha)))
+          ;; Phase 1 is holding Git's branch lock. Drop it so this
+          ;; batch reaches the compare-and-swap instead of failing
+          ;; because the lock file exists.
+          (%release-branch-ref-lock! repository-2 "main")
           (signals concurrent-modification-error
             (%git-update-ref-stdin! repository-2
                                     (list (list :update "refs/heads/main"

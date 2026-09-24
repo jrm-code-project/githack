@@ -229,6 +229,8 @@
                 "FORMAT-TRANSACTION-MANIFEST"
                 "PARSE-TRANSACTION-MANIFEST"
                 "%PREPARE-PARTICIPANT!"
+                "%BRANCH-REF-LOCK-PATHNAME"
+                "%RELEASE-BRANCH-REF-LOCK!"
                 "FORMAT-ANNOTATED-TAG-CONTENT"
                 "%ROLLBACK-PARTICIPANT-PREPARE!"
                 "%WRITE-LEDGER-COMMIT-POINT!"
