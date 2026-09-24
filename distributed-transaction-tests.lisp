@@ -508,6 +508,40 @@ at, and the prepare ref is gone."
           (ignore-errors (delete-file script))
           (ignore-errors (delete-file log)))))))
 
+(test exorcist-decodes-feature/foo-from-one-prepare-ref-segment
+  "The prepare ref for branch \"feature/foo\" is
+refs/githack/prepare/<tx-id>/feature%2Ffoo: one segment after the
+tx-id, not a directory named feature. The manifest keeps the raw
+name. After the ledger write, RUN-GITHACK-EXORCIST! reports the
+branch as \"feature/foo\" and advances refs/heads/feature/foo to the
+prepared commit. The unencoded path TX/feature/foo fails the segment
+assertion, and a decode that leaves \"%2F\" in the name fails the
+branch assertion."
+  (with-temporary-git-repository (repository)
+    (dtx-write! repository "feature/foo" "seed")
+    (let* ((tx-id (generate-transaction-id))
+           (txn (%make-githack-transaction tx-id)))
+      (let ((*current-transaction* txn))
+        (dtx-write! repository "feature/foo" "final"))
+      (let* ((pw (first (%githack-transaction/pending-writes txn)))
+             (manifest-text (format-transaction-manifest
+                              (build-transaction-manifest tx-id (list pw)
+                                                          (pending-write/git-repository pw))))
+             (ref (prepare-ref-path tx-id "feature/foo"))
+             (suffix (subseq ref (length "refs/githack/prepare/"))))
+        (is (string= (format nil "~A/feature%2Ffoo" tx-id) suffix))
+        (is (= 1 (count #\/ suffix)))
+        (%prepare-participant! pw tx-id manifest-text)
+        (is (equal (list ref)
+                   (mapcar #'third (%git-for-each-ref repository "refs/githack/prepare/"))))
+        (%write-ledger-commit-point! (pending-write/git-repository pw) tx-id)
+        (is (equal (list (list tx-id "feature/foo" :committed))
+                   (run-githack-exorcist! repository)))
+        (is (string= (pending-write/new-commit-sha pw)
+                     (git-show-ref-sha repository "feature/foo")))
+        (is (equal "final" (dtx-read repository "feature/foo")))
+        (is (null (%git-for-each-ref repository "refs/githack/prepare/")))))))
+
 (defun %strand-second-participant-after-ledger (repository-1 repository-2)
   "Leave a two-repository transaction crashed after the ledger write
 and after participant 1's roll-forward, before participant 2's.

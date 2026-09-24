@@ -52,7 +52,10 @@
 ;;; accepted) whose target is that participant's own already-
 ;;; persisted, not-yet-ref-visible commit and whose message is the
 ;;; Manifest, then point a tracking ref,
-;;; `refs/githack/prepare/<tx-id>/<branch-name>`, at that tag. If any
+;;; `refs/githack/prepare/<tx-id>/<encoded-branch>`, at that tag.
+;;; The branch is one percent-encoded segment (`/` is `%2F`), so a
+;;; slash in the branch name is not a path separator. The raw name
+;;; is only in the Manifest. If any
 ;;; participant's own Prepare step fails, every prepare ref already
 ;;; created for this transaction is deleted again (best-effort) and
 ;;; DISTRIBUTED-TRANSACTION-ERROR is signalled: nothing further
@@ -262,11 +265,49 @@ in fact point at a commit, directly or transitively)."
 ;;; Transaction Manifests and annotated-tag content.
 ;;; ------------------------------------------------------------------
 
+(defun %encode-ref-path-segment (string)
+  "Return STRING as one Git ref path segment. #\\% becomes \"%25\"
+and #\\/ becomes \"%2F\"; every other character is copied. Used so a
+branch name is a single segment of a prepare ref. The raw name is
+stored only in the transaction manifest."
+  (let ((n (length string)))
+    (with-output-to-string (out)
+      (let next ((i 0))
+        (when (< i n)
+          (let ((char (char string i)))
+            (cond
+              ((char= char #\%) (write-string "%25" out))
+              ((char= char #\/) (write-string "%2F" out))
+              (t (write-char char out))))
+          (next (1+ i)))))))
+
+(defun %decode-ref-path-segment (string)
+  "Inverse of %ENCODE-REF-PATH-SEGMENT. A #\\% followed by two
+hexadecimal digits is one character. Anything else is copied."
+  (let ((n (length string)))
+    (with-output-to-string (out)
+      (let next ((i 0))
+        (when (< i n)
+          (if (and (char= (char string i) #\%)
+                   (<= (+ i 3) n)
+                   (digit-char-p (char string (+ i 1)) 16)
+                   (digit-char-p (char string (+ i 2)) 16))
+              (progn
+                (write-char (code-char (parse-integer string :start (1+ i) :end (+ i 3) :radix 16)) out)
+                (next (+ i 3)))
+              (progn
+                (write-char (char string i) out)
+                (next (1+ i)))))))))
+
 (defun prepare-ref-path (tx-id branch-name)
   "Return the Git ref path GitHack's own Two-Phase-Commit Phase 1
-uses to track TX-ID's own prepared-but-uncommitted write against
-BRANCH-NAME: \"refs/githack/prepare/<tx-id>/<branch-name>\"."
-  (format nil "refs/githack/prepare/~A/~A" tx-id branch-name))
+uses to track TX-ID's prepared-but-uncommitted write against
+BRANCH-NAME. BRANCH-NAME is one percent-encoded path segment
+(%ENCODE-REF-PATH-SEGMENT): a slash is \"%2F\", not another
+directory. The raw branch name is stored only in the transaction
+manifest. The path is
+\"refs/githack/prepare/<tx-id>/<encoded-branch>\"."
+  (format nil "refs/githack/prepare/~A/~A" tx-id (%encode-ref-path-segment branch-name)))
 
 (defun ledger-ref-path (tx-id)
   "Return the Git ref path GitHack's own Two-Phase-Commit Phase 2
@@ -530,7 +571,7 @@ repository cannot itself be reached."
          (suffix (subseq ref-path (length prefix)))
          (slash (position #\/ suffix))
          (tx-id (subseq suffix 0 slash))
-         (branch-name (subseq suffix (1+ slash))))
+         (branch-name (%decode-ref-path-segment (subseq suffix (1+ slash)))))
     (handler-case
         (let* ((tag-content (sb-ext:octets-to-string (git-cat-file repository tag-sha) :external-format :utf-8))
                (manifest-text (nth-value 1 (split-commit-header-and-message tag-content)))

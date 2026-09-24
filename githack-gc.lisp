@@ -44,8 +44,11 @@ shaped like one."
 
 (defun prepare-tx-id-from-ref (ref-path)
   "Return the TX-ID string encoded in REF-PATH (a
-`refs/githack/prepare/<tx-id>/<branch-name>` ref path), or NIL if
-REF-PATH is not shaped like one."
+`refs/githack/prepare/<tx-id>/<encoded-branch>` ref path), or NIL
+if REF-PATH is not shaped like one. The tx-id is only the next
+segment after `prepare/`. The branch segment may contain `%2F`
+for a slash in the raw branch name; that slash is not a
+separator in the ref."
   (let ((suffix (ref-suffix-after-prefix ref-path "refs/githack/prepare/")))
     (and suffix (subseq suffix 0 (position #\/ suffix)))))
 
