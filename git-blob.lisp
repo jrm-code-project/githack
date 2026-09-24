@@ -68,99 +68,101 @@ error if ATOM's type is not supported. Dispatches on ATOM's concrete
 class; KEYWORD and (ARRAY (UNSIGNED-BYTE 8) (*)) are not themselves
 CLOS classes usable as method specializers, so those two cases are
 distinguished by an explicit type check inside the SYMBOL and VECTOR
-methods respectively."))
+methods respectively.")
 
-(defmethod atom->envelope ((atom integer))
-  (list :integer atom))
+  (:method ((atom bit-vector))
+    (list :bit-vector (coerce atom 'list)))
 
-(defmethod atom->envelope ((atom symbol))
-  (if (keywordp atom)
-      (list :keyword (normalize-string (symbol-name atom)))
-      (symbol->envelope atom)))
+  (:method ((atom character))
+    (character->envelope atom))
 
-(defmethod atom->envelope ((atom single-float))
-  (list :single-float (float->marked-string atom 'double-float)))
+  (:method ((atom double-float))
+    (list :double-float (float->marked-string atom 'single-float)))
 
-(defmethod atom->envelope ((atom double-float))
-  (list :double-float (float->marked-string atom 'single-float)))
+  (:method ((atom integer))
+    (list :integer atom))
 
-(defmethod atom->envelope ((atom character))
-  (character->envelope atom))
+  (:method ((atom single-float))
+    (list :single-float (float->marked-string atom 'double-float)))
 
-(defmethod atom->envelope ((atom string))
-  (list :string (normalize-string atom)))
+  (:method ((atom string))
+    (list :string (normalize-string atom)))
 
-(defmethod atom->envelope ((atom bit-vector))
-  (list :bit-vector (coerce atom 'list)))
+  (:method ((atom symbol))
+    (if (keywordp atom)
+        (list :keyword (normalize-string (symbol-name atom)))
+        (symbol->envelope atom)))
 
-(defmethod atom->envelope ((atom vector))
-  (if (typep atom '(array (unsigned-byte 8) (*)))
-      (list :byte-vector (coerce atom 'list))
-      (call-next-method)))
+  (:method ((atom vector))
+    (if (typep atom '(array (unsigned-byte 8) (*)))
+        (list :byte-vector (coerce atom 'list))
+        (call-next-method)))
 
-(defmethod atom->envelope ((atom t))
-  (error 'invalid-argument-error
-         :format-control "SERIALIZE-ATOM does not support objects of type ~S."
-         :format-arguments (list (type-of atom))))
+  ;; default
+  (:method ((atom t))
+    (error 'invalid-argument-error
+           :format-control "SERIALIZE-ATOM does not support objects of type ~S."
+           :format-arguments (list (type-of atom)))))
 
 (defgeneric envelope-tag->atom (tag data)
   (:documentation
    "Reconstruct the atom ENVELOPE->ATOM's own (TAG . DATA) envelope
 describes, dispatching on TAG via an EQL specializer -- the inverse,
-per-tag step of ATOM->ENVELOPE's own per-class methods."))
+per-tag step of ATOM->ENVELOPE's own per-class methods.")
 
-(defmethod envelope-tag->atom ((tag (eql :integer)) data)
-  (first data))
+  (:method ((tag (eql :bit-vector)) data)
+    (let ((bits (first data)))
+      (make-array (length bits) :element-type 'bit :initial-contents bits)))
 
-(defmethod envelope-tag->atom ((tag (eql :keyword)) data)
-  (intern (first data) (find-package "KEYWORD")))
+  (:method ((tag (eql :byte-vector)) data)
+    (let ((bytes (first data)))
+      (make-array (length bytes) :element-type '(unsigned-byte 8)
+                                 :initial-contents bytes)))
 
-(defmethod envelope-tag->atom ((tag (eql :symbol)) data)
-  (destructuring-bind (package-name symbol-name) data
-    (let ((package (find-package package-name)))
-      (unless package
+  (:method ((tag (eql :character)) data)
+    (first data))
+
+  (:method ((tag (eql :character-code)) data)
+    (code-char (first data)))
+
+  (:method ((tag (eql :double-float)) data)
+    (let ((*read-eval* nil))
+      (read-from-string (first data))))
+
+  (:method ((tag (eql :integer)) data)
+    (first data))
+
+  (:method ((tag (eql :keyword)) data)
+    (intern (first data) (find-package "KEYWORD")))
+
+  (:method ((tag (eql :named-character)) data)
+    (or (name-char (first data))
         (error 'malformed-git-object-error
-               :format-control "Cannot deserialize symbol: no package named ~S."
-               :format-arguments (list package-name)))
-      (intern symbol-name package))))
+               :format-control "Unknown character name ~S."
+               :format-arguments (list (first data)))))
 
-(defmethod envelope-tag->atom ((tag (eql :single-float)) data)
-  (let ((*read-eval* nil))
-    (read-from-string (first data))))
+  (:method ((tag (eql :single-float)) data)
+    (let ((*read-eval* nil))
+      (read-from-string (first data))))
 
-(defmethod envelope-tag->atom ((tag (eql :double-float)) data)
-  (let ((*read-eval* nil))
-    (read-from-string (first data))))
+  (:method ((tag (eql :string)) data)
+    (first data))
 
-(defmethod envelope-tag->atom ((tag (eql :character)) data)
-  (first data))
+  (:method ((tag (eql :symbol)) data)
+    (destructuring-bind (package-name symbol-name) data
+      (let ((package (find-package package-name)))
+        (unless package
+          (error 'malformed-git-object-error
+                 :format-control "Cannot deserialize symbol: no package named ~S."
+                 :format-arguments (list package-name)))
+        (intern symbol-name package))))
 
-(defmethod envelope-tag->atom ((tag (eql :named-character)) data)
-  (or (name-char (first data))
-      (error 'malformed-git-object-error
-             :format-control "Unknown character name ~S."
-             :format-arguments (list (first data)))))
-
-(defmethod envelope-tag->atom ((tag (eql :character-code)) data)
-  (code-char (first data)))
-
-(defmethod envelope-tag->atom ((tag (eql :string)) data)
-  (first data))
-
-(defmethod envelope-tag->atom ((tag (eql :bit-vector)) data)
-  (let ((bits (first data)))
-    (make-array (length bits) :element-type 'bit :initial-contents bits)))
-
-(defmethod envelope-tag->atom ((tag (eql :byte-vector)) data)
-  (let ((bytes (first data)))
-    (make-array (length bytes) :element-type '(unsigned-byte 8)
-                                :initial-contents bytes)))
-
-(defmethod envelope-tag->atom ((tag t) data)
-  (declare (ignore data))
-  (error 'malformed-git-object-error
-         :format-control "Malformed atom envelope: unknown tag ~S."
-         :format-arguments (list tag)))
+  ;; default
+  (:method ((tag t) data)
+    (declare (ignore data))
+    (error 'malformed-git-object-error
+           :format-control "Malformed atom envelope: unknown tag ~S."
+           :format-arguments (list tag))))
 
 (defun envelope->atom (envelope)
   "Inverse of ATOM->ENVELOPE: reconstructs the exact Lisp atom
