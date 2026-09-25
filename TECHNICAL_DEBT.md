@@ -314,28 +314,47 @@ pass. No `TODO`/`FIXME`/`XXX`/`KLUDGE`/`WORKAROUND`/`BUG` markers, `LOOP`,
 existing conventions (see this document's own header and `AGENTS`-style
 instructions) are still being followed. Three new items surfaced:
 
-### 13. Crash recovery ("the Exorcist") is never invoked automatically
+### 13. Crash recovery ("the Exorcist") is never invoked automatically -- RESOLVED
 
-`distributed-transaction.lisp`'s own file-header comment documents crash
+`distributed-transaction.lisp`'s own file-header comment documented crash
 recovery as: "`RUN-GITHACK-EXORCIST!`, run against any single repository
-(on boot, or lazily on first access), finds every such stranded ref...".
-No such automatic invocation exists anywhere in the codebase:
-`RUN-GITHACK-EXORCIST!` (`distributed-transaction.lisp:821`) is called
-only from `RUN-GITHACK-GC!` (`githack-gc.lisp:86`), itself documented as
-"a dedicated garbage-collection utility for a long-running GitHack
-deployment" that an operator/scheduler must run explicitly --
-`RESOLVE-BRANCH`, `CALL-WITH-REPOSITORY`, and `CALL-WITH-GIT-TRANSACTION`
-never call it. In practice, if a process dies between a distributed
-transaction's Phase 1 (Prepare) and Phase 2 (Roll Forward), the affected
-participant branch stays frozen behind its own `refs/heads/<branch>.lock`
-file (unable to accept even an ordinary, single-repository transaction)
-until some operator remembers to run `RUN-GITHACK-GC!`/
-`RUN-GITHACK-EXORCIST!` by hand. Either the header comment should stop
-promising automatic recovery it does not perform, or (preferably) a
-lightweight exorcism pass should run lazily -- e.g. from
-`RESOLVE-BRANCH`/`CALL-WITH-GIT-TRANSACTION` itself, the moment a branch
-is found still behind its own lock file -- so a crashed coordinator does
-not require manual intervention to unfreeze a live branch.
+(on boot, or lazily on first access), finds every such stranded ref...",
+but no automatic invocation actually existed anywhere in the codebase --
+`RUN-GITHACK-EXORCIST!` was called only from `RUN-GITHACK-GC!`, itself an
+operator/scheduler-driven utility. A process dying between Phase 1
+(Prepare) and Phase 2 (Roll Forward) left the affected participant branch
+frozen behind its own `refs/heads/<branch>.lock` file until someone
+remembered to run `RUN-GITHACK-GC!`/`RUN-GITHACK-EXORCIST!` by hand.
+
+The originally suggested fix location -- hooking `RESOLVE-BRANCH` or
+`CALL-WITH-GIT-TRANSACTION` -- turned out to violate `githack.asd`'s own
+load order: both `git-branch.lisp` and `git-transaction.lisp` load
+*before* `distributed-transaction.lisp`, so neither can call into
+`RUN-GITHACK-EXORCIST!` without introducing a load-order cycle.
+
+Also, a single participant's on-disk state cannot locally distinguish "a
+legitimate, still in-flight sibling Prepare is still gathering votes"
+from "the coordinator crashed after this participant's own Prepare but
+before reaching the Point of No Return" -- both look identical (a lock
+file exists, no Ledger commit-point ref yet). Invoking exorcism eagerly
+or proactively (e.g. on every poll iteration of the lock-acquisition
+loop) would risk corrupting a live, still-in-flight transaction that
+simply hasn't finished yet.
+
+The fix actually landed inside `%ACQUIRE-BRANCH-REF-LOCK!` itself (same
+file as `RUN-GITHACK-EXORCIST!`, so no layering violation), at its
+existing polling loop's `+TRANSACTION-LOCK-TIMEOUT+` boundary -- a point
+the system already unconditionally treated as "stuck" (it already errored
+out there before this fix). Once that timeout elapses, `%ACQUIRE-BRANCH-
+REF-LOCK!` now makes exactly one lazy `(ignore-errors (run-githack-
+exorcist! repository))` attempt; if that clears the lock file, the
+acquisition's own deadline is extended and polling continues normally; if
+not (or exorcism itself errors), `TRANSACTION-LOCK-TIMEOUT-ERROR` is
+signalled exactly as before. Worst case is therefore unchanged from
+before this fix; best case a crashed coordinator's stranded participant
+self-heals with no operator intervention. See `%ACQUIRE-BRANCH-REF-LOCK!`'s
+own docstring and the regression test `ACQUIRING-A-BRANCH-REF-LOCK-
+LAZILY-EXORCISES-A-STRANDED-LOCK` in `distributed-transaction-tests.lisp`.
 
 ### 14. `%atomic-replace-file`'s Windows path re-introduces a "fresh process per call" cost, and its POSIX branch is untested
 

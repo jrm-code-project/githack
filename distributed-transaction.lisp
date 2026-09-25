@@ -494,14 +494,26 @@ NIL if neither collision exists yet."
 NEW-SHA into it. After the file exists, the branch must still be at
 OLD-SHA (NIL when the branch does not exist yet); otherwise the lock
 is removed and CONCURRENT-MODIFICATION-ERROR is signalled. Polls
-while some other update holds the lock, then signals
-TRANSACTION-LOCK-TIMEOUT-ERROR. Before touching the filesystem at
-all, signals REF-HIERARCHY-CONFLICT-ERROR if BRANCH-NAME collides
-with another ref or another participant's own still-open lock file
-along a shared slash-prefix -- see %BRANCH-HIERARCHY-BLOCKING-REF.
-That collision can otherwise go undetected until Phase 2's own
-%ATOMIC-REPLACE-FILE, well past this transaction's Point of No
-Return, where it can no longer be rolled back."
+while some other update holds the lock; if it is still held once
++TRANSACTION-LOCK-TIMEOUT+ has elapsed, makes one lazy attempt at
+RUN-GITHACK-EXORCIST! against REPOSITORY -- since a legitimate,
+still-in-flight sibling Prepare is expected to finish well within
+that generous timeout, a lock still held at that point is exactly
+the situation RUN-GITHACK-EXORCIST!'s own header comment already
+promises automatic recovery for (\"on boot, or lazily on first
+access\") but that, before this fix, no code path ever actually
+delivered on. If exorcism clears BRANCH-NAME's own lock file,
+polling continues with a fresh deadline; otherwise (exorcism found
+nothing to resolve, or itself failed) TRANSACTION-LOCK-TIMEOUT-ERROR
+is signalled exactly as before -- so a caller sees no new failure
+mode, only a chance to recover from one it would have hit anyway.
+Before touching the filesystem at all, signals
+REF-HIERARCHY-CONFLICT-ERROR if BRANCH-NAME collides with another
+ref or another participant's own still-open lock file along a shared
+slash-prefix -- see %BRANCH-HIERARCHY-BLOCKING-REF. That collision
+can otherwise go undetected until Phase 2's own %ATOMIC-REPLACE-FILE,
+well past this transaction's Point of No Return, where it can no
+longer be rolled back."
   (let ((blocking (%branch-hierarchy-blocking-ref repository branch-name)))
     (when blocking
       (error 'ref-hierarchy-conflict-error
@@ -510,7 +522,8 @@ Return, where it can no longer be rolled back."
              :detail "Detected while acquiring this participant's own branch-ref lock, during Phase 1 (Prepare).")))
   (let ((lock (%branch-ref-lock-pathname repository branch-name))
         (deadline (+ (get-internal-real-time)
-                     (round (* +transaction-lock-timeout+ internal-time-units-per-second)))))
+                     (round (* +transaction-lock-timeout+ internal-time-units-per-second))))
+        (exorcism-attempted? nil))
     (ensure-directories-exist lock)
     (let next ()
       (let ((stream (open lock :direction :output
@@ -519,7 +532,15 @@ Return, where it can no longer be rolled back."
         (if (null stream)
             (progn
               (when (> (get-internal-real-time) deadline)
-                (error 'transaction-lock-timeout-error :pathname lock))
+                (if exorcism-attempted?
+                    (error 'transaction-lock-timeout-error :pathname lock)
+                    (progn
+                      (setf exorcism-attempted? t)
+                      (ignore-errors (run-githack-exorcist! repository))
+                      (if (probe-file lock)
+                          (error 'transaction-lock-timeout-error :pathname lock)
+                          (setf deadline (+ (get-internal-real-time)
+                                            (round (* +transaction-lock-timeout+ internal-time-units-per-second))))))))
               (sleep +transaction-lock-poll-interval+)
               (next))
             (handler-case

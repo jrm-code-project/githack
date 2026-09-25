@@ -253,6 +253,46 @@ already resolved a stranded ref, finds nothing left to do."
       (run-githack-exorcist! repository)
       (is (null (run-githack-exorcist! repository))))))
 
+(test acquiring-a-branch-ref-lock-lazily-exorcises-a-stranded-lock
+  "%ACQUIRE-BRANCH-REF-LOCK!, finding BRANCH-NAME's lock file already
+held by an earlier transaction that reached Phase 2's own Point-of-
+No-Return (a written Ledger commit point) before crashing, does not
+simply wait out +TRANSACTION-LOCK-TIMEOUT+ and give up: once that
+timeout elapses it makes one lazy RUN-GITHACK-EXORCIST! attempt,
+which rolls the stranded write forward and clears the lock, letting
+this fresh acquisition succeed instead of signalling TRANSACTION-
+LOCK-TIMEOUT-ERROR. RUN-GITHACK-EXORCIST! is never called by hand
+here -- %ACQUIRE-BRANCH-REF-LOCK! itself must find and resolve the
+stranded lock on its own."
+  (with-temporary-git-repository (repository)
+    (let* ((tx-id (generate-transaction-id))
+           (txn (%make-githack-transaction tx-id))
+           (pw nil))
+      (let ((*current-transaction* txn))
+        (dtx-write! repository "main" "should-be-rolled-forward"))
+      (setf pw (first (%githack-transaction/pending-writes txn)))
+      (let ((manifest-text (format-transaction-manifest
+                              (build-transaction-manifest tx-id (list pw) (pending-write/git-repository pw)))))
+        (%prepare-participant! pw tx-id manifest-text)
+        ;; Point of no return reached, then crash simulated before
+        ;; roll-forward -- exactly EXORCIST-ROLLS-FORWARD-A-STRANDED-
+        ;; PREPARE-REF-WITH-A-WRITTEN-LEDGER's own setup.
+        (%write-ledger-commit-point! (pending-write/git-repository pw) tx-id))
+      (is (probe-file (%branch-ref-lock-pathname repository "main")))
+      (let ((+transaction-lock-timeout+ 0.2d0))
+        (finishes
+          (%acquire-branch-ref-lock! repository "main" (pending-write/new-commit-sha pw) "unused-new-sha")))
+      ;; The stranded write was rolled forward by the lazy exorcism
+      ;; attempt, so THIS acquisition's own OLD-SHA (the just-recovered
+      ;; commit) matched the branch's real current state.
+      (is (equal (pending-write/new-commit-sha pw) (git-show-ref-sha repository "main")))
+      (is (null (%git-for-each-ref repository "refs/githack/prepare/")))
+      ;; Our own successful acquisition still holds BRANCH-NAME's lock
+      ;; file open; release it rather than publish a bogus SHA.
+      (is (probe-file (%branch-ref-lock-pathname repository "main")))
+      (%release-branch-ref-lock! repository "main")
+      (is (not (probe-file (%branch-ref-lock-pathname repository "main")))))))
+
 (defun %exorcist-kill-poll (predicate seconds)
   "Return true once PREDICATE is true, checking every tenth of a
 second for up to SECONDS. Used to wait on a child process without
