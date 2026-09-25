@@ -55,38 +55,39 @@ is FUNCALLed with no arguments and its result recursively passed back
 through QUERY-SOURCE-LIST (so a :FROM clause's SOURCE may be a thunk
 that computes/loads its collection lazily); NIL is the empty
 collection. Define further methods, specialized on your own
-collection classes, to make QUERY work directly over them too."))
+collection classes, to make QUERY work directly over them too.")
 
-(defmethod query-source-list ((source null))
-  nil)
+  (:method ((source null))
+    nil)
 
-(defmethod query-source-list ((source cons))
-  source)
+  (:method ((source cons))
+    source)
 
-(defmethod query-source-list ((source vector))
-  (coerce source 'list))
+  (:method ((source vector))
+    (coerce source 'list))
 
-(defmethod query-source-list ((source persistent-vector))
-  (collect (scan-persistent-vector source)))
+  (:method ((source persistent-vector))
+    (collect (scan-persistent-vector source)))
 
-(defmethod query-source-list ((source persistent-hash-table))
-  (let ((pairs '()))
-    (phash-map (lambda (key value) (push (cons key value) pairs)) source)
-    (nreverse pairs)))
+  (:method ((source persistent-hash-table))
+    (let ((pairs '()))
+      (phash-map (lambda (key value) (push (cons key value) pairs)) source)
+      (nreverse pairs)))
 
-(defmethod query-source-list ((source persistent-wttree))
-  (wt->alist source))
+  (:method ((source persistent-wttree))
+    (wt->alist source))
 
-(defmethod query-source-list ((source function))
-  (query-source-list (funcall source)))
+  (:method ((source function))
+    (query-source-list (funcall source)))
 
-(defmethod query-source-list ((source persistent-object))
-  (list source))
+  (:method ((source persistent-object))
+    (list source))
 
-(defmethod query-source-list ((source t))
-  (error 'invalid-argument-error
-         :format-control "QUERY-SOURCE-LIST has no method for ~S (of type ~S); define one to use it as a QUERY :FROM source."
-         :format-arguments (list source (type-of source))))
+  ;; default
+  (:method ((source t))
+    (error 'invalid-argument-error
+           :format-control "QUERY-SOURCE-LIST has no method for ~S (of type ~S); define one to use it as a QUERY :FROM source."
+           :format-arguments (list source (type-of source)))))
 
 (defun query-default-less-than (a b)
   "Return true if A sorts strictly before B under QUERY's own
@@ -126,48 +127,48 @@ what each slot ultimately means."
    "Destructively update STATE (a %QUERY-PARSE-STATE) to reflect
 CLAUSE, one QUERY macro clause whose own head keyword is HEAD, as
 part of QUERY-PARSE-CLAUSES's single left-to-right walk over the
-macro's own clause list. Dispatches on HEAD via an EQL specializer."))
+macro's own clause list. Dispatches on HEAD via an EQL specializer.")
 
-(defmethod %apply-query-clause! ((head (eql :from)) clause state)
-  (destructuring-bind (var source-form) (cdr clause)
-    (push (list var source-form) (%query-parse-state/froms state))))
+  (:method ((head (eql :from)) clause state)
+    (destructuring-bind (var source-form) (cdr clause)
+      (push (list var source-form) (%query-parse-state/froms state))))
 
-(defmethod %apply-query-clause! ((head (eql :where)) clause state)
-  (destructuring-bind (predicate-form) (cdr clause)
-    (push predicate-form (%query-parse-state/wheres state))))
+  (:method ((head (eql :where)) clause state)
+    (destructuring-bind (predicate-form) (cdr clause)
+      (push predicate-form (%query-parse-state/wheres state))))
 
-(defmethod %apply-query-clause! ((head (eql :order-by)) clause state)
-  (when (%query-parse-state/order-by-seen? state)
-    (error "QUERY accepts at most one :ORDER-BY clause."))
-  (setf (%query-parse-state/order-by-seen? state) t)
-  (destructuring-bind (key-form &key descending test) (cdr clause)
-    (setf (%query-parse-state/order-by-key state) key-form)
-    (setf (%query-parse-state/order-by-descending state) descending)
-    (setf (%query-parse-state/order-by-test state) test)))
+  (:method ((head (eql :order-by)) clause state)
+    (when (%query-parse-state/order-by-seen? state)
+      (error "QUERY accepts at most one :ORDER-BY clause."))
+    (setf (%query-parse-state/order-by-seen? state) t)
+    (destructuring-bind (key-form &key descending test) (cdr clause)
+      (setf (%query-parse-state/order-by-key state) key-form)
+      (setf (%query-parse-state/order-by-descending state) descending)
+      (setf (%query-parse-state/order-by-test state) test)))
 
-(defmethod %apply-query-clause! ((head (eql :distinct)) clause state)
-  (declare (ignore clause))
-  (when (%query-parse-state/distinct? state)
-    (error "QUERY accepts at most one :DISTINCT clause."))
-  (setf (%query-parse-state/distinct? state) t))
+  (:method ((head (eql :distinct)) clause state)
+    (declare (ignore clause))
+    (when (%query-parse-state/distinct? state)
+      (error "QUERY accepts at most one :DISTINCT clause."))
+    (setf (%query-parse-state/distinct? state) t))
 
-(defmethod %apply-query-clause! ((head (eql :limit)) clause state)
-  (when (%query-parse-state/limit-seen? state)
-    (error "QUERY accepts at most one :LIMIT clause."))
-  (setf (%query-parse-state/limit-seen? state) t)
-  (destructuring-bind (limit-form) (cdr clause)
-    (setf (%query-parse-state/limit state) limit-form)))
+  (:method ((head (eql :limit)) clause state)
+    (when (%query-parse-state/limit-seen? state)
+      (error "QUERY accepts at most one :LIMIT clause."))
+    (setf (%query-parse-state/limit-seen? state) t)
+    (destructuring-bind (limit-form) (cdr clause)
+      (setf (%query-parse-state/limit state) limit-form)))
 
-(defmethod %apply-query-clause! ((head (eql :select)) clause state)
-  (when (%query-parse-state/select-seen? state)
-    (error "QUERY accepts at most one :SELECT clause."))
-  (setf (%query-parse-state/select-seen? state) t)
-  (destructuring-bind (select-form) (cdr clause)
-    (setf (%query-parse-state/select state) select-form)))
+  (:method ((head (eql :select)) clause state)
+    (when (%query-parse-state/select-seen? state)
+      (error "QUERY accepts at most one :SELECT clause."))
+    (setf (%query-parse-state/select-seen? state) t)
+    (destructuring-bind (select-form) (cdr clause)
+      (setf (%query-parse-state/select state) select-form)))
 
-(defmethod %apply-query-clause! ((head t) clause state)
-  (declare (ignore state))
-  (error "Malformed QUERY clause ~S: expected a list headed by a keyword (:FROM, :WHERE, :ORDER-BY, :DISTINCT, :LIMIT, or :SELECT)." clause))
+  (:method ((head t) clause state)
+    (declare (ignore state))
+    (error "Malformed QUERY clause ~S: expected a list headed by a keyword (:FROM, :WHERE, :ORDER-BY, :DISTINCT, :LIMIT, or :SELECT)." clause)))
 
 (defun query-parse-clauses (clauses)
   "Return seven values parsed out of CLAUSES (a QUERY macro's own

@@ -434,31 +434,31 @@ Adams tree rooted at NODE, in ascending key order."
 Git's object database according to its concrete type, and return the
 resulting SHA. Broken out of WT-PERSIST-COMPONENT so this dispatch
 is its own generic function, with one DEFMETHOD per concrete type in
-place of an ETYPECASE clause."))
+place of an ETYPECASE clause.")
 
-(defmethod persist-wttree-component-by-type ((git-object persistent-wttree))
-  (serialize-persistent-wttree-node git-object))
+  (:method ((git-object persistent-wttree))
+    (serialize-persistent-wttree-node git-object))
 
-(defmethod persist-wttree-component-by-type ((git-object persistent-cons))
-  (serialize-persistent-cons git-object))
+  (:method ((git-object persistent-cons))
+    (serialize-persistent-cons git-object))
 
-(defmethod persist-wttree-component-by-type ((git-object persistent-vector))
-  (serialize-persistent-vector git-object))
+  (:method ((git-object persistent-vector))
+    (serialize-persistent-vector git-object))
 
-(defmethod persist-wttree-component-by-type ((git-object git-tree))
-  (setf (sha git-object)
-        (git-hash-object (get-repository git-object) "tree" (serialize-tree git-object))))
+  (:method ((git-object git-tree))
+    (setf (sha git-object)
+          (git-hash-object (get-repository git-object) "tree" (serialize-tree git-object))))
 
-(defmethod persist-wttree-component-by-type ((git-object git-blob))
-  (setf (sha git-object)
-        (git-hash-object (get-repository git-object) "blob"
-                          (serialize-atom (get-payload git-object)))))
+  (:method ((git-object git-blob))
+    (setf (sha git-object)
+          (git-hash-object (get-repository git-object) "blob"
+                           (serialize-atom (get-payload git-object)))))
 
-(defmethod persist-cons-component-by-type ((git-object persistent-wttree))
-  (serialize-persistent-wttree-node git-object))
+  (:method ((git-object persistent-wttree))
+    (serialize-persistent-wttree-node git-object))
 
-(defmethod persist-vector-component-by-type ((git-object persistent-wttree))
-  (serialize-persistent-wttree-node git-object))
+  (:method ((git-object persistent-wttree))
+    (serialize-persistent-wttree-node git-object)))
 
 (defun wt-persist-component (git-object)
   "Ensure GIT-OBJECT (a GIT-BLOB, a plain GIT-TREE, a PERSISTENT-CONS,
