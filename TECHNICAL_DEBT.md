@@ -378,36 +378,59 @@ Nothing currently reminds a contributor to separately run
 `(asdf:test-system "githack/kademlia-test")` after touching one of those
 shared entry points.
 
-### 16. `SCAN-PERSISTENT-ALIST`/`SCAN-PERSISTENT-PLIST` fail to compile on a genuinely clean build, but the failure is masked by stale FASL caching
+### 16. `SCAN-PERSISTENT-ALIST`/`SCAN-PERSISTENT-PLIST` fail to compile on a genuinely clean build, but the failure is masked by stale FASL caching (Resolved)
 
-`persistent-cons.lisp`'s `SCAN-PERSISTENT-ALIST` and
-`SCAN-PERSISTENT-PLIST` are declared `(DECLARE
-(OPTIMIZABLE-SERIES-FUNCTION 2))` and both end in `(VALUES (MAP-FN ...)
-(MAP-FN ...))` -- returning two series from an optimizable series
-function. SERIES signals "Restriction violation 7 ... VALUES returns
-multiple series" for this pattern, which SBCL/ASDF treats as a
-`FAILURE-P` compile result, and `asdf:load-system`'s default
-`:on-failure` policy turns that into a fatal
-`UIOP/LISP-BUILD:COMPILE-FILE-ERROR` -- confirmed reproducible with the
-`common-lisp` FASL cache directory deleted entirely and a fresh SBCL
-process, i.e. on what a brand-new clone/clean build would actually
-experience. This has gone unnoticed because the documented, everyday
-test workflow (`ql:quickload` followed by `asdf:test-system :githack`)
-does not force recompilation of files whose FASL is already
-cached-and-current, so a working developer machine's local cache masks
-the failure indefinitely -- `persistent-cons.lisp` had not actually been
-recompiled by any of this project's routine `(ql:quickload
-:githack)`-based test runs for some time. Verify any future "all tests
-green" claim for files that may be affected by cache staleness with
-`(asdf:load-system :githack :force t)` against a FASL cache that has been
-cleared, not just the routine `ql:quickload` sequence. Fixing
-`SCAN-PERSISTENT-ALIST`/`SCAN-PERSISTENT-PLIST` themselves (e.g.
-restructuring to avoid a multi-series `VALUES` return, or dropping the
-`OPTIMIZABLE-SERIES-FUNCTION` declaration) is deferred to a follow-up.
+**Resolved:** `persistent-cons.lisp`'s `SCAN-PERSISTENT-ALIST` and
+`SCAN-PERSISTENT-PLIST` were declared `(DECLARE
+(OPTIMIZABLE-SERIES-FUNCTION 2))` and both ended in `(VALUES (MAP-FN
+...) (MAP-FN ...))` -- returning two series from an optimizable series
+function. SERIES flatly forbids this shape (see `s-code.lisp`'s `(rrs 7
+"VALUES returns multiple series" ...)` restriction check -- the same
+machinery SERIES's own multi-output primitives like `SCAN-ALIST`
+sidestep only by being written with its lower-level `FRAGL`/`DEFS`
+primitives), so SBCL/ASDF surfaced it as a `FAILURE-P` compile result
+that `asdf:load-system`'s default `:on-failure` policy turned into a
+fatal `UIOP/LISP-BUILD:COMPILE-FILE-ERROR` -- confirmed reproducible
+with the `common-lisp` FASL cache directory deleted entirely and a
+fresh SBCL process, i.e. on what a brand-new clone/clean build would
+actually experience. This had gone unnoticed because the documented,
+everyday test workflow (`ql:quickload` followed by `asdf:test-system
+:githack`) does not force recompilation of files whose FASL is already
+cached-and-current, so a working developer machine's local cache masked
+the failure indefinitely. Dropping the `OPTIMIZABLE-SERIES-FUNCTION`
+declaration alone was *not* sufficient: GitHack's `"GITHACK"` package
+also shadows `LET*` from `SERIES` (`package.lisp`'s own
+`:SHADOWING-IMPORT-FROM "SERIES" "LET*"`), and it is that shadowed
+`LET*` -- not `DEFUN` -- that applies SERIES's whole-body series
+analysis regardless of the declaration. The fix uses a plain `CL:LET*`
+(and `CL:DEFUN`) for both functions' own bodies, sidestepping SERIES's
+body-scanning macro entirely; `SCAN-FN`/`MAP-FN` remain ordinary,
+exported SERIES functions that still produce genuine runtime series
+objects from a `CL:LET*`, and every existing caller already consumed
+both functions' two returned series via `MULTIPLE-VALUE-BIND` outside
+any surrounding `OPTIMIZABLE-SERIES-FUNCTION`, so no exercised behavior
+changed -- only the (never-exercised) potential for SERIES to fuse a
+call to either function into a further-surrounding series expression
+was given up. Verified via `(asdf:load-system :githack :force t)`
+against a fully cleared FASL cache: zero fatal errors, and the full
+FiveAM suite still passes 1093/1093 (100%). Verify any future "all
+tests green" claim for files that may be affected by cache staleness
+the same way, not just via the routine `ql:quickload` sequence.
+
+**Related, not yet fixed:** the same clean-cache verification also
+surfaced two pre-existing `STYLE-WARNING`s in `persistent-struct.lisp`
+(unrelated to this item, previously masked the same way) --
+`PERSISTENT-STRUCT-PARSE-SLOT-DESCRIPTION`'s `DESTRUCTURING-BIND`
+lambda list mixes `&OPTIONAL` and `&KEY`, and
+`PERSISTENT-STRUCT-CONSTRUCTOR-DOCUMENTATION`'s `FORMAT` call passes 3
+arguments to a control string that only consumes 2. Left for a
+follow-up since they are style-warnings, not fatal errors, and out of
+this item's scope.
 
 ---
 
 ## Explicitly *not* debt (verified, no action needed)
+
 
 - **Old prototype system removal**: `githack.lisp`, `tests.lisp`, all
   `cid-*.lisp`, `mapper.lisp`, `integer-mapper.lisp`,

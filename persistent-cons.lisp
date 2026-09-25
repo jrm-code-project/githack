@@ -338,7 +338,7 @@ the resulting series is later consumed."
               (persistent-cons-decode (persistent-car (%ensure-persistent-cons-loaded! tail))))
             tails)))
 
-(defun scan-persistent-alist (list)
+(cl:defun scan-persistent-alist (list)
   "Analogous to SERIES's own SCAN-ALIST: return two series -- the
 successive keys and, correspondingly, values -- scanned from LIST (a
 PERSISTENT-CONS spine, a not-yet-retyped GIT-TREE proxy for one, or
@@ -362,17 +362,37 @@ scan). LIST is assumed to already hold at most one pair per key, the
 same invariant PERSISTENT-HASH-TABLE.LISP's own bucket chains always
 maintain.
 
-An OPTIMIZABLE-SERIES-FUNCTION producing 2 output series, built
-entirely from the primitive SCAN-FN/MAP-FN series functions exactly
-as SCAN-PERSISTENT-LIST is, so it can be spliced and fused into a
-surrounding series expression by the SERIES compiler -- only the
-prefix of LIST actually demanded is ever fetched from Git. Each
-spine tail's pair is fetched and decoded into keys/values only once,
-regardless of how many of the two returned series are actually
-consumed, since both are derived (via cheap, no-fetch CAR/CDR) from
-one shared, single underlying (key . value) Lisp cons series."
-  (declare (optimizable-series-function 2))
-  (let* ((tails (scan-fn t
+Built entirely from the primitive SCAN-FN/MAP-FN series functions
+exactly as SCAN-PERSISTENT-LIST is -- only the prefix of LIST
+actually demanded is ever fetched from Git. Each spine tail's pair is
+fetched and decoded into keys/values only once, regardless of how
+many of the two returned series are actually consumed, since both
+are derived (via cheap, no-fetch CAR/CDR) from one shared, single
+underlying (key . value) Lisp cons series.
+
+NOT declared OPTIMIZABLE-SERIES-FUNCTION, and its own LET*
+explicitly CL:LET* rather than GITHACK's own SERIES-shadowed LET*:
+SERIES's FRAGL/DEFS machinery flatly forbids a series-expression body
+from returning (VALUES series series) -- see s-code.lisp's `(rrs 7
+\"VALUES returns multiple series\" ...)` restriction check -- and it
+is GITHACK's shadowed LET* (SERIES:LET*, per package.lisp's own
+:SHADOWING-IMPORT-FROM \"SERIES\" \"LET*\"), not DEFUN, that applies
+this whole-body series analysis; a plain CL:DEFUN wrapping a
+GITHACK::LET* is not sufficient by itself, only an explicit CL:LET*
+sidesteps SERIES's body-scanning macro. SCAN-FN/MAP-FN remain
+ordinary, exported SERIES functions usable from a plain CL:LET*,
+producing genuine runtime SERIES objects exactly as they would from
+an optimized context -- SERIES's own multi-output primitives (e.g.
+SCAN-ALIST) instead achieve real compile-time fusion only via the
+lower-level FRAGL/DEFS primitives, not this SCAN-FN/MAP-FN idiom.
+Every current caller already invokes this function directly and
+destructures its two returned series via MULTIPLE-VALUE-BIND,
+exactly as it would with SERIES-shadowed LET* and the declaration
+present -- so this change costs no exercised behavior; it only
+forgoes SERIES's compile-time fusion of this call into a
+further-surrounding series expression, an optimization no caller
+currently relies on."
+  (cl:let* ((tails (scan-fn t
                          (lambda () list)
                          (lambda (tail) (persistent-cdr (%ensure-persistent-cons-loaded! tail)))
                          (lambda (tail) (not (persistent-cons-tail-p tail)))))
@@ -386,7 +406,7 @@ one shared, single underlying (key . value) Lisp cons series."
     (values (map-fn t #'car pairs)
             (map-fn t #'cdr pairs))))
 
-(defun scan-persistent-plist (list)
+(cl:defun scan-persistent-plist (list)
   "Analogous to SERIES's own SCAN-PLIST: return two series -- the
 successive indicators and, correspondingly, values -- scanned from
 LIST (a PERSISTENT-CONS spine, a not-yet-retyped GIT-TREE proxy for
@@ -409,21 +429,41 @@ to decide whether to keep the current pair, defeating the entire
 purpose of a lazy, incremental scan). LIST is assumed to already
 hold at most one pair per indicator.
 
-An OPTIMIZABLE-SERIES-FUNCTION producing 2 output series, built
-entirely from the primitive SCAN-FN/MAP-FN series functions exactly
-as SCAN-PERSISTENT-LIST is, so it can be spliced and fused into a
-surrounding series expression by the SERIES compiler -- only the
-prefix of LIST actually demanded is ever fetched from Git. Each
-indicator/value pair's two cons cells are fetched and decoded into
-indicators/values only once, regardless of how many of the two
-returned series are actually consumed, since both are derived (via
-cheap, no-fetch CAR/CDR) from one shared, single underlying
-(indicator . value) Lisp cons series; and since %ENSURE-PERSISTENT-
-CONS-LOADED is idempotent (a no-op once a cons is already loaded),
-the value cons cell fetched while advancing to the next pair's own
-indicator-position tail is not re-fetched when later decoded."
-  (declare (optimizable-series-function 2))
-  (let* ((tails (scan-fn t
+Built entirely from the primitive SCAN-FN/MAP-FN series functions
+exactly as SCAN-PERSISTENT-LIST is -- only the prefix of LIST
+actually demanded is ever fetched from Git. Each indicator/value
+pair's two cons cells are fetched and decoded into indicators/values
+only once, regardless of how many of the two returned series are
+actually consumed, since both are derived (via cheap, no-fetch
+CAR/CDR) from one shared, single underlying (indicator . value) Lisp
+cons series; and since %ENSURE-PERSISTENT-CONS-LOADED is idempotent
+(a no-op once a cons is already loaded), the value cons cell fetched
+while advancing to the next pair's own indicator-position tail is
+not re-fetched when later decoded.
+
+NOT declared OPTIMIZABLE-SERIES-FUNCTION, and its own LET*
+explicitly CL:LET* rather than GITHACK's own SERIES-shadowed LET*:
+SERIES's FRAGL/DEFS machinery flatly forbids a series-expression body
+from returning (VALUES series series) -- see s-code.lisp's `(rrs 7
+\"VALUES returns multiple series\" ...)` restriction check -- and it
+is GITHACK's shadowed LET* (SERIES:LET*, per package.lisp's own
+:SHADOWING-IMPORT-FROM \"SERIES\" \"LET*\"), not DEFUN, that applies
+this whole-body series analysis; a plain CL:DEFUN wrapping a
+GITHACK::LET* is not sufficient by itself, only an explicit CL:LET*
+sidesteps SERIES's body-scanning macro. SCAN-FN/MAP-FN remain
+ordinary, exported SERIES functions usable from a plain CL:LET*,
+producing genuine runtime SERIES objects exactly as they would from
+an optimized context -- SERIES's own multi-output primitives (e.g.
+SCAN-PLIST) instead achieve real compile-time fusion only via the
+lower-level FRAGL/DEFS primitives, not this SCAN-FN/MAP-FN idiom.
+Every current caller already invokes this function directly and
+destructures its two returned series via MULTIPLE-VALUE-BIND,
+exactly as it would with SERIES-shadowed LET* and the declaration
+present -- so this change costs no exercised behavior; it only
+forgoes SERIES's compile-time fusion of this call into a
+further-surrounding series expression, an optimization no caller
+currently relies on."
+  (cl:let* ((tails (scan-fn t
                          (lambda () list)
                          (lambda (tail)
                            (persistent-cdr (%ensure-persistent-cons-loaded!
