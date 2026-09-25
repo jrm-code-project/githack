@@ -186,18 +186,18 @@ CONS's own SHA, doing nothing further if CONS already has one."
         (setf (persistent-cons-proper cons) proper)
         (let* ((repository (get-repository cons))
                (meta-blob (make-instance 'git-blob :repository repository
-                                                    :sha (git-hash-object
-                                                          repository "blob"
-                                                          (serialize-persistent-cons-meta length proper))))
+                                                   :sha (git-hash-object
+                                                         repository "blob"
+                                                         (serialize-persistent-cons-meta length proper))))
                (readme-blob (make-instance 'git-blob :repository repository
-                                                      :sha (git-hash-object
-                                                            repository "blob"
-                                                            (sb-ext:string-to-octets
-                                                             +persistent-cons-readme+
-                                                             :external-format :utf-8))))
+                                                     :sha (git-hash-object
+                                                           repository "blob"
+                                                           (sb-ext:string-to-octets
+                                                            +persistent-cons-readme+
+                                                            :external-format :utf-8))))
                (car-object (persistent-car cons))
                (cdr-object (or (persistent-cdr cons)
-                                (make-instance 'git-blob :repository repository :payload nil))))
+                               (make-instance 'git-blob :repository repository :payload nil))))
           (unless car-object
             (error 'unpersisted-object-error
                    :format-control "Cannot serialize persistent cons: its PERSISTENT-CAR has not been set."))
@@ -305,6 +305,7 @@ applies this identical convention to its own PERSISTENT-CONS
 bucket chains."
   (and tail (not (typep tail 'git-blob))))
 
+#+series
 (defun scan-persistent-list (list)
   "Return a series of the successive PERSISTENT-CAR elements of LIST
 (a PERSISTENT-CONS, a not-yet-retyped GIT-TREE proxy for one, or NIL
@@ -338,7 +339,8 @@ the resulting series is later consumed."
               (persistent-cons-decode (persistent-car (%ensure-persistent-cons-loaded! tail))))
             tails)))
 
-(cl:defun scan-persistent-alist (list)
+#+series
+(series::defs scan-persistent-alist (list)
   "Analogous to SERIES's own SCAN-ALIST: return two series -- the
 successive keys and, correspondingly, values -- scanned from LIST (a
 PERSISTENT-CONS spine, a not-yet-retyped GIT-TREE proxy for one, or
@@ -362,51 +364,68 @@ scan). LIST is assumed to already hold at most one pair per key, the
 same invariant PERSISTENT-HASH-TABLE.LISP's own bucket chains always
 maintain.
 
-Built entirely from the primitive SCAN-FN/MAP-FN series functions
-exactly as SCAN-PERSISTENT-LIST is -- only the prefix of LIST
-actually demanded is ever fetched from Git. Each spine tail's pair is
-fetched and decoded into keys/values only once, regardless of how
-many of the two returned series are actually consumed, since both
-are derived (via cheap, no-fetch CAR/CDR) from one shared, single
-underlying (key . value) Lisp cons series.
+Built directly on SERIES::FRAGL/SERIES::DEFS -- the same low-level,
+undocumented, non-exported primitive machinery SERIES itself uses to
+define its own SCAN-ALIST/SCAN-PLIST (see s-code.lisp) -- rather than
+the higher-level, user-facing OPTIMIZABLE-SERIES-FUNCTION/SCAN-FN/
+MAP-FN idiom SCAN-PERSISTENT-LIST uses. This achieves genuine
+compile-time loop fusion: SERIES::DEFS registers this function's
+RETURNS-SERIES and SERIES-OPTIMIZER properties directly, exactly as
+SCAN-ALIST/SCAN-PLIST register their own, so a caller that declares
+OPTIMIZABLE-SERIES-FUNCTION and invokes SCAN-PERSISTENT-ALIST from
+within a further series expression gets it spliced/merged at compile
+time into a single physical TAGBODY loop -- exactly as if it had
+called SCAN-ALIST itself -- rather than allocating separate runtime
+SERIES-OF-LISTS/IMAGE-SERIES objects for the fused portion. (The
+higher-level SCAN-FN/MAP-FN idiom cannot achieve this: SERIES's
+OPTIMIZABLE-SERIES-FUNCTION mechanism categorically forbids a
+series-expression body from itself returning (VALUES series series)
+-- see s-code.lisp's `(rrs 7 \"VALUES returns multiple series\" ...)`
+restriction check -- so a plain SCAN-FN/MAP-FN-based DEFUN can only
+ever produce two already-realized runtime SERIES objects, never a
+function SERIES's own compiler recognizes and fuses into a
+surrounding optimized expression; verified directly -- a caller
+declaring OPTIMIZABLE-SERIES-FUNCTION and invoking such a DEFUN
+triggers SERIES's own \"Non-series to series data flow\" compile-time
+warning, whereas the SERIES::FRAGL-based SCAN-PERSISTENT-ALIST below
+triggers no such warning.) Each spine tail's pair is still fetched
+and decoded into keys/values only once, regardless of how many of
+the two returned series are actually consumed, and only the prefix
+of LIST actually demanded is ever fetched from Git, exactly as the
+previous SCAN-FN/MAP-FN-based implementation already guaranteed.
 
-NOT declared OPTIMIZABLE-SERIES-FUNCTION, and its own LET*
-explicitly CL:LET* rather than GITHACK's own SERIES-shadowed LET*:
-SERIES's FRAGL/DEFS machinery flatly forbids a series-expression body
-from returning (VALUES series series) -- see s-code.lisp's `(rrs 7
-\"VALUES returns multiple series\" ...)` restriction check -- and it
-is GITHACK's shadowed LET* (SERIES:LET*, per package.lisp's own
-:SHADOWING-IMPORT-FROM \"SERIES\" \"LET*\"), not DEFUN, that applies
-this whole-body series analysis; a plain CL:DEFUN wrapping a
-GITHACK::LET* is not sufficient by itself, only an explicit CL:LET*
-sidesteps SERIES's body-scanning macro. SCAN-FN/MAP-FN remain
-ordinary, exported SERIES functions usable from a plain CL:LET*,
-producing genuine runtime SERIES objects exactly as they would from
-an optimized context -- SERIES's own multi-output primitives (e.g.
-SCAN-ALIST) instead achieve real compile-time fusion only via the
-lower-level FRAGL/DEFS primitives, not this SCAN-FN/MAP-FN idiom.
-Every current caller already invokes this function directly and
-destructures its two returned series via MULTIPLE-VALUE-BIND,
-exactly as it would with SERIES-shadowed LET* and the declaration
-present -- so this change costs no exercised behavior; it only
-forgoes SERIES's compile-time fusion of this call into a
-further-surrounding series expression, an optimization no caller
-currently relies on."
-  (cl:let* ((tails (scan-fn t
-                         (lambda () list)
-                         (lambda (tail) (persistent-cdr (%ensure-persistent-cons-loaded! tail)))
-                         (lambda (tail) (not (persistent-cons-tail-p tail)))))
-         (pairs (map-fn t
-                        (lambda (tail)
-                          (let ((pair (%ensure-persistent-cons-loaded!
-                                       (persistent-cons-decode (persistent-car (%ensure-persistent-cons-loaded! tail))))))
-                            (cons (persistent-cons-decode (persistent-car pair))
-                                  (persistent-cons-decode (persistent-cdr pair)))))
-                        tails)))
-    (values (map-fn t #'car pairs)
-            (map-fn t #'cdr pairs))))
+CAVEAT: SERIES::DEFS and SERIES::FRAGL are wholly private, unexported,
+undocumented internals of the third-party SERIES library -- FRAGL is
+mentioned nowhere in s-doc.txt or any published SERIES reference --
+so there is no compatibility contract guaranteeing this exact
+positional-argument shape (input-specs, output-specs, state-specs,
+mutator-specs, prolog, TAGBODY body ending in `(GO SERIES::END)`,
+epilog, wraprs, and a mandatory trailing NIL non-mutable flag)
+survives a future SERIES version bump. This shape was reverse-
+engineered directly from SERIES's own SCAN-ALIST source and confirmed
+both by macroexpanding FRAGL forms in isolation and by exercising
+every one of this file's SCAN-PERSISTENT-ALIST-* FiveAM tests against
+it unchanged. If a future SERIES upgrade ever breaks this, reverting
+to the previous SCAN-FN/MAP-FN-based CL:DEFUN implementation (correct,
+but forgoing compile-time fusion) is the safe fallback -- see git
+history."
+  (series::fragl ((list))
+                 ((keys t) (values t))
+                 ((tail t list) (keys t) (values t) (pair t))
+                 ()
+                 ()
+                 (l (if (not (persistent-cons-tail-p tail)) (go series::end))
+                    (setq pair (%ensure-persistent-cons-loaded!
+                                (persistent-cons-decode (persistent-car (%ensure-persistent-cons-loaded! tail)))))
+                    (setq keys (persistent-cons-decode (persistent-car pair)))
+                    (setq values (persistent-cons-decode (persistent-cdr pair)))
+                    (setq tail (persistent-cdr (%ensure-persistent-cons-loaded! tail))))
+                 ()
+                 ()
+                 nil))
 
-(cl:defun scan-persistent-plist (list)
+#+series
+(series::defs scan-persistent-plist (list)
   "Analogous to SERIES's own SCAN-PLIST: return two series -- the
 successive indicators and, correspondingly, values -- scanned from
 LIST (a PERSISTENT-CONS spine, a not-yet-retyped GIT-TREE proxy for
@@ -429,55 +448,69 @@ to decide whether to keep the current pair, defeating the entire
 purpose of a lazy, incremental scan). LIST is assumed to already
 hold at most one pair per indicator.
 
-Built entirely from the primitive SCAN-FN/MAP-FN series functions
-exactly as SCAN-PERSISTENT-LIST is -- only the prefix of LIST
-actually demanded is ever fetched from Git. Each indicator/value
-pair's two cons cells are fetched and decoded into indicators/values
-only once, regardless of how many of the two returned series are
-actually consumed, since both are derived (via cheap, no-fetch
-CAR/CDR) from one shared, single underlying (indicator . value) Lisp
-cons series; and since %ENSURE-PERSISTENT-CONS-LOADED is idempotent
-(a no-op once a cons is already loaded), the value cons cell fetched
-while advancing to the next pair's own indicator-position tail is
-not re-fetched when later decoded.
+Built directly on SERIES::FRAGL/SERIES::DEFS -- the same low-level,
+undocumented, non-exported primitive machinery SERIES itself uses to
+define its own SCAN-ALIST/SCAN-PLIST (see s-code.lisp) -- rather than
+the higher-level, user-facing OPTIMIZABLE-SERIES-FUNCTION/SCAN-FN/
+MAP-FN idiom SCAN-PERSISTENT-LIST uses. This achieves genuine
+compile-time loop fusion: SERIES::DEFS registers this function's
+RETURNS-SERIES and SERIES-OPTIMIZER properties directly, exactly as
+SCAN-ALIST/SCAN-PLIST register their own, so a caller that declares
+OPTIMIZABLE-SERIES-FUNCTION and invokes SCAN-PERSISTENT-PLIST from
+within a further series expression gets it spliced/merged at compile
+time into a single physical TAGBODY loop -- exactly as if it had
+called SCAN-PLIST itself -- rather than allocating separate runtime
+SERIES-OF-LISTS/IMAGE-SERIES objects for the fused portion. (The
+higher-level SCAN-FN/MAP-FN idiom cannot achieve this: SERIES's
+OPTIMIZABLE-SERIES-FUNCTION mechanism categorically forbids a
+series-expression body from itself returning (VALUES series series)
+-- see s-code.lisp's `(rrs 7 \"VALUES returns multiple series\" ...)`
+restriction check -- so a plain SCAN-FN/MAP-FN-based DEFUN can only
+ever produce two already-realized runtime SERIES objects, never a
+function SERIES's own compiler recognizes and fuses into a
+surrounding optimized expression; verified directly -- a caller
+declaring OPTIMIZABLE-SERIES-FUNCTION and invoking such a DEFUN
+triggers SERIES's own \"Non-series to series data flow\" compile-time
+warning, whereas the SERIES::FRAGL-based SCAN-PERSISTENT-PLIST below
+triggers no such warning.) Each indicator/value pair's two cons cells
+are still fetched and decoded into indicators/values only once,
+regardless of how many of the two returned series are actually
+consumed (and since %ENSURE-PERSISTENT-CONS-LOADED! is idempotent, the
+value cons cell fetched while advancing to the next pair's indicator-
+position tail is not re-fetched when later decoded), and only the
+prefix of LIST actually demanded is ever fetched from Git, exactly as
+the previous SCAN-FN/MAP-FN-based implementation already guaranteed.
 
-NOT declared OPTIMIZABLE-SERIES-FUNCTION, and its own LET*
-explicitly CL:LET* rather than GITHACK's own SERIES-shadowed LET*:
-SERIES's FRAGL/DEFS machinery flatly forbids a series-expression body
-from returning (VALUES series series) -- see s-code.lisp's `(rrs 7
-\"VALUES returns multiple series\" ...)` restriction check -- and it
-is GITHACK's shadowed LET* (SERIES:LET*, per package.lisp's own
-:SHADOWING-IMPORT-FROM \"SERIES\" \"LET*\"), not DEFUN, that applies
-this whole-body series analysis; a plain CL:DEFUN wrapping a
-GITHACK::LET* is not sufficient by itself, only an explicit CL:LET*
-sidesteps SERIES's body-scanning macro. SCAN-FN/MAP-FN remain
-ordinary, exported SERIES functions usable from a plain CL:LET*,
-producing genuine runtime SERIES objects exactly as they would from
-an optimized context -- SERIES's own multi-output primitives (e.g.
-SCAN-PLIST) instead achieve real compile-time fusion only via the
-lower-level FRAGL/DEFS primitives, not this SCAN-FN/MAP-FN idiom.
-Every current caller already invokes this function directly and
-destructures its two returned series via MULTIPLE-VALUE-BIND,
-exactly as it would with SERIES-shadowed LET* and the declaration
-present -- so this change costs no exercised behavior; it only
-forgoes SERIES's compile-time fusion of this call into a
-further-surrounding series expression, an optimization no caller
-currently relies on."
-  (cl:let* ((tails (scan-fn t
-                         (lambda () list)
-                         (lambda (tail)
-                           (persistent-cdr (%ensure-persistent-cons-loaded!
-                                             (persistent-cdr (%ensure-persistent-cons-loaded! tail)))))
-                         (lambda (tail) (not (persistent-cons-tail-p tail)))))
-         (pairs (map-fn t
-                        (lambda (tail)
-                          (let* ((indicator-cons (%ensure-persistent-cons-loaded! tail))
-                                 (value-cons (%ensure-persistent-cons-loaded! (persistent-cdr indicator-cons))))
-                            (cons (persistent-cons-decode (persistent-car indicator-cons))
-                                  (persistent-cons-decode (persistent-car value-cons)))))
-                        tails)))
-    (values (map-fn t #'car pairs)
-            (map-fn t #'cdr pairs))))
+CAVEAT: SERIES::DEFS and SERIES::FRAGL are wholly private, unexported,
+undocumented internals of the third-party SERIES library -- FRAGL is
+mentioned nowhere in s-doc.txt or any published SERIES reference --
+so there is no compatibility contract guaranteeing this exact
+positional-argument shape (input-specs, output-specs, state-specs,
+mutator-specs, prolog, TAGBODY body ending in `(GO SERIES::END)`,
+epilog, wraprs, and a mandatory trailing NIL non-mutable flag)
+survives a future SERIES version bump. This shape was reverse-
+engineered directly from SERIES's own SCAN-ALIST source and confirmed
+both by macroexpanding FRAGL forms in isolation and by exercising
+every one of this file's SCAN-PERSISTENT-PLIST-* FiveAM tests against
+it unchanged. If a future SERIES upgrade ever breaks this, reverting
+to the previous SCAN-FN/MAP-FN-based CL:DEFUN implementation (correct,
+but forgoing compile-time fusion) is the safe fallback -- see git
+history."
+  (series::fragl ((list))
+                 ((indicators t) (values t))
+                 ((tail t list) (indicators t) (values t))
+                 ()
+                 ()
+                 (l (if (not (persistent-cons-tail-p tail)) (go series::end))
+                    (setq indicators (persistent-cons-decode (persistent-car (%ensure-persistent-cons-loaded! tail))))
+                    (setq values (persistent-cons-decode
+                                  (persistent-car (%ensure-persistent-cons-loaded!
+                                                   (persistent-cdr (%ensure-persistent-cons-loaded! tail))))))
+                    (setq tail (persistent-cdr (%ensure-persistent-cons-loaded!
+                                                (persistent-cdr (%ensure-persistent-cons-loaded! tail))))))
+                 ()
+                 ()
+                 nil))
 
 (defun persistent-cons-encode (repository value)
   "Inverse of PERSISTENT-CONS-DECODE: return VALUE itself, unchanged,
@@ -514,8 +547,8 @@ SERIALIZE-PERSISTENT-CONS on the returned head (or on any nested,
 newly built cons cell) to actually persist it to Git."
   (fold-right (lambda (value tail)
                 (make-instance 'persistent-cons :repository repository :loaded? t
-                                                 :persistent-car (persistent-cons-encode repository value)
-                                                 :persistent-cdr tail))
+                                                :persistent-car (persistent-cons-encode repository value)
+                                                :persistent-cdr tail))
               items
               nil))
 
@@ -544,10 +577,10 @@ of its two output series, and vice versa."
            (length keys) (length values)))
   (fold-right (lambda (pair tail)
                 (make-instance 'persistent-cons :repository repository :loaded? t
-                                                 :persistent-car (make-instance 'persistent-cons :repository repository :loaded? t
-                                                                                 :persistent-car (persistent-cons-encode repository (car pair))
-                                                                                 :persistent-cdr (persistent-cons-encode repository (cdr pair)))
-                                                 :persistent-cdr tail))
+                                                :persistent-car (make-instance 'persistent-cons :repository repository :loaded? t
+                                                                                                :persistent-car (persistent-cons-encode repository (car pair))
+                                                                                                :persistent-cdr (persistent-cons-encode repository (cdr pair)))
+                                                :persistent-cdr tail))
               (mapcar #'cons keys values)
               nil))
 
@@ -576,9 +609,9 @@ versa."
            (length indicators) (length values)))
   (fold-right (lambda (pair tail)
                 (make-instance 'persistent-cons :repository repository :loaded? t
-                                                 :persistent-car (persistent-cons-encode repository (car pair))
-                                                 :persistent-cdr (make-instance 'persistent-cons :repository repository :loaded? t
-                                                                                 :persistent-car (persistent-cons-encode repository (cdr pair))
-                                                                                 :persistent-cdr tail)))
+                                                :persistent-car (persistent-cons-encode repository (car pair))
+                                                :persistent-cdr (make-instance 'persistent-cons :repository repository :loaded? t
+                                                                                                :persistent-car (persistent-cons-encode repository (cdr pair))
+                                                                                                :persistent-cdr tail)))
               (mapcar #'cons indicators values)
               nil))

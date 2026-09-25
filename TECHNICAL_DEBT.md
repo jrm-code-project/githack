@@ -499,6 +499,41 @@ constructor's own name. Verified via another clean-cache forced
 recompile: zero warnings of any kind, full suite still 1104/1104 core
 + 53/53 Kademlia checks (100%).
 
+**Follow-up, now the compile-time fusion gap itself is also closed:**
+the fix above deliberately gave up SERIES's compile-time loop fusion
+for both functions -- a real, if previously unexercised, capability
+gap. That gap has since been closed for real: both functions are now
+built directly on `SERIES::FRAGL`/`SERIES::DEFS`, the same low-level,
+undocumented, non-exported primitive machinery SERIES itself uses to
+define its own `SCAN-ALIST`/`SCAN-PLIST` (see `s-code.lisp`), rather
+than the higher-level `SCAN-FN`/`MAP-FN` idiom the interim fix used.
+`SERIES::DEFS` registers each function's `RETURNS-SERIES` and
+`SERIES-OPTIMIZER` properties directly, exactly as `SCAN-ALIST`/
+`SCAN-PLIST` register their own, so a caller that declares
+`OPTIMIZABLE-SERIES-FUNCTION` and invokes either function from within
+a further series expression now gets it spliced/merged at compile
+time into a single physical `TAGBODY` loop, with no intermediate
+runtime `SERIES-OF-LISTS`/`IMAGE-SERIES` objects allocated for the
+fused portion -- verified concretely: a scratch caller declaring
+`OPTIMIZABLE-SERIES-FUNCTION` and calling the old `SCAN-FN`/`MAP-FN`-
+based implementation triggered SERIES's own "Non-series to series
+data flow" compile-time warning (proof it could *not* be recognized
+or fused), while the same caller against the new `FRAGL`-based
+implementation triggers no such warning. Correctness was verified
+both via all of this file's existing `SCAN-PERSISTENT-ALIST-*`/
+`SCAN-PERSISTENT-PLIST-*`/`COLLECT-PERSISTENT-ALIST`/
+`COLLECT-PERSISTENT-PLIST` FiveAM tests passing unchanged, and via an
+instrumented `GIT-CAT-FILE` call-count check confirming a bounded,
+fused consumer (`(COLLECT (SUBSERIES KEYS 0 N))`) fetches only the N
+demanded pairs' worth of Git objects, not the whole spine. Because
+`SERIES::FRAGL`/`SERIES::DEFS` are wholly private SERIES internals
+with no compatibility contract, both functions' docstrings now spell
+out the exact reverse-engineered `FRAGL` clause contract used and
+name the previous `SCAN-FN`/`MAP-FN`-based `CL:DEFUN` implementation
+as the safe fallback should a future SERIES upgrade ever break it.
+Verified via another clean-cache forced recompile: zero warnings,
+full suite still 1104/1104 core + 53/53 Kademlia checks (100%).
+
 ---
 
 ## Explicitly *not* debt (verified, no action needed)
