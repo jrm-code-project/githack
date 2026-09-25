@@ -429,13 +429,85 @@ holds the prepared commit and the lock file is only a leftover."
   (ignore-errors (delete-file (%branch-ref-lock-pathname repository branch-name)))
   nil)
 
+(defun %branch-name-proper-prefixes (branch-name)
+  "Return BRANCH-NAME's own proper slash-prefixes as bare branch
+names (not full ref paths), longest first: \"feature/foo\" yields
+(\"feature\"). A thin adapter over %REF-PROPER-PREFIXES (GIT-
+BRANCH.LISP), so the two notions of \"proper prefix\" cannot drift
+apart."
+  (let ((base-length (length "refs/heads/")))
+    (remove nil
+            (mapcar (lambda (full)
+                      (and (< base-length (length full))
+                           (subseq full base-length)))
+                    (%ref-proper-prefixes (branch-ref-name branch-name))))))
+
+(defun %files-under (directory)
+  "Return every regular file pathname found anywhere under DIRECTORY
+(a directory pathname), recursively, or NIL if DIRECTORY does not
+exist. Used to find a branch's own loose ref, or another
+participant's still-open %ACQUIRE-BRANCH-REF-LOCK! lock file, before
+either is visible to `git show-ref`/`git for-each-ref`."
+  (when (uiop:directory-exists-p directory)
+    (append (uiop:directory-files directory)
+            (mapcan #'%files-under (uiop:subdirectories directory)))))
+
+(defun %first-blocking-branch-name-under (repository branch-name)
+  "Return the branch name of the first real ref or still-open lock
+file found anywhere below BRANCH-NAME's own directory in REPOSITORY,
+or NIL if that directory does not exist yet or holds nothing. A
+trailing \".lock\" is stripped, since that file names the same
+branch its own real ref would."
+  (let ((directory (uiop:ensure-directory-pathname (%branch-ref-pathname repository branch-name))))
+    (let ((files (%files-under directory)))
+      (when files
+        (let* ((relative (substitute #\/ #\\ (enough-namestring (first files) directory)))
+               (segment (if (uiop:string-suffix-p relative ".lock")
+                            (subseq relative 0 (- (length relative) (length ".lock")))
+                            relative)))
+          (format nil "~A/~A" branch-name segment))))))
+
+(defun %branch-hierarchy-blocking-ref (repository branch-name)
+  "Return the full ref path (e.g. \"refs/heads/feature/foo\") of an
+on-disk artifact -- a real branch ref, or another participant's own
+still-open %ACQUIRE-BRANCH-REF-LOCK! lock file -- that would prevent
+BRANCH-NAME's own loose ref from ever being published: a proper
+prefix of BRANCH-NAME already occupies the file Git needs as a
+directory for BRANCH-NAME, or BRANCH-NAME itself already occupies
+the directory Git needs as a file for BRANCH-NAME. Checked directly
+against the filesystem rather than `git show-ref`/`git for-each-
+ref`, because a sibling participant's own still-open Prepare lock
+file has not yet become a real ref that either of those can see.
+NIL if neither collision exists yet."
+  (let ((blocking-prefix
+          (find-if (lambda (prefix)
+                     (or (uiop:file-exists-p (%branch-ref-pathname repository prefix))
+                         (uiop:file-exists-p (%branch-ref-lock-pathname repository prefix))))
+                   (%branch-name-proper-prefixes branch-name))))
+    (if blocking-prefix
+        (branch-ref-name blocking-prefix)
+        (let ((under (%first-blocking-branch-name-under repository branch-name)))
+          (and under (branch-ref-name under))))))
+
 (defun %acquire-branch-ref-lock! (repository branch-name old-sha new-sha)
   "Create Git's `refs/heads/<branch>.lock` for BRANCH-NAME and write
 NEW-SHA into it. After the file exists, the branch must still be at
 OLD-SHA (NIL when the branch does not exist yet); otherwise the lock
 is removed and CONCURRENT-MODIFICATION-ERROR is signalled. Polls
 while some other update holds the lock, then signals
-TRANSACTION-LOCK-TIMEOUT-ERROR."
+TRANSACTION-LOCK-TIMEOUT-ERROR. Before touching the filesystem at
+all, signals REF-HIERARCHY-CONFLICT-ERROR if BRANCH-NAME collides
+with another ref or another participant's own still-open lock file
+along a shared slash-prefix -- see %BRANCH-HIERARCHY-BLOCKING-REF.
+That collision can otherwise go undetected until Phase 2's own
+%ATOMIC-REPLACE-FILE, well past this transaction's Point of No
+Return, where it can no longer be rolled back."
+  (let ((blocking (%branch-hierarchy-blocking-ref repository branch-name)))
+    (when blocking
+      (error 'ref-hierarchy-conflict-error
+             :repository repository :name branch-name
+             :blocking-ref blocking
+             :detail "Detected while acquiring this participant's own branch-ref lock, during Phase 1 (Prepare).")))
   (let ((lock (%branch-ref-lock-pathname repository branch-name))
         (deadline (+ (get-internal-real-time)
                      (round (* +transaction-lock-timeout+ internal-time-units-per-second)))))
@@ -607,10 +679,11 @@ participant forward. Returns TX-ID."
           (%prepare-participant! pw tx-id manifest-text)
           (push pw prepared))
       (error (condition)
-        (dolist (pw prepared) (%rollback-participant-prepare! pw))
-        (error 'distributed-transaction-error
-               :format-control "Distributed transaction ~A: Phase 1 (Prepare) failed; rolled back ~D already-prepared participant(s). Original error: ~A"
-               :format-arguments (list tx-id (length prepared) condition))))
+        (let ((rolled-back-refs (remove nil (mapcar #'pending-write/prepare-ref prepared))))
+          (dolist (pw prepared) (%rollback-participant-prepare! pw))
+          (error 'distributed-transaction-error
+                 :format-control "Distributed transaction ~A: Phase 1 (Prepare) failed; rolled back ~D already-prepared participant(s)~@[, deleting prepare ref(s) ~{~A~^, ~}~]. Original error: ~A"
+                 :format-arguments (list tx-id (length prepared) rolled-back-refs condition)))))
     ;; Point of no return: from here on, TX-ID is permanently committed.
     (%write-ledger-commit-point! ledger-git-repository tx-id)
     (dolist (pw pending-writes)
