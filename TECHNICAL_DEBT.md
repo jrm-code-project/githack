@@ -356,26 +356,60 @@ self-heals with no operator intervention. See `%ACQUIRE-BRANCH-REF-LOCK!`'s
 own docstring and the regression test `ACQUIRING-A-BRANCH-REF-LOCK-
 LAZILY-EXORCISES-A-STRANDED-LOCK` in `distributed-transaction-tests.lisp`.
 
-### 14. `%atomic-replace-file`'s Windows path re-introduces a "fresh process per call" cost, and its POSIX branch is untested
+### 14. `%atomic-replace-file`'s Windows path re-introduces a "fresh process per call" cost, and its POSIX branch is untested -- PARTIALLY RESOLVED
 
-`%atomic-replace-file` (`distributed-transaction.lisp:406-423`), called
-once per participant in every distributed transaction's Phase 2 roll-
-forward (`%publish-locked-branch-ref!` at line 561), spawns a brand-new
-`powershell.exe` process on `#+os-windows` and has it compile a
+`%atomic-replace-file` (`distributed-transaction.lisp`), called once per
+participant in every distributed transaction's Phase 2 roll-forward
+(`%publish-locked-branch-ref!`), used to spawn a brand-new
+`powershell.exe` process on `#+os-windows` and have it compile a
 `[DllImport]` P/Invoke shim (`Add-Type`) from scratch every single call,
-to invoke `MoveFileEx` once. This is exactly the "spawn a fresh process
-per call" anti-pattern item #3 in this document specifically eliminated
-for ordinary Git plumbing via `git-io.lisp`'s long-lived session cache;
-here it is reintroduced, unbatched and unamortized, for every 2PC
-publish. It also collapses every possible `MoveFileEx` failure into a
-bare exit code of `1` (the inline script's own `exit 1`), discarding
-`GetLastError()`, so a real failure (as opposed to the ref-hierarchy
-collision fixed in commit `3afd0e3`, which item #14's sibling fix now
-catches earlier) still produces an undiagnosable "Could not publish ...
-(1): " message with empty output. Separately, the `#-os-windows` branch
-(`(uiop:rename-file-overwriting-target source target)`) has zero test
-coverage, since every test in this suite runs on Windows; there is no
-CI job or documented manual step that exercises it.
+to invoke `MoveFileEx` once -- exactly the "spawn a fresh process per
+call" anti-pattern item #3 in this document specifically eliminated for
+ordinary Git plumbing via `git-io.lisp`'s long-lived session cache. It
+also collapsed every possible `MoveFileEx` failure into a bare exit code
+of `1`, discarding `GetLastError()`, producing an undiagnosable "Could
+not publish ... (1): " message with empty output.
+
+Fixed the process-per-call and diagnostics halves: `%atomic-replace-file`
+now normally serves a request via `%atomic-replace-file-via-session`, a
+single round-trip to `*atomic-move-session*` -- one long-lived
+PowerShell subprocess (mirroring `git-io.lisp`'s `*git-io-sessions*`
+pattern exactly, including a one-shot fallback,
+`%atomic-replace-file-one-shot`, transparently used if the session
+cannot be started or misbehaves, and an `sb-ext:*exit-hooks*` entry,
+`close-atomic-move-session`, so no PowerShell subprocess outlives the
+Lisp process). The Add-Type P/Invoke shim now compiles exactly once for
+the session's whole lifetime rather than once per call. Both the session
+and one-shot paths now report the real Win32 error code (via
+`Marshal.GetLastWin32Error()`) on a genuine `MoveFileEx` failure instead
+of a bare, undiagnosable exit code.
+
+One real bug surfaced and was fixed while building the session: `
+[Console]::Out.WriteLine` on Windows appends the platform's own
+`Environment.NewLine` (CRLF), not a bare LF, so a naive
+LF-delimited reader (`%git-io-read-line-of-octets`, shared with
+`git-io.lisp`'s own sessions, which only ever talk to `git` itself and
+so only ever see bare-LF lines) left a stray trailing CR byte in every
+reply, breaking the `(string= reply "OK")` comparison on every single
+call. Fixed by having the session's own PowerShell script write with an
+explicit `` `n `` (bare LF) instead of `WriteLine`, and, defensively, by
+right-trimming any stray `#\Return` from a reply on the Lisp side too.
+Covered by two new direct tests,
+`ATOMIC-REPLACE-FILE-REPLACES-AN-EXISTING-TARGET-AND-CONSUMES-THE-SOURCE`
+and `ATOMIC-REPLACE-FILE-CREATES-A-NONEXISTENT-TARGET`
+(`distributed-transaction-tests.lisp`), which would have caught this
+regression immediately had they existed before.
+
+Still open: the `#-os-windows` branch
+(`(uiop:rename-file-overwriting-target source target)`) still has zero
+test coverage, since every test in this suite runs on Windows; there is
+still no CI job or documented manual step that exercises it. The two new
+tests above are written platform-generically (they call
+`%atomic-replace-file` directly with plain temp files, not through any
+`#+os-windows`-specific API) so they would already exercise that branch
+correctly if this suite were ever run on a POSIX machine or CI runner --
+but no such runner exists yet, so this half of the item remains
+genuinely open.
 
 ### 15. `githack/kademlia` depends on GitHack's public API but is invisible to `asdf:test-system :githack` -- RESOLVED
 

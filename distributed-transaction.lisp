@@ -403,22 +403,133 @@ into a carriage return."
     (write-sequence (sb-ext:string-to-octets (format nil "~A~%" sha) :external-format :ascii) out)
     (finish-output out)))
 
-(defun %atomic-replace-file (source target)
-  "Replace TARGET with SOURCE. SOURCE is consumed. On Windows this is
-MoveFileEx with MOVEFILE_REPLACE_EXISTING and MOVEFILE_WRITE_THROUGH,
-so a crash cannot leave the branch ref missing."
-  #+os-windows
+(defparameter +atomic-move-session-script+
+  "Add-Type -Namespace GithackAtomic -Name Move -MemberDefinition '[DllImport(\"kernel32.dll\", SetLastError=true, CharSet=CharSet.Unicode)] public static extern bool MoveFileEx(string existing, string neu, int flags);'; while ($true) { $line = [Console]::In.ReadLine(); if ($line -eq $null) { break }; $parts = $line.Split([char]9); $ok = [GithackAtomic.Move]::MoveFileEx($parts[0], $parts[1], 9); if ($ok) { [Console]::Out.Write(\"OK`n\") } else { [Console]::Out.Write('ERR ' + [System.Runtime.InteropServices.Marshal]::GetLastWin32Error() + \"`n\") }; [Console]::Out.Flush() }"
+  "PowerShell source for *ATOMIC-MOVE-SESSION*'s persistent
+subprocess: compiles the MoveFileEx P/Invoke shim exactly once, then
+loops reading \"<source>\\t<target>\" lines from its own stdin and
+writing back \"OK\" or \"ERR <win32-error-code>\" per request,
+terminated with a bare LF (not [CONSOLE]::OUT.WRITELINE's own
+platform-default CRLF, which would leave a stray CR byte in
+%GIT-IO-READ-LINE-OF-OCTETS's own LF-delimited read). See
+%ATOMIC-REPLACE-FILE-VIA-SESSION.")
+
+(defvar *atomic-move-session* nil
+  "Cached UIOP process-info for the persistent PowerShell subprocess
+(running +ATOMIC-MOVE-SESSION-SCRIPT+) that performs Windows
+MoveFileEx calls for %ATOMIC-REPLACE-FILE, avoiding a fresh process
+spawn and a fresh Add-Type P/Invoke compile on every call. NIL until
+first used; see %ENSURE-ATOMIC-MOVE-SESSION and
+%DISCARD-ATOMIC-MOVE-SESSION.")
+
+#+os-windows
+(defun %start-atomic-move-session ()
+  "Launch the persistent PowerShell subprocess behind
+*ATOMIC-MOVE-SESSION*, returning its UIOP process-info."
+  (uiop:launch-program (list "powershell" "-NoProfile" "-NonInteractive" "-Command" +atomic-move-session-script+)
+                        :input :stream :output :stream
+                        :element-type '(unsigned-byte 8)))
+
+#+os-windows
+(defun %ensure-atomic-move-session ()
+  "Return the cached, still-alive *ATOMIC-MOVE-SESSION* process-info,
+starting one via %START-ATOMIC-MOVE-SESSION if none is cached yet or
+the cached one has died."
+  (if (and *atomic-move-session* (uiop:process-alive-p *atomic-move-session*))
+      *atomic-move-session*
+      (setf *atomic-move-session* (%start-atomic-move-session))))
+
+#+os-windows
+(defun %discard-atomic-move-session ()
+  "Forcibly terminate and forget *ATOMIC-MOVE-SESSION*, if any, so
+the next call starts a fresh subprocess instead of reusing a broken
+one."
+  (when *atomic-move-session*
+    (let ((process *atomic-move-session*))
+      (setf *atomic-move-session* nil)
+      (ignore-errors (uiop:terminate-process process :urgent t))
+      (ignore-errors (uiop:close-streams process)))))
+
+#+os-windows
+(defun close-atomic-move-session ()
+  "Terminate and forget *ATOMIC-MOVE-SESSION*, if any. A defensive
+backstop parallel to CLOSE-GIT-IO-SESSIONS (git-io.lisp); registered
+on SB-EXT:*EXIT-HOOKS* below so no leftover PowerShell subprocess
+outlives the Lisp process that spawned it."
+  (%discard-atomic-move-session))
+
+#+os-windows
+;;; Registered by symbol, not a fresh closure, so reloading this file
+;;; (e.g. during interactive development) does not accumulate
+;;; duplicate entries -- PUSHNEW's default #'EQL test recognizes the
+;;; same symbol across reloads.
+(pushnew 'close-atomic-move-session sb-ext:*exit-hooks*)
+
+#+os-windows
+(defun %atomic-replace-file-via-session (source target)
+  "Perform SOURCE -> TARGET via *ATOMIC-MOVE-SESSION*'s persistent
+PowerShell MoveFileEx loop, a single round-trip with no process
+spawn or Add-Type recompile. Signals a plain error, including the
+raw Win32 error code, on failure; %ATOMIC-REPLACE-FILE catches this
+and falls back to %ATOMIC-REPLACE-FILE-ONE-SHOT."
+  (let* ((process (%ensure-atomic-move-session))
+         (src (substitute #\/ #\\ (uiop:native-namestring source)))
+         (dst (substitute #\/ #\\ (uiop:native-namestring target))))
+    (%git-io-write-line-of-octets (uiop:process-info-input process) (format nil "~A~C~A" src #\Tab dst))
+    (let ((reply (let ((raw (%git-io-read-line-of-octets (uiop:process-info-output process))))
+                   (and raw (string-right-trim '(#\Return) raw)))))
+      (cond
+        ((null reply)
+         (error "Atomic-move session produced no output for ~A -> ~A (process may have exited)." source target))
+        ((string= reply "OK") nil)
+        ((and (>= (length reply) 4) (string= "ERR " reply :end2 4))
+         (error 'distributed-transaction-error
+                :format-control "Could not publish ~A onto ~A (Win32 error ~A)."
+                :format-arguments (list source target (subseq reply 4))))
+        (t (error "Unrecognized atomic-move session reply ~S for ~A -> ~A." reply source target))))))
+
+(defun %atomic-replace-file-one-shot (source target)
+  "Shell out to a fresh, one-shot PowerShell subprocess to perform
+SOURCE -> TARGET via Windows MoveFileEx, including a fresh Add-Type
+P/Invoke compile. The fallback %ATOMIC-REPLACE-FILE uses if its
+persistent session is unavailable or misbehaves. Unlike the original
+version of this function, a MoveFileEx failure's own Win32 error
+code (via GetLastWin32Error) is captured and reported, rather than
+collapsed into an undiagnosable bare exit code."
   (let* ((src (substitute #\/ #\\ (uiop:native-namestring source)))
          (dst (substitute #\/ #\\ (uiop:native-namestring target)))
-         (script (format nil "Add-Type -Namespace GithackAtomic -Name Move -MemberDefinition '[DllImport(\"kernel32.dll\", SetLastError=true, CharSet=CharSet.Unicode)] public static extern bool MoveFileEx(string existing, string neu, int flags);'; if (-not [GithackAtomic.Move]::MoveFileEx('~A','~A', 9)) { exit 1 }"
+         (script (format nil "Add-Type -Namespace GithackAtomic -Name Move -MemberDefinition '[DllImport(\"kernel32.dll\", SetLastError=true, CharSet=CharSet.Unicode)] public static extern bool MoveFileEx(string existing, string neu, int flags);'; if (-not [GithackAtomic.Move]::MoveFileEx('~A','~A', 9)) { Write-Output ('ERR ' + [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()); exit 1 }"
                          src dst)))
     (multiple-value-bind (output error-output code)
         (uiop:run-program (list "powershell" "-NoProfile" "-NonInteractive" "-Command" script)
                           :output :string :error-output :string :ignore-error-status t)
       (unless (zerop code)
-        (error 'distributed-transaction-error
-               :format-control "Could not publish ~A onto ~A (~D): ~A~A"
-               :format-arguments (list source target code output error-output)))))
+        (let ((trimmed (string-trim '(#\Space #\Newline #\Return) output)))
+          (error 'distributed-transaction-error
+                 :format-control "Could not publish ~A onto ~A (~A)."
+                 :format-arguments (list source target
+                                         (if (and (>= (length trimmed) 4) (string= "ERR " trimmed :end2 4))
+                                             (format nil "Win32 error ~A" (subseq trimmed 4))
+                                             (format nil "exit code ~D: ~A~A" code output error-output)))))))))
+
+(defun %atomic-replace-file (source target)
+  "Replace TARGET with SOURCE. SOURCE is consumed. On Windows this is
+MoveFileEx with MOVEFILE_REPLACE_EXISTING and MOVEFILE_WRITE_THROUGH,
+so a crash cannot leave the branch ref missing. Normally served by a
+single round-trip to *ATOMIC-MOVE-SESSION*'s persistent PowerShell
+subprocess (see %ATOMIC-REPLACE-FILE-VIA-SESSION), avoiding the
+'fresh process, fresh Add-Type compile, per call' cost item #3 in
+TECHNICAL_DEBT.md already eliminated for ordinary Git plumbing via
+GIT-IO.LISP's own long-lived session cache; transparently falls back
+to a one-shot PowerShell subprocess (%ATOMIC-REPLACE-FILE-ONE-SHOT)
+if that session cannot be started or misbehaves."
+  #+os-windows
+  (handler-case
+      (%atomic-replace-file-via-session source target)
+    (distributed-transaction-error (condition) (error condition))
+    (error ()
+      (%discard-atomic-move-session)
+      (%atomic-replace-file-one-shot source target)))
   #-os-windows
   (uiop:rename-file-overwriting-target source target))
 

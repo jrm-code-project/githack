@@ -293,6 +293,55 @@ stranded lock on its own."
       (%release-branch-ref-lock! repository "main")
       (is (not (probe-file (%branch-ref-lock-pathname repository "main")))))))
 
+(defun %read-whole-file-as-string (pathname)
+  "Return PATHNAME's entire content as a single string. Used only by
+%ATOMIC-REPLACE-FILE's own tests below, whose files are tiny plain
+text, never actual Git objects."
+  (with-open-file (stream pathname :direction :input)
+    (let ((line (read-line stream nil nil)))
+      (or line ""))))
+
+(test atomic-replace-file-replaces-an-existing-target-and-consumes-the-source
+  "%ATOMIC-REPLACE-FILE overwrites an already-existing TARGET with
+SOURCE's own content and leaves SOURCE gone afterward -- the branch-
+ref-publish case %PUBLISH-LOCKED-BRANCH-REF! exercises on every
+non-first write to a branch. Exercises whichever platform branch
+(the persistent-session MoveFileEx path on Windows, or UIOP:RENAME-
+FILE-OVERWRITING-TARGET elsewhere) is actually active on the machine
+running this test."
+  (let ((source (unique-temporary-pathname "githack-atomic-replace-source-"))
+        (target (unique-temporary-pathname "githack-atomic-replace-target-")))
+    (unwind-protect
+        (progn
+          (with-open-file (out source :direction :output :if-exists :supersede :if-does-not-exist :create)
+            (write-line "new-content" out))
+          (with-open-file (out target :direction :output :if-exists :supersede :if-does-not-exist :create)
+            (write-line "old-content" out))
+          (%atomic-replace-file source target)
+          (is (not (probe-file source)))
+          (is (equal "new-content" (%read-whole-file-as-string target))))
+      (ignore-errors (delete-file source))
+      (ignore-errors (delete-file target)))))
+
+(test atomic-replace-file-creates-a-nonexistent-target
+  "%ATOMIC-REPLACE-FILE also succeeds when TARGET does not exist yet
+-- the first-ever publish of a branch ref, e.g. the very first write
+in ONE-PARTICIPANT-GITHACK-TRANSACTION-TAKES-THE-FAST-PATH's own
+Phase 2 equivalent."
+  (let ((source (unique-temporary-pathname "githack-atomic-create-source-"))
+        (target (unique-temporary-pathname "githack-atomic-create-target-")))
+    (ignore-errors (delete-file target))
+    (unwind-protect
+        (progn
+          (with-open-file (out source :direction :output :if-exists :supersede :if-does-not-exist :create)
+            (write-line "fresh-content" out))
+          (is (not (probe-file target)))
+          (%atomic-replace-file source target)
+          (is (not (probe-file source)))
+          (is (equal "fresh-content" (%read-whole-file-as-string target))))
+      (ignore-errors (delete-file source))
+      (ignore-errors (delete-file target)))))
+
 (defun %exorcist-kill-poll (predicate seconds)
   "Return true once PREDICATE is true, checking every tenth of a
 second for up to SECONDS. Used to wait on a child process without

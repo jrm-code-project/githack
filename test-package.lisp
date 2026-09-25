@@ -231,6 +231,8 @@
                 "PARSE-TRANSACTION-MANIFEST"
                 "%PREPARE-PARTICIPANT!"
                 "%ACQUIRE-BRANCH-REF-LOCK!"
+                "%ATOMIC-REPLACE-FILE"
+                "UNIQUE-TEMPORARY-PATHNAME"
                 "%BRANCH-REF-LOCK-PATHNAME"
                 "%RELEASE-BRANCH-REF-LOCK!"
                 "FORMAT-ANNOTATED-TAG-CONTENT"
