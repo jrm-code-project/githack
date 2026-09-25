@@ -228,33 +228,33 @@ SERIALIZE-PERSISTENT-OBJECT writes to Git."
 'GIT-OBJECT)) to Git's object database according to its concrete
 type. Broken out of PERSIST-OBJECT-COMPONENT so this dispatch is its
 own generic function, with one DEFMETHOD per concrete type in place
-of an ETYPECASE clause."))
+of an ETYPECASE clause.")
 
-(defmethod persist-object-component-by-type ((value persistent-object))
-  (serialize-persistent-object value))
+  (:method ((value persistent-object))
+    (serialize-persistent-object value))
 
-(defmethod persist-object-component-by-type ((value persistent-cons))
-  (serialize-persistent-cons value))
+  (:method ((value persistent-cons))
+    (serialize-persistent-cons value))
 
-(defmethod persist-object-component-by-type ((value persistent-vector))
-  (serialize-persistent-vector value))
+  (:method ((value persistent-vector))
+    (serialize-persistent-vector value))
 
-(defmethod persist-object-component-by-type ((value persistent-array))
-  (serialize-persistent-array value))
+  (:method ((value persistent-array))
+    (serialize-persistent-array value))
 
-(defmethod persist-object-component-by-type ((value persistent-wttree))
-  (serialize-persistent-wttree-node value))
+  (:method ((value persistent-wttree))
+    (serialize-persistent-wttree-node value))
 
-(defmethod persist-object-component-by-type ((value git-tree))
-  (unless (sha value)
-    (setf (sha value)
-          (git-hash-object (get-repository value) "tree" (serialize-tree value)))))
+  (:method ((value git-tree))
+    (unless (sha value)
+      (setf (sha value)
+            (git-hash-object (get-repository value) "tree" (serialize-tree value)))))
 
-(defmethod persist-object-component-by-type ((value git-blob))
-  (unless (sha value)
-    (setf (sha value)
-          (git-hash-object (get-repository value) "blob"
-                            (serialize-atom (get-payload value))))))
+  (:method ((value git-blob))
+    (unless (sha value)
+      (setf (sha value)
+            (git-hash-object (get-repository value) "blob"
+                             (serialize-atom (get-payload value)))))))
 
 ;;; PERSISTENT-CONS.LISP and PERSISTENT-VECTOR.LISP each define their
 ;;; own analogous PERSIST-CONS-COMPONENT-BY-TYPE/%PERSIST-VECTOR-
@@ -460,12 +460,12 @@ at all."
    "Return the concrete PERSISTENT-* class-name symbol REDISPATCH-
 PERSISTENT-TREE must MAKE-INSTANCE for a compound TAG (:CONS,
 :VECTOR, :ARRAY, or :WTTREE), dispatching via an EQL specializer on
-TAG."))
+TAG.")
 
-(defmethod %persistent-class-for-tag ((tag (eql :cons))) 'persistent-cons)
-(defmethod %persistent-class-for-tag ((tag (eql :vector))) 'persistent-vector)
-(defmethod %persistent-class-for-tag ((tag (eql :array))) 'persistent-array)
-(defmethod %persistent-class-for-tag ((tag (eql :wttree))) 'persistent-wttree)
+  (:method ((tag (eql :cons))) 'persistent-cons)
+  (:method ((tag (eql :vector))) 'persistent-vector)
+  (:method ((tag (eql :array))) 'persistent-array)
+  (:method ((tag (eql :wttree))) 'persistent-wttree))
 
 (defgeneric %deserialize-persistent-compound! (tag hollow tree-octets meta-octets)
   (:documentation
@@ -473,19 +473,19 @@ TAG."))
 not-yet-loaded proxy of the class %PERSISTENT-CLASS-FOR-TAG TAG names
 -- from TREE-OCTETS/META-OCTETS, dispatching via an EQL specializer
 on TAG to the matching DESERIALIZE-PERSISTENT-*! function. Returns
-HOLLOW."))
+HOLLOW.")
 
-(defmethod %deserialize-persistent-compound! ((tag (eql :cons)) hollow tree-octets meta-octets)
-  (deserialize-persistent-cons! hollow tree-octets meta-octets))
+  (:method ((tag (eql :cons)) hollow tree-octets meta-octets)
+    (deserialize-persistent-cons! hollow tree-octets meta-octets))
 
-(defmethod %deserialize-persistent-compound! ((tag (eql :vector)) hollow tree-octets meta-octets)
-  (deserialize-persistent-vector! hollow tree-octets meta-octets))
+  (:method ((tag (eql :vector)) hollow tree-octets meta-octets)
+    (deserialize-persistent-vector! hollow tree-octets meta-octets))
 
-(defmethod %deserialize-persistent-compound! ((tag (eql :array)) hollow tree-octets meta-octets)
-  (deserialize-persistent-array! hollow tree-octets meta-octets))
+  (:method ((tag (eql :array)) hollow tree-octets meta-octets)
+    (deserialize-persistent-array! hollow tree-octets meta-octets))
 
-(defmethod %deserialize-persistent-compound! ((tag (eql :wttree)) hollow tree-octets meta-octets)
-  (deserialize-persistent-wttree-node! hollow tree-octets meta-octets))
+  (:method ((tag (eql :wttree)) hollow tree-octets meta-octets)
+    (deserialize-persistent-wttree-node! hollow tree-octets meta-octets)))
 
 (defun redispatch-persistent-tree (tree)
   "Return the correctly, specifically typed proxy for TREE (a plain,

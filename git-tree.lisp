@@ -50,13 +50,13 @@ START into the familiar lowercase 40-character hexadecimal string."
   (:documentation
    "Return the Git permission-mode string appropriate for the
 concrete type of GIT-OBJECT: \"40000\" for a GIT-TREE (directory),
-or \"100644\" for a GIT-BLOB (regular file)."))
+or \"100644\" for a GIT-BLOB (regular file).")
 
-(defmethod infer-git-mode ((git-object git-tree))
-  "40000")
+  (:method ((git-object git-tree))
+    "40000")
 
-(defmethod infer-git-mode ((git-object git-blob))
-  "100644")
+  (:method ((git-object git-blob))
+    "100644"))
 
 (defun tree-sort-key (name object)
   "Return the string Git itself sorts tree entries by: NAME as-is

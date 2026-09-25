@@ -378,6 +378,33 @@ Nothing currently reminds a contributor to separately run
 `(asdf:test-system "githack/kademlia-test")` after touching one of those
 shared entry points.
 
+### 16. `SCAN-PERSISTENT-ALIST`/`SCAN-PERSISTENT-PLIST` fail to compile on a genuinely clean build, but the failure is masked by stale FASL caching
+
+`persistent-cons.lisp`'s `SCAN-PERSISTENT-ALIST` and
+`SCAN-PERSISTENT-PLIST` are declared `(DECLARE
+(OPTIMIZABLE-SERIES-FUNCTION 2))` and both end in `(VALUES (MAP-FN ...)
+(MAP-FN ...))` -- returning two series from an optimizable series
+function. SERIES signals "Restriction violation 7 ... VALUES returns
+multiple series" for this pattern, which SBCL/ASDF treats as a
+`FAILURE-P` compile result, and `asdf:load-system`'s default
+`:on-failure` policy turns that into a fatal
+`UIOP/LISP-BUILD:COMPILE-FILE-ERROR` -- confirmed reproducible with the
+`common-lisp` FASL cache directory deleted entirely and a fresh SBCL
+process, i.e. on what a brand-new clone/clean build would actually
+experience. This has gone unnoticed because the documented, everyday
+test workflow (`ql:quickload` followed by `asdf:test-system :githack`)
+does not force recompilation of files whose FASL is already
+cached-and-current, so a working developer machine's local cache masks
+the failure indefinitely -- `persistent-cons.lisp` had not actually been
+recompiled by any of this project's routine `(ql:quickload
+:githack)`-based test runs for some time. Verify any future "all tests
+green" claim for files that may be affected by cache staleness with
+`(asdf:load-system :githack :force t)` against a FASL cache that has been
+cleared, not just the routine `ql:quickload` sequence. Fixing
+`SCAN-PERSISTENT-ALIST`/`SCAN-PERSISTENT-PLIST` themselves (e.g.
+restructuring to avoid a multi-series `VALUES` return, or dropping the
+`OPTIMIZABLE-SERIES-FUNCTION` declaration) is deferred to a follow-up.
+
 ---
 
 ## Explicitly *not* debt (verified, no action needed)

@@ -302,27 +302,27 @@ own SHA."
 Git's object database according to its concrete type, and return the
 resulting SHA. Broken out of PERSIST-GIT-OBJECT so this dispatch is
 its own generic function, with one DEFMETHOD per concrete type in
-place of an ETYPECASE clause."))
+place of an ETYPECASE clause.")
 
-(defmethod persist-git-object-by-type ((git-object persistent-object))
-  (serialize-persistent-object git-object))
+  (:method ((git-object persistent-object))
+    (serialize-persistent-object git-object))
 
-(defmethod persist-git-object-by-type ((git-object persistent-cons))
-  (serialize-persistent-cons git-object))
+  (:method ((git-object persistent-cons))
+    (serialize-persistent-cons git-object))
 
-(defmethod persist-git-object-by-type ((git-object persistent-vector))
-  (serialize-persistent-vector git-object))
+  (:method ((git-object persistent-vector))
+    (serialize-persistent-vector git-object))
 
-(defmethod persist-git-object-by-type ((git-object persistent-array))
-  (serialize-persistent-array git-object))
+  (:method ((git-object persistent-array))
+    (serialize-persistent-array git-object))
 
-(defmethod persist-git-object-by-type ((git-object git-tree))
-  (persist-git-tree-object git-object))
+  (:method ((git-object git-tree))
+    (persist-git-tree-object git-object))
 
-(defmethod persist-git-object-by-type ((git-object git-blob))
-  (setf (sha git-object)
-        (git-hash-object (get-repository git-object) "blob"
-                          (serialize-atom (get-payload git-object)))))
+  (:method ((git-object git-blob))
+    (setf (sha git-object)
+          (git-hash-object (get-repository git-object) "blob"
+                           (serialize-atom (get-payload git-object))))))
 
 (defun persist-git-object (git-object)
   "Ensure GIT-OBJECT (a GIT-BLOB, GIT-TREE, PERSISTENT-CONS,
@@ -432,23 +432,23 @@ Records the new commit in TRANSACTION's RESULT slot and returns it."
    "Signal the error TRANSACTION's own REBASE-FALLBACK value calls
 for, once COMMIT-GIT-TRANSACTION-WITH-REBASE!'s own rebase-retry loop
 finds a genuine, unresolvable GIT-MERGE-TREE conflict, dispatching on
-REBASE-FALLBACK (:RETRY or :ERROR) via an EQL specializer."))
+REBASE-FALLBACK (:RETRY or :ERROR) via an EQL specializer.")
 
-(defmethod %signal-rebase-fallback-error ((rebase-fallback (eql :retry)) &key repository branch-name base-sha current-head-sha candidate-sha conflict-detail)
-  (declare (ignore candidate-sha))
-  (error 'concurrent-modification-error
-         :repository repository :name branch-name
-         :expected-sha base-sha :new-sha current-head-sha
-         :detail (format nil "Unresolvable rebase merge conflict; falling back to :RETRY.~@[~%~A~]"
-                          conflict-detail)))
+  (:method ((rebase-fallback (eql :retry)) &key repository branch-name base-sha current-head-sha candidate-sha conflict-detail)
+    (declare (ignore candidate-sha))
+    (error 'concurrent-modification-error
+           :repository repository :name branch-name
+           :expected-sha base-sha :new-sha current-head-sha
+           :detail (format nil "Unresolvable rebase merge conflict; falling back to :RETRY.~@[~%~A~]"
+                           conflict-detail)))
 
-(defmethod %signal-rebase-fallback-error ((rebase-fallback (eql :error)) &key repository branch-name base-sha current-head-sha candidate-sha conflict-detail)
-  (error 'merge-conflict-error
-         :repository repository :name branch-name
-         :base-sha base-sha
-         :candidate-sha candidate-sha
-         :current-head-sha current-head-sha
-         :detail conflict-detail))
+  (:method ((rebase-fallback (eql :error)) &key repository branch-name base-sha current-head-sha candidate-sha conflict-detail)
+    (error 'merge-conflict-error
+           :repository repository :name branch-name
+           :base-sha base-sha
+           :candidate-sha candidate-sha
+           :current-head-sha current-head-sha
+           :detail conflict-detail)))
 
 (defun commit-git-transaction-with-rebase! (transaction root)
   "Commit TRANSACTION (an outermost, :READ-WRITE GIT-TRANSACTION
@@ -751,23 +751,23 @@ deeper, inside ATTEMPT itself)."
 CALL-WITH-GIT-TRANSACTION-ATTEMPT) applying the retry/locking
 strategy CONFLICT-RESOLUTION names (:ERROR, :RETRY, :LOCK, or
 :REBASE), dispatching via an EQL specializer. REPOSITORY-PATHNAME is
-only consulted by the :LOCK method."))
+only consulted by the :LOCK method.")
 
-(defmethod call-with-conflict-resolution ((conflict-resolution (eql :error)) repository-pathname attempt)
-  (declare (ignore repository-pathname))
-  (funcall attempt))
+  (:method ((conflict-resolution (eql :error)) repository-pathname attempt)
+    (declare (ignore repository-pathname))
+    (funcall attempt))
 
-(defmethod call-with-conflict-resolution ((conflict-resolution (eql :retry)) repository-pathname attempt)
-  (declare (ignore repository-pathname))
-  (%retry-until-success attempt))
+  (:method ((conflict-resolution (eql :retry)) repository-pathname attempt)
+    (declare (ignore repository-pathname))
+    (%retry-until-success attempt))
 
-(defmethod call-with-conflict-resolution ((conflict-resolution (eql :lock)) repository-pathname attempt)
-  (with-repository-transaction-lock (repository-pathname)
-    (funcall attempt)))
+  (:method ((conflict-resolution (eql :lock)) repository-pathname attempt)
+    (with-repository-transaction-lock (repository-pathname)
+      (funcall attempt)))
 
-(defmethod call-with-conflict-resolution ((conflict-resolution (eql :rebase)) repository-pathname attempt)
-  (declare (ignore repository-pathname))
-  (%retry-until-success attempt))
+  (:method ((conflict-resolution (eql :rebase)) repository-pathname attempt)
+    (declare (ignore repository-pathname))
+    (%retry-until-success attempt)))
 
 (defun call-with-git-transaction (repository mode &key branch author committer message parents receiver
                                                         (conflict-resolution :error) (rebase-fallback :error))

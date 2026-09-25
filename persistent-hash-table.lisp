@@ -40,20 +40,20 @@ a function object, the symbol naming it, via
 FUNCTION-LAMBDA-EXPRESSION's third value. Signals an error if TEST is
 a function whose name cannot be determined this way, since an
 unnamed function is not a serializable atom -- callers should pass a
-symbol (e.g. 'EQUAL) instead of #'EQUAL."))
+symbol (e.g. 'EQUAL) instead of #'EQUAL.")
 
-(defmethod normalize-hash-test ((test symbol))
-  (unless (fboundp test)
-    (error 'invalid-argument-error
-           :format-control "TEST ~S does not name a callable function."
-           :format-arguments (list test)))
-  test)
-
-(defmethod normalize-hash-test ((test function))
-  (or (nth-value 2 (function-lambda-expression test))
+  (:method ((test symbol))
+    (unless (fboundp test)
       (error 'invalid-argument-error
-             :format-control "Cannot determine a symbol name for the function ~S; pass TEST as a symbol (e.g. 'EQUAL) instead."
-             :format-arguments (list test))))
+             :format-control "TEST ~S does not name a callable function."
+             :format-arguments (list test)))
+    test)
+
+  (:method ((test function))
+    (or (nth-value 2 (function-lambda-expression test))
+        (error 'invalid-argument-error
+               :format-control "Cannot determine a symbol name for the function ~S; pass TEST as a symbol (e.g. 'EQUAL) instead."
+               :format-arguments (list test)))))
 
 (defun phash-test-function (table)
   "Return the two-argument equality predicate function named by

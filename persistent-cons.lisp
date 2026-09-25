@@ -126,19 +126,19 @@ Signals an error if OCTETS is not a plist whose :TAG is :CONS."
 Git's object database according to its concrete type, and return the
 resulting SHA. Broken out of PERSIST-CONS-COMPONENT so this
 dispatch is its own generic function, with one DEFMETHOD per
-concrete type in place of an ETYPECASE clause."))
+concrete type in place of an ETYPECASE clause.")
 
-(defmethod persist-cons-component-by-type ((git-object persistent-cons))
-  (serialize-persistent-cons git-object))
+  (:method ((git-object persistent-cons))
+    (serialize-persistent-cons git-object))
 
-(defmethod persist-cons-component-by-type ((git-object git-tree))
-  (setf (sha git-object)
-        (git-hash-object (get-repository git-object) "tree" (serialize-tree git-object))))
+  (:method ((git-object git-tree))
+    (setf (sha git-object)
+          (git-hash-object (get-repository git-object) "tree" (serialize-tree git-object))))
 
-(defmethod persist-cons-component-by-type ((git-object git-blob))
-  (setf (sha git-object)
-        (git-hash-object (get-repository git-object) "blob"
-                          (serialize-atom (get-payload git-object)))))
+  (:method ((git-object git-blob))
+    (setf (sha git-object)
+          (git-hash-object (get-repository git-object) "blob"
+                           (serialize-atom (get-payload git-object))))))
 
 (defun persist-cons-component (git-object)
   "Ensure GIT-OBJECT (a GIT-BLOB, a plain GIT-TREE, or a nested
