@@ -45,8 +45,11 @@ NAME (INITFORM defaults to NIL, with no :TYPE/:READ-ONLY/:TRANSIENT),
 or a list (NAME &OPTIONAL INITFORM &KEY TYPE READ-ONLY TRANSIENT)."
   (if (symbolp slot-description)
       (list :name slot-description :initform nil :type nil :read-only nil :transient nil)
-      (destructuring-bind (name &optional initform &key type read-only transient) slot-description
-        (list :name name :initform initform :type type :read-only read-only :transient transient))))
+      (destructuring-bind (name &optional initform &rest key-args) slot-description
+        (list :name name :initform initform
+              :type (getf key-args :type)
+              :read-only (getf key-args :read-only)
+              :transient (getf key-args :transient)))))
 
 (defun persistent-struct-slot-accessor-name (slot conc-name package)
   "Return the symbol, interned in PACKAGE, DEFINE-PERSISTENT-STRUCT
@@ -98,10 +101,10 @@ plist as returned by PERSISTENT-STRUCT-PARSE-SLOT-DESCRIPTION)."
 generated MAKE-NAME constructor function, templated from NAME,
 MAKE-NAME, and SLOTS (each a plist as returned by
 PERSISTENT-STRUCT-PARSE-SLOT-DESCRIPTION)."
-  (format nil "Construct and return a new ~:@(~A~) instance via MAKE-INSTANCE, accepting one &KEY argument per slot (~{~A~^, ~}), each defaulting to that slot's own DEFINE-PERSISTENT-STRUCT DEFAULT-INITFORM when not supplied."
+  (format nil "Construct and return a new ~:@(~A~) instance via ~:@(~A~) (which calls MAKE-INSTANCE), accepting one &KEY argument per slot (~{~A~^, ~}), each defaulting to that slot's own DEFINE-PERSISTENT-STRUCT DEFAULT-INITFORM when not supplied."
           name
-          (mapcar (lambda (slot) (format nil "~:@(~A~)" (getf slot :name))) slots)
-          make-name))
+          make-name
+          (mapcar (lambda (slot) (format nil "~:@(~A~)" (getf slot :name))) slots)))
 
 (defun persistent-struct-predicate-documentation (name predicate-name)
   "Return the docstring DEFINE-PERSISTENT-STRUCT attaches to its

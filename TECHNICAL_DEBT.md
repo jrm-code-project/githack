@@ -478,15 +478,26 @@ FiveAM suite still passes 1093/1093 (100%). Verify any future "all
 tests green" claim for files that may be affected by cache staleness
 the same way, not just via the routine `ql:quickload` sequence.
 
-**Related, not yet fixed:** the same clean-cache verification also
+**Related, now also fixed:** the same clean-cache verification also
 surfaced two pre-existing `STYLE-WARNING`s in `persistent-struct.lisp`
 (unrelated to this item, previously masked the same way) --
 `PERSISTENT-STRUCT-PARSE-SLOT-DESCRIPTION`'s `DESTRUCTURING-BIND`
-lambda list mixes `&OPTIONAL` and `&KEY`, and
-`PERSISTENT-STRUCT-CONSTRUCTOR-DOCUMENTATION`'s `FORMAT` call passes 3
-arguments to a control string that only consumes 2. Left for a
-follow-up since they are style-warnings, not fatal errors, and out of
-this item's scope.
+lambda list mixed `&OPTIONAL` and `&KEY`, fixed by replacing the
+`&KEY` portion with `&REST KEY-ARGS` plus `GETF`, an equivalent parse
+with no `&OPTIONAL`/`&KEY` combination to warn about. And
+`PERSISTENT-STRUCT-CONSTRUCTOR-DOCUMENTATION`'s `FORMAT` call passed 3
+arguments to a control string that only consumed 2 -- not just a
+warning but a real doc-drift bug: the unused third argument was
+`MAKE-NAME` itself, so every `DEFINE-PERSISTENT-STRUCT`-generated
+constructor's own docstring silently never named its own generated
+function, contrary to what the surrounding docstring already claimed
+("templated from NAME, MAKE-NAME, and SLOTS"). Fixed by adding a
+`~:@(~A~)` directive for `MAKE-NAME` to the control string itself, so
+the generated docstring now actually reads "...via `MAKE-<NAME>`
+(which calls MAKE-INSTANCE)..." instead of silently dropping the
+constructor's own name. Verified via another clean-cache forced
+recompile: zero warnings of any kind, full suite still 1104/1104 core
++ 53/53 Kademlia checks (100%).
 
 ---
 
