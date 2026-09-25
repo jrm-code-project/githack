@@ -3,7 +3,13 @@
   :author "Joe Marshall <eval.apply@gmail.com>"
   :version "0.1"
   :license "MIT"
-  :in-order-to ((test-op (test-op "githack/test")))
+  ;; TEST-OP on this system also runs "githack/kademlia-test", so the
+  ;; standard `(asdf:test-system :githack)` workflow exercises Kademlia
+  ;; too -- it is a separate system only to keep ordinary LOAD-OP of
+  ;; "githack" itself free of sockets/threads (see TECHNICAL_DEBT.md
+  ;; item 15), not to make it invisible to the test command.
+  :in-order-to ((test-op (test-op "githack/test")
+                          (test-op "githack/kademlia-test")))
   :depends-on ("alexandria" "fold" "function" "named-let" "series")
   :components ((:file "package")
                (:file "conditions" :depends-on ("package"))

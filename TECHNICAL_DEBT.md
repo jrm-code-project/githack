@@ -377,7 +377,7 @@ catches earlier) still produces an undiagnosable "Could not publish ...
 coverage, since every test in this suite runs on Windows; there is no
 CI job or documented manual step that exercises it.
 
-### 15. `githack/kademlia` depends on GitHack's public API but is invisible to `asdf:test-system :githack`
+### 15. `githack/kademlia` depends on GitHack's public API but is invisible to `asdf:test-system :githack` -- RESOLVED
 
 `kademlia/package.lisp` imports `DEFINE-PERSISTENT-STRUCT`, `PHASH-MAKE`,
 `PHASH-GET`, `PHASH-PUT`, `PHASH-REMOVE`, `PHASH-MAP`,
@@ -385,17 +385,25 @@ CI job or documented manual step that exercises it.
 directly from `"GITHACK"` (`kademlia/package.lisp:24-32`), making it a
 real, non-trivial downstream consumer of GitHack's own public surface.
 It is deliberately packaged as a separate `githack/kademlia` /
-`githack/kademlia-test` ASDF system (`githack.asd:64-88`) so that using
+`githack/kademlia-test` ASDF system (`githack.asd`) so that using
 GitHack as a plain object database never pulls in sockets or threads --
 a reasonable design choice, not itself debt. But this document's own
 build/test instructions, and this repository's stated convention ("run
 this after every change ... `(asdf:test-system :githack)` ... must be
-100% green"), only exercise the core `githack`/`githack/test` systems: a
-change to any of the above exported names' signature or behavior can
+100% green"), only exercised the core `githack`/`githack/test` systems: a
+change to any of the above exported names' signature or behavior could
 silently break Kademlia with no signal from the standard test command.
-Nothing currently reminds a contributor to separately run
-`(asdf:test-system "githack/kademlia-test")` after touching one of those
-shared entry points.
+
+Fixed by chaining `githack`'s own `TEST-OP` to also perform `TEST-OP` on
+`"githack/kademlia-test"` (`githack.asd`'s `:in-order-to` clause for the
+`githack` system now lists both `"githack/test"` and `"githack/kademlia-
+test"`). This only affects `TEST-OP` -- an ordinary `(ql:quickload
+:githack)`/`LOAD-OP` of `"githack"` alone still never touches
+`"githack/kademlia"` and so still never pulls in sockets or threads,
+preserving the original design goal -- but the standard `(asdf:test-
+system :githack)` workflow this document already prescribes now runs
+both suites (1099 core checks + 53 Kademlia checks, both 100% passing)
+with no separate command to remember.
 
 ### 16. `SCAN-PERSISTENT-ALIST`/`SCAN-PERSISTENT-PLIST` fail to compile on a genuinely clean build, but the failure is masked by stale FASL caching (Resolved)
 
