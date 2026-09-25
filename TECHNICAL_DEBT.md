@@ -302,14 +302,95 @@ technical-debt work should start from a fresh audit rather than this list.
 
 ---
 
+## Fresh audit (post-2PC/Kademlia), 2026-09-25
+
+Items #1-#12 above were audited against `main` as of the distributed
+Two-Phase-Commit (`distributed-transaction.lisp`), ref-hierarchy
+(`git-branch.lisp`'s `%blocking-ref-for-hierarchy`), and Kademlia
+(`kademlia/*.lisp`) work that landed after this document's last full
+pass. No `TODO`/`FIXME`/`XXX`/`KLUDGE`/`WORKAROUND`/`BUG` markers, `LOOP`,
+`ECASE`, `REDUCE`, or `REMOVE-IF`/`REMOVE-IF-NOT` usage, or raw `(GENSYM
+...)` calls were found in any active `*.lisp` file -- this codebase's
+existing conventions (see this document's own header and `AGENTS`-style
+instructions) are still being followed. Three new items surfaced:
+
+### 13. Crash recovery ("the Exorcist") is never invoked automatically
+
+`distributed-transaction.lisp`'s own file-header comment documents crash
+recovery as: "`RUN-GITHACK-EXORCIST!`, run against any single repository
+(on boot, or lazily on first access), finds every such stranded ref...".
+No such automatic invocation exists anywhere in the codebase:
+`RUN-GITHACK-EXORCIST!` (`distributed-transaction.lisp:821`) is called
+only from `RUN-GITHACK-GC!` (`githack-gc.lisp:86`), itself documented as
+"a dedicated garbage-collection utility for a long-running GitHack
+deployment" that an operator/scheduler must run explicitly --
+`RESOLVE-BRANCH`, `CALL-WITH-REPOSITORY`, and `CALL-WITH-GIT-TRANSACTION`
+never call it. In practice, if a process dies between a distributed
+transaction's Phase 1 (Prepare) and Phase 2 (Roll Forward), the affected
+participant branch stays frozen behind its own `refs/heads/<branch>.lock`
+file (unable to accept even an ordinary, single-repository transaction)
+until some operator remembers to run `RUN-GITHACK-GC!`/
+`RUN-GITHACK-EXORCIST!` by hand. Either the header comment should stop
+promising automatic recovery it does not perform, or (preferably) a
+lightweight exorcism pass should run lazily -- e.g. from
+`RESOLVE-BRANCH`/`CALL-WITH-GIT-TRANSACTION` itself, the moment a branch
+is found still behind its own lock file -- so a crashed coordinator does
+not require manual intervention to unfreeze a live branch.
+
+### 14. `%atomic-replace-file`'s Windows path re-introduces a "fresh process per call" cost, and its POSIX branch is untested
+
+`%atomic-replace-file` (`distributed-transaction.lisp:406-423`), called
+once per participant in every distributed transaction's Phase 2 roll-
+forward (`%publish-locked-branch-ref!` at line 561), spawns a brand-new
+`powershell.exe` process on `#+os-windows` and has it compile a
+`[DllImport]` P/Invoke shim (`Add-Type`) from scratch every single call,
+to invoke `MoveFileEx` once. This is exactly the "spawn a fresh process
+per call" anti-pattern item #3 in this document specifically eliminated
+for ordinary Git plumbing via `git-io.lisp`'s long-lived session cache;
+here it is reintroduced, unbatched and unamortized, for every 2PC
+publish. It also collapses every possible `MoveFileEx` failure into a
+bare exit code of `1` (the inline script's own `exit 1`), discarding
+`GetLastError()`, so a real failure (as opposed to the ref-hierarchy
+collision fixed in commit `3afd0e3`, which item #14's sibling fix now
+catches earlier) still produces an undiagnosable "Could not publish ...
+(1): " message with empty output. Separately, the `#-os-windows` branch
+(`(uiop:rename-file-overwriting-target source target)`) has zero test
+coverage, since every test in this suite runs on Windows; there is no
+CI job or documented manual step that exercises it.
+
+### 15. `githack/kademlia` depends on GitHack's public API but is invisible to `asdf:test-system :githack`
+
+`kademlia/package.lisp` imports `DEFINE-PERSISTENT-STRUCT`, `PHASH-MAKE`,
+`PHASH-GET`, `PHASH-PUT`, `PHASH-REMOVE`, `PHASH-MAP`,
+`DESERIALIZE-PERSISTENT-OBJECT`, `WITH-REPOSITORY`, and `WITH-TRANSACTION`
+directly from `"GITHACK"` (`kademlia/package.lisp:24-32`), making it a
+real, non-trivial downstream consumer of GitHack's own public surface.
+It is deliberately packaged as a separate `githack/kademlia` /
+`githack/kademlia-test` ASDF system (`githack.asd:64-88`) so that using
+GitHack as a plain object database never pulls in sockets or threads --
+a reasonable design choice, not itself debt. But this document's own
+build/test instructions, and this repository's stated convention ("run
+this after every change ... `(asdf:test-system :githack)` ... must be
+100% green"), only exercise the core `githack`/`githack/test` systems: a
+change to any of the above exported names' signature or behavior can
+silently break Kademlia with no signal from the standard test command.
+Nothing currently reminds a contributor to separately run
+`(asdf:test-system "githack/kademlia-test")` after touching one of those
+shared entry points.
+
+---
+
 ## Explicitly *not* debt (verified, no action needed)
 
 - **Old prototype system removal**: `githack.lisp`, `tests.lisp`, all
   `cid-*.lisp`, `mapper.lisp`, `integer-mapper.lisp`,
-  `versioned-object.lisp`, `versioned-value.lisp`, and
-  `persistent-wttree.lisp` are confirmed absent from the working tree and
-  from `githack.asd`; only stale *documentation* (item #2) still refers to
-  them.
+  `versioned-object.lisp`, and `versioned-value.lisp` are confirmed absent
+  from the working tree and from `githack.asd`; only stale *documentation*
+  (item #2) still refers to them. `persistent-wttree.lisp` has since been
+  reintroduced as a genuine, active component (a weight-balanced-tree
+  implementation of the `table` protocol, wired into `githack.asd` and
+  depended on by `persistent-standard-class`) -- distinct from, and not a
+  revival of, the old prototype's own version of that file.
 - **TODO/FIXME/XXX/HACK/KLUDGE markers**: none found in any active `*.lisp`
   or `*.asd` file.
 - **Raw `assert`-based testing**: confined to the deleted `tests.lisp`; the
